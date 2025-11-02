@@ -1,0 +1,1 @@
+ALTER TABLE "committee_bill" ADD COLUMN "session" integer NOT NULL;
