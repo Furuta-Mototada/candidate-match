@@ -6,41 +6,8 @@ import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import * as schema from '../src/lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
+import { parseJapaneseDate } from '../src/dateUtils';
 /* eslint-disable @typescript-eslint/no-explicit-any */
-
-// Helper to parse Japanese date format "令和○年○月○日" or "平成○年○月○日"
-function parseJapaneseDate(text: string): string | null {
-	if (!text) return null;
-
-	// Match patterns like "令和7年10月21日" or "平成31年1月28日"
-	const eraMatch = text.match(/(令和|平成|昭和)(\d{1,2})年(\d{1,2})月(\d{1,2})日/);
-	if (eraMatch) {
-		const era = eraMatch[1];
-		const eraYear = parseInt(eraMatch[2]);
-		const month = parseInt(eraMatch[3]);
-		const day = parseInt(eraMatch[4]);
-
-		const eraBase: Record<string, number> = {
-			令和: 2018,
-			平成: 1988,
-			昭和: 1925
-		};
-
-		const year = eraBase[era] + eraYear;
-		return new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10);
-	}
-
-	// Match Western format "2019年1月28日"
-	const westernMatch = text.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
-	if (westernMatch) {
-		const year = parseInt(westernMatch[1]);
-		const month = parseInt(westernMatch[2]);
-		const day = parseInt(westernMatch[3]);
-		return new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10);
-	}
-
-	return null;
-}
 
 function resolveUrl(base: string, href: string) {
 	try {
@@ -302,19 +269,30 @@ async function main() {
 						} else {
 							billId = existingBills[0].id as number;
 							console.log(`Bill already exists with ID: ${billId}`);
+
+							// Set deliberation_complete to false when starting to process the bill
+							await db!
+								.update(schema.bill)
+								.set({
+									deliberationCompleted: false
+								})
+								.where(eq(schema.bill.id, billId));
 						}
 
 						// 2b. Update deliberation status
+						// For the endSession, don't set deliberationCompleted to true
+						// This allows us to track if bills appear in future sessions
+						const shouldMarkComplete = deliberationCompleted && session !== endSession;
 						await db!
 							.update(schema.bill)
 							.set({
-								deliberationCompleted: deliberationCompleted,
+								deliberationCompleted: shouldMarkComplete,
 								passed: passed
 							})
 							.where(eq(schema.bill.id, billId));
 
 						console.log(
-							`Updated bill deliberation status: completed=${deliberationCompleted}, passed=${passed}`
+							`Updated bill deliberation status: completed=${shouldMarkComplete}, passed=${passed}`
 						);
 
 						// 2c & 2d. Process committees
