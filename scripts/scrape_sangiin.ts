@@ -269,17 +269,10 @@ async function main() {
 						} else {
 							billId = existingBills[0].id as number;
 							console.log(`Bill already exists with ID: ${billId}`);
-
-							// Set deliberation_complete to false when starting to process the bill
-							await db!
-								.update(schema.bill)
-								.set({
-									deliberationCompleted: false
-								})
-								.where(eq(schema.bill.id, billId));
 						}
 
 						// 2b. Update deliberation status
+						// For existing bills, first reset deliberation_complete to false
 						// For the endSession, don't set deliberationCompleted to true
 						// This allows us to track if bills appear in future sessions
 						const shouldMarkComplete = deliberationCompleted && session !== endSession;

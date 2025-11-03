@@ -12,6 +12,11 @@ export function parseJapaneseDate(text: string): string | null {
 		const month = parseInt(eraMatch[3]);
 		const day = parseInt(eraMatch[4]);
 
+		// Era base years: The base year is calculated as (era start year - 1)
+		// This allows us to add the era year to get the actual Gregorian year
+		// 令和 (Reiwa): Started May 1, 2019, so base = 2018
+		// 平成 (Heisei): Started January 8, 1989, so base = 1988
+		// 昭和 (Showa): Started December 25, 1926, so base = 1925
 		const eraBase: Record<string, number> = {
 			令和: 2018,
 			平成: 1988,
