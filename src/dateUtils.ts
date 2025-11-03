@@ -2,6 +2,12 @@
 export function parseJapaneseDate(text: string): string | null {
 	if (!text) return null;
 
+	// Helper function to format date as ISO string (YYYY-MM-DD)
+	// Uses UTC to ensure consistent date representation regardless of local timezone
+	const formatDate = (year: number, month: number, day: number): string => {
+		return new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10);
+	};
+
 	// Match patterns like "令和7年10月21日", "平成31年1月28日", or "令和元年1月28日"
 	const eraMatch = text.match(/(令和|平成|昭和)(元|\d{1,2})年(\d{1,2})月(\d{1,2})日/);
 	if (eraMatch) {
@@ -24,7 +30,7 @@ export function parseJapaneseDate(text: string): string | null {
 		};
 
 		const year = eraBase[era] + eraYear;
-		return new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10);
+		return formatDate(year, month, day);
 	}
 
 	// Match Western format "2019年1月28日"
@@ -33,7 +39,7 @@ export function parseJapaneseDate(text: string): string | null {
 		const year = parseInt(westernMatch[1]);
 		const month = parseInt(westernMatch[2]);
 		const day = parseInt(westernMatch[3]);
-		return new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10);
+		return formatDate(year, month, day);
 	}
 
 	return null;

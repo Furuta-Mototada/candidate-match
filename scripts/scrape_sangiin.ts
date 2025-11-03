@@ -272,9 +272,9 @@ async function main() {
 						}
 
 						// 2b. Update deliberation status
-						// For existing bills, first reset deliberation_complete to false
-						// For the endSession, don't set deliberationCompleted to true
-						// This allows us to track if bills appear in future sessions
+						// Bills are marked complete only if they have a promulgation date
+						// and the current session is not the endSession.
+						// For the endSession, bills remain incomplete to track if they appear in future sessions.
 						const shouldMarkComplete = deliberationCompleted && session !== endSession;
 						await db!
 							.update(schema.bill)
