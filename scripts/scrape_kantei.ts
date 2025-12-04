@@ -6,38 +6,15 @@ import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import * as schema from '../src/lib/server/db/schema';
 import { eq } from 'drizzle-orm';
+import { parseJapaneseDate } from './date-utils';
 /* eslint-disable @typescript-eslint/no-explicit-any */
-
-// Simple helper to parse Japanese dates like "YYYY年M月D日" into ISO string
-function parseJapaneseDate(text: string): string | null {
-	const re = /(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日/;
-	const m = text.match(re);
-	if (!m) return null;
-	const y = Number(m[1]);
-	const mo = Number(m[2]);
-	const d = Number(m[3]);
-	const iso = new Date(Date.UTC(y, mo - 1, d)).toISOString().slice(0, 10);
-	return iso;
-}
-
-// Parse dates with Japanese era like "令和7年10月21日" or "平成3年4月1日". Supports 元年 as year 1.
-function parseJapaneseEraDate(text: string): string | null {
-	const re = /(令和|平成|昭和)(元|\d{1,4})年\s*(\d{1,2})月\s*(\d{1,2})日/;
-	const m = text.match(re);
-	if (!m) return null;
-	const era = m[1];
-	const yearPart = m[2] === '元' ? 1 : Number(m[2]);
-	const month = Number(m[3]);
-	const day = Number(m[4]);
-	const eraBase: Record<string, number> = { 令和: 2018, 平成: 1988, 昭和: 1925 };
-	const base = eraBase[era];
-	if (!base) return null;
-	const year = base + yearPart;
-	return new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10);
-}
 
 function parsePeriod(periodText: string): { start: string | null; end: string | null } {
 	if (!periodText) return { start: null, end: null };
+
+	// Check if this indicates "present" (現在) - if so, end date should be null
+	const hasPresent = /現在|present/i.test(periodText);
+
 	const parts = periodText
 		.split(/～|〜|~/)
 		.map((s) => s.trim())
@@ -45,13 +22,15 @@ function parsePeriod(periodText: string): { start: string | null; end: string | 
 	const startRaw = parts[0] || '';
 	const endRaw = parts[1] || '';
 
-	// Try numeric yyyy年mm月dd日 first
-	const start = parseJapaneseDate(startRaw) || parseJapaneseEraDate(startRaw) || null;
+	// Parse using unified date parser (handles both era and Western formats)
+	const start = parseJapaneseDate(startRaw);
 	let end: string | null = null;
-	if (endRaw && /現在|present/.test(endRaw)) {
+
+	// If the text contains "現在" (present), the end date is null (ongoing)
+	if (hasPresent) {
 		end = null;
 	} else if (endRaw) {
-		end = parseJapaneseDate(endRaw) || parseJapaneseEraDate(endRaw) || null;
+		end = parseJapaneseDate(endRaw);
 	}
 	return { start, end };
 }
@@ -177,6 +156,10 @@ async function main() {
 				if (!startDate || !endDate) {
 					// Extract dates from detail page (try Gregorian first, then era dates)
 					const textAll = $$('body').text();
+
+					// Check if this is the current cabinet (contains "現在" = present)
+					const hasPresent = /現在|present/i.test(textAll);
+
 					const dates: string[] = [];
 					const dateRe = /(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日/g;
 					let mm: RegExpExecArray | null;
@@ -186,15 +169,15 @@ async function main() {
 					}
 
 					const maybeStart = dates[0] ? parseJapaneseDate(dates[0]) : null;
-					const maybeEnd = dates[1] ? parseJapaneseDate(dates[1]) : null;
+					const maybeEnd = hasPresent ? null : dates[1] ? parseJapaneseDate(dates[1]) : null;
 
 					if (!startDate) startDate = maybeStart;
 					if (!endDate) endDate = maybeEnd;
 
 					// If no Gregorian dates found, try era-based dates in the detail page
-					if (!startDate || !endDate) {
-						if (!startDate) startDate = parseJapaneseEraDate(textAll);
-						if (!endDate) {
+					if (!startDate || (!endDate && !hasPresent)) {
+						if (!startDate) startDate = parseJapaneseDate(textAll);
+						if (!endDate && !hasPresent) {
 							// try to find two era dates
 							const eraRe = /(令和|平成|昭和)(元|\d{1,4})年\s*\d{1,2}月\s*\d{1,2}日/g;
 							const eraMatches: string[] = [];
@@ -204,9 +187,9 @@ async function main() {
 								if (eraMatches.length >= 2) break;
 							}
 							if (eraMatches.length >= 2) {
-								endDate = parseJapaneseEraDate(eraMatches[1]);
+								endDate = parseJapaneseDate(eraMatches[1]);
 							} else if (eraMatches.length === 1) {
-								if (!startDate) startDate = parseJapaneseEraDate(eraMatches[0]);
+								if (!startDate) startDate = parseJapaneseDate(eraMatches[0]);
 							}
 						}
 					}

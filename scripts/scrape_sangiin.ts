@@ -6,41 +6,8 @@ import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import * as schema from '../src/lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
+import { parseJapaneseDate } from './date-utils';
 /* eslint-disable @typescript-eslint/no-explicit-any */
-
-// Helper to parse Japanese date format "令和○年○月○日" or "平成○年○月○日"
-function parseJapaneseDate(text: string): string | null {
-	if (!text) return null;
-
-	// Match patterns like "令和7年10月21日" or "平成31年1月28日"
-	const eraMatch = text.match(/(令和|平成|昭和)(\d{1,2})年(\d{1,2})月(\d{1,2})日/);
-	if (eraMatch) {
-		const era = eraMatch[1];
-		const eraYear = parseInt(eraMatch[2]);
-		const month = parseInt(eraMatch[3]);
-		const day = parseInt(eraMatch[4]);
-
-		const eraBase: Record<string, number> = {
-			令和: 2018,
-			平成: 1988,
-			昭和: 1925
-		};
-
-		const year = eraBase[era] + eraYear;
-		return new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10);
-	}
-
-	// Match Western format "2019年1月28日"
-	const westernMatch = text.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
-	if (westernMatch) {
-		const year = parseInt(westernMatch[1]);
-		const month = parseInt(westernMatch[2]);
-		const day = parseInt(westernMatch[3]);
-		return new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10);
-	}
-
-	return null;
-}
 
 function resolveUrl(base: string, href: string) {
 	try {
@@ -151,7 +118,13 @@ async function main() {
 								const detailBody = await detailRes.text();
 								const $detail = load(detailBody);
 
-								// Extract submission date and promulgation date from table rows
+								// Variables to track deliberation status
+								let remarks = '';
+								let firstOriginatedChamber = '';
+								let shuginPlenary = '';
+								let sanginPlenary = '';
+
+								// Extract submission date, promulgation date, and other metadata from table rows
 								$detail('table tr').each((i, row) => {
 									const th = $detail(row).find('th').text().trim();
 									const td = $detail(row).find('td').text().trim();
@@ -170,6 +143,20 @@ async function main() {
 											deliberationCompleted = true;
 											passed = true;
 										}
+									}
+
+									// Case 1: Check for 撤回 in remarks (備考)
+									if (th === '備考' && td && td !== '　' && td !== '') {
+										remarks = td;
+										if (remarks.includes('撤回')) {
+											deliberationCompleted = true;
+											passed = false;
+										}
+									}
+
+									// Extract 先議区分 (first originated chamber)
+									if (th === '先議区分' && td && td !== '　' && td !== '') {
+										firstOriginatedChamber = td;
 									}
 								});
 
@@ -203,6 +190,7 @@ async function main() {
 											let voteMethod: string | null = null;
 											let voteDate: string | null = null;
 											let voteUrl: string | null = null;
+											let result: string | null = null;
 
 											$detail(table)
 												.find('tr')
@@ -227,7 +215,28 @@ async function main() {
 													if (th === '議決日' && tdText && tdText !== '　') {
 														voteDate = parseJapaneseDate(tdText);
 													}
+
+													if (th === '議決' && tdText && tdText !== '　') {
+														result = tdText;
+													}
 												});
+
+											// Track plenary activity
+											if (chamberName === '衆議院') {
+												shuginPlenary = voteMethod || result || '';
+												// Case 3: Check for 否決 at 衆議院本会議経過
+												if (result === '否決') {
+													deliberationCompleted = true;
+													passed = false;
+												}
+											} else if (chamberName === '参議院') {
+												sanginPlenary = voteMethod || result || '';
+												// Case 4: Check for 否決 at 参議院本会議経過 when 本院先議
+												if (result === '否決' && firstOriginatedChamber === '本院先議') {
+													deliberationCompleted = true;
+													passed = false;
+												}
+											}
 
 											if (voteMethod && voteMethod !== '－') {
 												votes.push({
@@ -243,6 +252,18 @@ async function main() {
 
 								processChamberVotes('衆議院');
 								processChamberVotes('参議院');
+
+								// Case 2: Check if both plenary sessions are empty (未了 case)
+								// Only apply this if NOT the latest session (219)
+								if (
+									billSession < 219 &&
+									!shuginPlenary &&
+									!sanginPlenary &&
+									!deliberationCompleted
+								) {
+									deliberationCompleted = true;
+									passed = false;
+								}
 							}
 						} catch (err) {
 							console.error(`Error fetching bill detail for ${billDetailUrl}:`, err);
@@ -462,77 +483,64 @@ async function main() {
 										const voteBody = await voteRes.text();
 										const $vote = load(voteBody);
 
-										// Parse vote results using the discovered HTML structure
-										// Structure: Each TR has 3 members, each with: <TD class="pro">...<TD class="con">...<TD class="nam"><TT>Name</TT></TD>
+										// Parse vote results using the new HTML structure (as of 2025)
+										// Structure: <li class="giin"><span class="pros">賛成</span><span class="cons"></span><span class="names">Name</span></li>
 										let voteCount = 0;
 										const votePromises: Promise<void>[] = [];
 
-										$vote('table tr').each((i, row) => {
-											const cells = $vote(row).find('td');
+										$vote('li.giin').each((i, element) => {
+											const $element = $vote(element);
 
-											// Check if this row has vote data (has class="nam" cells)
-											const namCells = cells.filter('.nam');
-											if (namCells.length === 0) return;
+											// Extract member name from the names span
+											const memberName = $element
+												.find('span.names')
+												.text()
+												.trim()
+												.replace(/\s+/g, ' ');
+											if (!memberName) return;
 
-											// Process each member in this row (typically 3 members per row)
-											// Each member has 3 cells: pro, con, nam
-											for (let cellIdx = 0; cellIdx < cells.length; cellIdx += 3) {
-												if (cellIdx + 2 >= cells.length) break;
+											// Determine if this is an approval or rejection vote
+											// Check if the pros or cons span contains text
+											const prosText = $element.find('span.pros').text().trim();
+											const consText = $element.find('span.cons').text().trim();
 
-												const proCell = $vote(cells[cellIdx]);
-												const conCell = $vote(cells[cellIdx + 1]);
-												const namCell = $vote(cells[cellIdx + 2]);
+											// If neither has text, skip (likely absent)
+											if (!prosText && !consText) return;
 
-												// Check if this is a name cell
-												if (!namCell.hasClass('nam')) continue;
+											const approved = prosText === '賛成'; // True if pros contains "賛成", false if cons contains "反対"
 
-												const memberName = namCell.find('tt').text().trim().replace(/\s+/g, ' ');
-												if (!memberName) continue;
+											// Process this vote asynchronously
+											const votePromise = (async () => {
+												// Insert or get member
+												const existingMember = await db!
+													.select()
+													.from(schema.member)
+													.where(eq(schema.member.name, memberName));
 
-												// Determine if this is an approval or rejection vote
-												const hasProImage = proCell.find('img').length > 0;
-												const hasConImage = conCell.find('img').length > 0;
+												let memberId: number;
+												if (existingMember.length > 0) {
+													memberId = existingMember[0].id as number;
+												} else {
+													const [newMember] = await db!
+														.insert(schema.member)
+														.values({ name: memberName } as any)
+														.returning();
+													memberId = newMember.id as number;
+													console.log(`Inserted member: ${memberName} (${memberId})`);
+												}
 
-												// If neither has an image, skip (likely absent)
-												if (!hasProImage && !hasConImage) continue;
+												// Insert vote result
+												await db!.insert(schema.billVotesResultMember).values({
+													billVotesId: voteId,
+													memberId: memberId,
+													approved: approved
+												} as any);
 
-												const approved = hasProImage; // True if pro has image, false if con has image
+												console.log(`Vote recorded: ${memberName} - ${approved ? '賛成' : '反対'}`);
+												voteCount++;
+											})();
 
-												// Process this vote asynchronously
-												const votePromise = (async () => {
-													// Insert or get member
-													const existingMember = await db!
-														.select()
-														.from(schema.member)
-														.where(eq(schema.member.name, memberName));
-
-													let memberId: number;
-													if (existingMember.length > 0) {
-														memberId = existingMember[0].id as number;
-													} else {
-														const [newMember] = await db!
-															.insert(schema.member)
-															.values({ name: memberName } as any)
-															.returning();
-														memberId = newMember.id as number;
-														console.log(`Inserted member: ${memberName} (${memberId})`);
-													}
-
-													// Insert vote result
-													await db!.insert(schema.billVotesResultMember).values({
-														billVotesId: voteId,
-														memberId: memberId,
-														approved: approved
-													} as any);
-
-													console.log(
-														`Vote recorded: ${memberName} - ${approved ? '賛成' : '反対'}`
-													);
-													voteCount++;
-												})();
-
-												votePromises.push(votePromise);
-											}
+											votePromises.push(votePromise);
 										});
 
 										// Wait for all vote processing to complete

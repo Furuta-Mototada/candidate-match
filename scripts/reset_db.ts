@@ -15,15 +15,24 @@ async function resetDatabase() {
 	try {
 		console.log('Truncating all tables...');
 
-		// Truncate tables in correct order (child tables first)
+		// Truncate tables in correct order (child tables first, then parent tables)
 		await sql`TRUNCATE TABLE bill_votes_result_member CASCADE`;
 		console.log('✓ Truncated bill_votes_result_member');
+
+		await sql`TRUNCATE TABLE bill_votes_result_group CASCADE`;
+		console.log('✓ Truncated bill_votes_result_group');
 
 		await sql`TRUNCATE TABLE bill_votes CASCADE`;
 		console.log('✓ Truncated bill_votes');
 
 		await sql`TRUNCATE TABLE bill_sponsors CASCADE`;
 		console.log('✓ Truncated bill_sponsors');
+
+		await sql`TRUNCATE TABLE bill_sponsor_groups CASCADE`;
+		console.log('✓ Truncated bill_sponsor_groups');
+
+		await sql`TRUNCATE TABLE bill_supporters CASCADE`;
+		console.log('✓ Truncated bill_supporters');
 
 		await sql`TRUNCATE TABLE committee_bill CASCADE`;
 		console.log('✓ Truncated committee_bill');
@@ -37,11 +46,23 @@ async function resetDatabase() {
 		await sql`TRUNCATE TABLE committee CASCADE`;
 		console.log('✓ Truncated committee');
 
-		await sql`TRUNCATE TABLE member CASCADE`;
-		console.log('✓ Truncated member');
+		await sql`TRUNCATE TABLE member_party CASCADE`;
+		console.log('✓ Truncated member_party');
+
+		await sql`TRUNCATE TABLE member_group CASCADE`;
+		console.log('✓ Truncated member_group');
 
 		await sql`TRUNCATE TABLE cabinet CASCADE`;
 		console.log('✓ Truncated cabinet');
+
+		await sql`TRUNCATE TABLE member CASCADE`;
+		console.log('✓ Truncated member');
+
+		await sql`TRUNCATE TABLE party CASCADE`;
+		console.log('✓ Truncated party');
+
+		await sql`TRUNCATE TABLE "group" CASCADE`;
+		console.log('✓ Truncated group');
 
 		console.log('\n✅ Database reset complete!');
 	} catch (err) {
