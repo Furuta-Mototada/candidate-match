@@ -20,7 +20,9 @@
 		"db:studio": "drizzle-kit studio",
 		"scrape:kantei": "tsx ./scripts/scrape_kantei.ts",
 		"scrape:sangiin": "tsx ./scripts/scrape_sangiin.ts",
-		"scrape:shugiin": "tsx ./scripts/scrape_shugiin.ts"
+		"scrape:shugiin": "tsx ./scripts/scrape_shugiin.ts",
+		"scrape:member-groups": "tsx ./scripts/scrape_member_groups.ts",
+		"calculate:legislation": "tsx ./scripts/calculate_legislation_scores.ts"
 	},
 	"files": [
 		"dist",
