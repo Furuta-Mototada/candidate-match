@@ -477,71 +477,165 @@ async function main() {
 
 							// 2g.ii. Process individual vote results for 押しボタン
 							if (vote.method === '押しボタン' && vote.voteUrl) {
+								console.log(`Fetching vote results from: ${vote.voteUrl}`);
 								try {
 									const voteRes = await fetch(vote.voteUrl);
 									if (voteRes.status === 200) {
 										const voteBody = await voteRes.text();
 										const $vote = load(voteBody);
 
-										// Parse vote results using the new HTML structure (as of 2025)
-										// Structure: <li class="giin"><span class="pros">賛成</span><span class="cons"></span><span class="names">Name</span></li>
 										let voteCount = 0;
 										const votePromises: Promise<void>[] = [];
 
-										$vote('li.giin').each((i, element) => {
-											const $element = $vote(element);
+										// Check which HTML structure is used
+										const hasNewStructure = $vote('li.giin').length > 0;
+										const hasOldStructure = $vote('td.nam').length > 0;
 
-											// Extract member name from the names span
-											const memberName = $element
-												.find('span.names')
-												.text()
-												.trim()
-												.replace(/\s+/g, ' ');
-											if (!memberName) return;
+										if (hasNewStructure) {
+											// NEW structure: <li class="giin"><span class="pros">賛成</span><span class="cons"></span><span class="names">Name</span></li>
+											console.log('Using NEW structure (li.giin with span elements)');
 
-											// Determine if this is an approval or rejection vote
-											// Check if the pros or cons span contains text
-											const prosText = $element.find('span.pros').text().trim();
-											const consText = $element.find('span.cons').text().trim();
+											$vote('li.giin').each((i, element) => {
+												const $element = $vote(element);
 
-											// If neither has text, skip (likely absent)
-											if (!prosText && !consText) return;
+												// Extract member name (remove all spaces)
+												const memberName = $element
+													.find('span.names')
+													.text()
+													.trim()
+													.replace(/\s+/g, '');
+												if (!memberName) return;
 
-											const approved = prosText === '賛成'; // True if pros contains "賛成", false if cons contains "反対"
+												// Determine if this is an approval or rejection vote
+												const prosText = $element.find('span.pros').text().trim();
+												const consText = $element.find('span.cons').text().trim();
 
-											// Process this vote asynchronously
-											const votePromise = (async () => {
-												// Insert or get member
-												const existingMember = await db!
-													.select()
-													.from(schema.member)
-													.where(eq(schema.member.name, memberName));
+												// If neither has text, skip (likely absent)
+												if (!prosText && !consText) return;
 
-												let memberId: number;
-												if (existingMember.length > 0) {
-													memberId = existingMember[0].id as number;
-												} else {
-													const [newMember] = await db!
-														.insert(schema.member)
-														.values({ name: memberName } as any)
-														.returning();
-													memberId = newMember.id as number;
-													console.log(`Inserted member: ${memberName} (${memberId})`);
-												}
+												const approved = prosText === '賛成';
 
-												// Insert vote result
-												await db!.insert(schema.billVotesResultMember).values({
-													billVotesId: voteId,
-													memberId: memberId,
-													approved: approved
-												} as any);
+												// Process this vote asynchronously
+												const votePromise = (async () => {
+													// Insert or get member
+													const existingMember = await db!
+														.select()
+														.from(schema.member)
+														.where(eq(schema.member.name, memberName));
 
-												console.log(`Vote recorded: ${memberName} - ${approved ? '賛成' : '反対'}`);
-												voteCount++;
-											})();
+													let memberId: number;
+													if (existingMember.length > 0) {
+														memberId = existingMember[0].id as number;
+													} else {
+														const [newMember] = await db!
+															.insert(schema.member)
+															.values({ name: memberName } as any)
+															.returning();
+														memberId = newMember.id as number;
+														console.log(`Inserted member: ${memberName} (${memberId})`);
+													}
 
-											votePromises.push(votePromise);
-										});
+													// Insert vote result
+													await db!.insert(schema.billVotesResultMember).values({
+														billVotesId: voteId,
+														memberId: memberId,
+														approved: approved
+													} as any);
+
+													console.log(
+														`Vote recorded: ${memberName} - ${approved ? '賛成' : '反対'}`
+													);
+													voteCount++;
+												})();
+
+												votePromises.push(votePromise);
+											});
+										} else if (hasOldStructure) {
+											// OLD structure: <TR><TD class="pro">...</TD><TD class="con">...</TD><TD class="nam">Name</TD>...</TR>
+											console.log('Using OLD structure (table with td.pro, td.con, td.nam)');
+
+											$vote('tr').each((i, element) => {
+												const $element = $vote(element);
+												const nameCells = $element.find('td.nam');
+
+												nameCells.each((j, nameCell) => {
+													const $nameCell = $vote(nameCell);
+													// Extract member name (remove all spaces)
+													const memberName = $nameCell.text().trim().replace(/\s+/g, '');
+													if (!memberName) return;
+
+													// Find the TD.pro and TD.con that come before this TD.nam
+													let proCell = null;
+													let conCell = null;
+
+													// Go backwards through siblings
+													let currentCell = $nameCell.prev();
+													while (currentCell.length > 0) {
+														if (currentCell.hasClass('con')) {
+															conCell = currentCell;
+														} else if (currentCell.hasClass('pro')) {
+															proCell = currentCell;
+															break;
+														}
+														currentCell = currentCell.prev();
+													}
+
+													if (!proCell || !conCell) return;
+
+													// Check which cell has an image (indicates the vote)
+													const hasProImage = proCell.find('img').length > 0;
+													const hasConImage = conCell.find('img').length > 0;
+
+													// Determine approval status
+													let approved: boolean;
+													if (hasProImage && !hasConImage) {
+														approved = true;
+													} else if (hasConImage && !hasProImage) {
+														approved = false;
+													} else {
+														// Skip if both or neither have images (shouldn't happen)
+														return;
+													}
+
+													// Process this vote asynchronously
+													const votePromise = (async () => {
+														// Insert or get member
+														const existingMember = await db!
+															.select()
+															.from(schema.member)
+															.where(eq(schema.member.name, memberName));
+
+														let memberId: number;
+														if (existingMember.length > 0) {
+															memberId = existingMember[0].id as number;
+														} else {
+															const [newMember] = await db!
+																.insert(schema.member)
+																.values({ name: memberName } as any)
+																.returning();
+															memberId = newMember.id as number;
+															console.log(`Inserted member: ${memberName} (${memberId})`);
+														}
+
+														// Insert vote result
+														await db!.insert(schema.billVotesResultMember).values({
+															billVotesId: voteId,
+															memberId: memberId,
+															approved: approved
+														} as any);
+
+														console.log(
+															`Vote recorded: ${memberName} - ${approved ? '賛成' : '反対'}`
+														);
+														voteCount++;
+													})();
+
+													votePromises.push(votePromise);
+												});
+											});
+										} else {
+											console.warn(`Unknown HTML structure for vote page: ${vote.voteUrl}`);
+										}
 
 										// Wait for all vote processing to complete
 										await Promise.all(votePromises);

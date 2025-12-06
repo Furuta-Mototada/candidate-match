@@ -17,7 +17,8 @@ export function parseJapaneseDate(text: string): string | null {
 
 	// Try Japanese era format first (令和|平成|昭和)
 	// Supports both regular numbers and 元年 (first year)
-	const eraMatch = text.match(/(令和|平成|昭和)(元|\d{1,4})年\s*(\d{1,2})月\s*(\d{1,2})日/);
+	// Allow optional space between era name and year
+	const eraMatch = text.match(/(令和|平成|昭和)\s*(元|\d{1,4})年\s*(\d{1,2})月\s*(\d{1,2})日/);
 	if (eraMatch) {
 		const era = eraMatch[1];
 		const yearPart = eraMatch[2] === '元' ? 1 : parseInt(eraMatch[2]);

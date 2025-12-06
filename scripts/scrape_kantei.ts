@@ -201,8 +201,8 @@ async function main() {
 				continue;
 			}
 
-			// Normalize name by removing excessive whitespace
-			const name = pmName.replace(/\s+/g, ' ').trim();
+			// Normalize name by removing all whitespace
+			const name = pmName.replace(/\s+/g, '').trim();
 
 			console.log(`Found PM: ${name} (${startDate} - ${endDate ?? 'present'})`);
 
