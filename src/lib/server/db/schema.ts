@@ -247,3 +247,50 @@ export const billVotesResultMember = pgTable(
 
 export type BillVotesResultMember = typeof billVotesResultMember.$inferSelect;
 export type NewBillVotesResultMember = typeof billVotesResultMember.$inferInsert;
+
+// Bill embeddings table - stores vector embeddings for clustering
+export const billEmbeddings = pgTable('bill_embeddings', {
+	billId: integer('bill_id')
+		.primaryKey()
+		.references(() => bill.id),
+	pdfUrl: text('pdf_url'), // URL to the PDF document
+	textContent: text('text_content'), // Extracted text content from PDF
+	embedding: text('embedding').notNull(), // JSON serialized vector (array of floats)
+	embeddingModel: text('embedding_model').notNull(), // Model used for embedding (e.g., 'paraphrase-multilingual-mpnet-base-v2')
+	createdAt: date('created_at').notNull().defaultNow()
+});
+
+export type BillEmbedding = typeof billEmbeddings.$inferSelect;
+export type NewBillEmbedding = typeof billEmbeddings.$inferInsert;
+
+// Bill clusters table - stores clustering results
+export const billClusters = pgTable('bill_clusters', {
+	id: serial('id').primaryKey(),
+	name: text('name').notNull(), // User-provided name for this clustering run
+	algorithm: text('algorithm').notNull(), // 'kmeans', 'hdbscan', etc.
+	parameters: text('parameters').notNull(), // JSON of clustering parameters
+	embeddingModel: text('embedding_model').notNull(), // Model used for the embeddings
+	createdAt: date('created_at').notNull().defaultNow()
+});
+
+export type BillCluster = typeof billClusters.$inferSelect;
+export type NewBillCluster = typeof billClusters.$inferInsert;
+
+// Bill cluster assignments - which bill belongs to which cluster
+export const billClusterAssignments = pgTable(
+	'bill_cluster_assignments',
+	{
+		clusterId: integer('cluster_id')
+			.notNull()
+			.references(() => billClusters.id),
+		billId: integer('bill_id')
+			.notNull()
+			.references(() => bill.id),
+		clusterLabel: integer('cluster_label').notNull(), // The cluster number assigned
+		distance: text('distance') // Distance to cluster center (for kmeans) or other metric
+	},
+	(table) => [primaryKey({ columns: [table.clusterId, table.billId] })]
+);
+
+export type BillClusterAssignment = typeof billClusterAssignments.$inferSelect;
+export type NewBillClusterAssignment = typeof billClusterAssignments.$inferInsert;

@@ -22,7 +22,10 @@
 		"scrape:sangiin": "tsx ./scripts/scrape_sangiin.ts",
 		"scrape:shugiin": "tsx ./scripts/scrape_shugiin.ts",
 		"scrape:member-groups": "tsx ./scripts/scrape_member_groups.ts",
-		"calculate:legislation": "tsx ./scripts/calculate_legislation_scores.ts"
+		"calculate:legislation": "tsx ./scripts/calculate_legislation_scores.ts",
+		"calculate:vectors": "tsx ./scripts/calculate_member_vectors.ts",
+		"embeddings:generate": "python3 ./scripts/generate_bill_embeddings.py",
+		"cluster:bills": "python3 ./scripts/cluster_bills.py"
 	},
 	"files": [
 		"dist",
