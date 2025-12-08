@@ -314,6 +314,31 @@ def main():
         print(f"Algorithm: {algorithm}")
         print(f"Parameters: {json.dumps(parameters)}")
 
+        # Auto-generate cluster names using LLM
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if openai_api_key:
+            print("\n=== Generating Cluster Names ===")
+            try:
+                import subprocess
+
+                result = subprocess.run(
+                    ["python", "scripts/name_clusters.py", str(cluster_id)],
+                    capture_output=True,
+                    text=True,
+                    cwd=os.getcwd(),
+                )
+                print(result.stdout)
+                if result.stderr:
+                    print(result.stderr)
+            except Exception as e:
+                print(f"Warning: Failed to auto-generate cluster names: {e}")
+                print(
+                    "You can run manually: python scripts/name_clusters.py", cluster_id
+                )
+        else:
+            print("\nNote: Set OPENAI_API_KEY to auto-generate cluster names")
+            print(f"Run manually: python scripts/name_clusters.py {cluster_id}")
+
     finally:
         clusterer.close()
 

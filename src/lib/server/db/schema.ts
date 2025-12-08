@@ -297,3 +297,21 @@ export const billClusterAssignments = pgTable(
 
 export type BillClusterAssignment = typeof billClusterAssignments.$inferSelect;
 export type NewBillClusterAssignment = typeof billClusterAssignments.$inferInsert;
+
+// Bill cluster label names - LLM-generated names for each cluster label
+export const billClusterLabelNames = pgTable(
+	'bill_cluster_label_names',
+	{
+		clusterId: integer('cluster_id')
+			.notNull()
+			.references(() => billClusters.id),
+		clusterLabel: integer('cluster_label').notNull(), // The cluster number
+		name: text('name').notNull(), // LLM-generated name for this cluster
+		description: text('description'), // LLM-generated description
+		generatedAt: date('generated_at').notNull().defaultNow()
+	},
+	(table) => [primaryKey({ columns: [table.clusterId, table.clusterLabel] })]
+);
+
+export type BillClusterLabelName = typeof billClusterLabelNames.$inferSelect;
+export type NewBillClusterLabelName = typeof billClusterLabelNames.$inferInsert;

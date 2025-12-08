@@ -4,6 +4,7 @@ import { db } from '$lib/server/db';
 import {
 	billClusters,
 	billClusterAssignments,
+	billClusterLabelNames,
 	bill,
 	billDetail,
 	billEmbeddings,
@@ -103,9 +104,25 @@ export const GET: RequestHandler = async ({ url }) => {
 				});
 			}
 
+			// Get cluster label names
+			const labelNames = await db
+				.select({
+					clusterLabel: billClusterLabelNames.clusterLabel,
+					name: billClusterLabelNames.name,
+					description: billClusterLabelNames.description
+				})
+				.from(billClusterLabelNames)
+				.where(eq(billClusterLabelNames.clusterId, clusterIdNum));
+
+			const labelNameMap: Record<number, { name: string; description: string | null }> = {};
+			for (const ln of labelNames) {
+				labelNameMap[ln.clusterLabel] = { name: ln.name, description: ln.description };
+			}
+
 			return json({
 				cluster: clusterInfo,
 				billsByCluster,
+				labelNames: labelNameMap,
 				totalBills: assignments.length
 			});
 		} else {

@@ -3,7 +3,12 @@ import type { RequestHandler } from './$types';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { db } from '$lib/server/db';
-import { billClusters, billClusterAssignments, member } from '$lib/server/db/schema';
+import {
+	billClusters,
+	billClusterAssignments,
+	billClusterLabelNames,
+	member
+} from '$lib/server/db/schema';
 import { eq, inArray } from 'drizzle-orm';
 
 const execAsync = promisify(exec);
@@ -186,10 +191,27 @@ export const GET: RequestHandler = async ({ url }) => {
 			labelCounts[assignment.clusterLabel] = (labelCounts[assignment.clusterLabel] || 0) + 1;
 		}
 
+		// Get cluster label names
+		const labelNames = await db
+			.select({
+				clusterLabel: billClusterLabelNames.clusterLabel,
+				name: billClusterLabelNames.name,
+				description: billClusterLabelNames.description
+			})
+			.from(billClusterLabelNames)
+			.where(eq(billClusterLabelNames.clusterId, clusterIdNum));
+
+		const labelNameMap: Record<number, { name: string; description: string | null }> = {};
+		for (const ln of labelNames) {
+			labelNameMap[ln.clusterLabel] = { name: ln.name, description: ln.description };
+		}
+
 		const clusterLabels = Object.entries(labelCounts)
 			.map(([label, count]) => ({
 				label: parseInt(label),
-				billCount: count
+				billCount: count,
+				name: labelNameMap[parseInt(label)]?.name || null,
+				description: labelNameMap[parseInt(label)]?.description || null
 			}))
 			.sort((a, b) => a.label - b.label);
 

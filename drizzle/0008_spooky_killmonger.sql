@@ -1,0 +1,1 @@
+ALTER TABLE "bill_cluster_label_names" DROP COLUMN "name_en";

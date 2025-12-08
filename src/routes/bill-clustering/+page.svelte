@@ -24,6 +24,9 @@
 	let visualizationData = $state<any[]>([]);
 	let isLoadingViz = $state(false);
 
+	// Cluster label names from LLM
+	let labelNames = $state<Record<number, { name: string; description: string | null }>>({});
+
 	async function generateClustering() {
 		if (!clusteringName.trim()) {
 			alert('Please enter a name for this clustering');
@@ -93,6 +96,7 @@
 
 			clusterData = result.cluster;
 			billsByCluster = result.billsByCluster;
+			labelNames = result.labelNames || {};
 
 			// Load visualization data for this specific cluster
 			await loadVisualizationDataForCluster(clusterId);
@@ -362,12 +366,15 @@
 								<div class="legend-title">クラスタ:</div>
 								{#each Array.from(new Set(visualizationData.map((p) => p.cluster))).sort() as cluster}
 									{@const count = visualizationData.filter((p) => p.cluster === cluster).length}
-									<div class="legend-item">
+									{@const labelName = labelNames[cluster]?.name}
+									<div class="legend-item" title={labelNames[cluster]?.description || ''}>
 										<div
 											class="legend-color"
 											style="background-color: {getClusterColor(cluster)}"
 										></div>
-										<span>{cluster === -1 ? 'ノイズ' : `クラスタ ${cluster}`} ({count})</span>
+										<span
+											>{cluster === -1 ? 'ノイズ' : labelName || `クラスタ ${cluster}`} ({count})</span
+										>
 									</div>
 								{/each}
 							</div>
@@ -378,14 +385,17 @@
 				<!-- Clusters Grid -->
 				<div class="clusters-grid">
 					{#each Object.entries(billsByCluster) as [label, bills]}
-						<div
-							class="cluster-group"
-							style="border-left: 4px solid {getClusterColor(Number(label))}"
-						>
+						{@const labelNum = Number(label)}
+						{@const labelName = labelNames[labelNum]?.name}
+						{@const labelDesc = labelNames[labelNum]?.description}
+						<div class="cluster-group" style="border-left: 4px solid {getClusterColor(labelNum)}">
 							<h3>
-								{Number(label) === -1 ? 'ノイズ (未分類)' : `クラスタ ${label}`}
+								{labelNum === -1 ? 'ノイズ (未分類)' : labelName || `クラスタ ${label}`}
 								<span class="count">({bills.length} 法案)</span>
 							</h3>
+							{#if labelDesc}
+								<p class="cluster-description">{labelDesc}</p>
+							{/if}
 
 							<div class="bills-list">
 								{#each bills as bill}
@@ -756,8 +766,15 @@
 
 	.cluster-group h3 {
 		font-size: 1.25rem;
-		margin-bottom: 1rem;
+		margin-bottom: 0.5rem;
 		color: #1f2937;
+	}
+
+	.cluster-description {
+		font-size: 0.875rem;
+		color: #4b5563;
+		margin-bottom: 1rem;
+		line-height: 1.5;
 	}
 
 	.count {
