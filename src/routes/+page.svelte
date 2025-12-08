@@ -9,371 +9,674 @@
 	});
 
 	let isLoading = $state(true);
-	let error = $state<string | null>(null);
 
 	onMount(async () => {
 		try {
 			const response = await fetch('/api/stats');
-			if (!response.ok) {
-				throw new Error('Failed to fetch statistics');
+			if (response.ok) {
+				stats = await response.json();
 			}
-			const data = await response.json();
-			stats = data;
 		} catch (err) {
 			console.error('Error loading stats:', err);
-			error = err instanceof Error ? err.message : 'Failed to load statistics';
 		} finally {
 			isLoading = false;
 		}
 	});
 </script>
 
-<div class="landing-page">
+<svelte:head>
+	<title>Candidate Match - あなたに合う議員を見つけよう</title>
+</svelte:head>
+
+<div class="page">
 	<!-- Hero Section -->
 	<section class="hero">
-		<div class="hero-content">
-			<h1 class="hero-title">日本国会議案分析プラットフォーム</h1>
-			<p class="hero-subtitle">AI技術を活用した国会議案・投票記録の包括的分析システム</p>
-			<div class="hero-description">
-				<p>
-					参議院・衆議院の議案データを収集し、機械学習とベクトル分析により、
-					議員の投票パターン、議案の類似性、政治的傾向を可視化します。
-				</p>
+		<div class="hero-badge">🇯🇵 日本国会分析プラットフォーム</div>
+		<h1 class="hero-title">
+			あなたの政治的価値観に<br />
+			<span class="gradient-text">最も近い議員</span>を見つけよう
+		</h1>
+		<p class="hero-subtitle">
+			法案への賛否を答えるだけで、AI が国会議員とのマッチ度を算出。
+			分野別の重要度設定で、あなただけの総合スコアを表示します。
+		</p>
+		<div class="hero-buttons">
+			<a href="/match" class="btn-primary">
+				マッチングを始める
+				<span class="btn-arrow">→</span>
+			</a>
+			<a href="#features" class="btn-secondary">機能を見る</a>
+		</div>
+
+		<!-- Trust indicators -->
+		<div class="trust-section">
+			<p class="trust-label">分析データ</p>
+			<div class="trust-stats">
+				<div class="trust-item">
+					<span class="trust-number">{isLoading ? '...' : stats.totalBills.toLocaleString()}</span>
+					<span class="trust-text">法案</span>
+				</div>
+				<div class="trust-divider"></div>
+				<div class="trust-item">
+					<span class="trust-number">{isLoading ? '...' : stats.totalMembers.toLocaleString()}</span
+					>
+					<span class="trust-text">議員</span>
+				</div>
+				<div class="trust-divider"></div>
+				<div class="trust-item">
+					<span class="trust-number">{isLoading ? '...' : stats.totalVotes.toLocaleString()}</span>
+					<span class="trust-text">投票記録</span>
+				</div>
 			</div>
 		</div>
 	</section>
 
-	<!-- Stats Section -->
-	<section class="stats-section">
-		{#if error}
-			<div class="error-message">
-				<p>⚠️ {error}</p>
+	<!-- How It Works Section -->
+	<section class="how-it-works">
+		<h2 class="section-title">使い方はかんたん</h2>
+		<div class="steps">
+			<div class="step">
+				<div class="step-number">1</div>
+				<div class="step-content">
+					<h3>法案に賛否を回答</h3>
+					<p>表示される法案に対して「賛成」「反対」「わからない」を選ぶだけ</p>
+				</div>
 			</div>
-		{/if}
-		<div class="stats-grid">
-			<div class="stat-card">
-				<div class="stat-icon">📊</div>
-				<div class="stat-number">{isLoading ? '...' : stats.totalBills.toLocaleString()}</div>
-				<div class="stat-label">分析済み議案</div>
+			<div class="step-arrow">→</div>
+			<div class="step">
+				<div class="step-number">2</div>
+				<div class="step-content">
+					<h3>分野の重要度を設定</h3>
+					<p>各政策分野があなたにとってどれくらい重要か★1〜5で評価</p>
+				</div>
 			</div>
-			<div class="stat-card">
-				<div class="stat-icon">👥</div>
-				<div class="stat-number">{isLoading ? '...' : stats.totalMembers.toLocaleString()}</div>
-				<div class="stat-label">国会議員</div>
+			<div class="step-arrow">→</div>
+			<div class="step">
+				<div class="step-number">3</div>
+				<div class="step-content">
+					<h3>マッチ結果を確認</h3>
+					<p>総合スコアと分野別スコアであなたに近い議員がわかる</p>
+				</div>
 			</div>
-			<div class="stat-card">
-				<div class="stat-icon">🗳️</div>
-				<div class="stat-number">{isLoading ? '...' : stats.totalVotes.toLocaleString()}</div>
-				<div class="stat-label">投票記録</div>
+		</div>
+	</section>
+
+	<!-- Primary CTA Card -->
+	<section class="cta-section">
+		<div class="cta-card">
+			<div class="cta-content">
+				<span class="cta-badge">🗳️ メイン機能</span>
+				<h2 class="cta-title">議員マッチング</h2>
+				<p class="cta-description">
+					あなたの回答パターンと国会議員の投票パターンをAIが比較分析。
+					複数の政策分野にわたって、総合的なマッチ度を算出します。
+				</p>
+				<ul class="cta-features">
+					<li>✓ 適応型質問選択で効率的に分析</li>
+					<li>✓ 8つの政策分野を個別に評価</li>
+					<li>✓ 重要度ウェイトで総合スコア算出</li>
+					<li>✓ 全議員のランキングを表示</li>
+				</ul>
+				<a href="/match" class="cta-button">
+					今すぐ試す
+					<span>→</span>
+				</a>
 			</div>
-			<div class="stat-card">
-				<div class="stat-icon">📅</div>
-				<div class="stat-number">{isLoading ? '...' : stats.sessionsAnalyzed}</div>
-				<div class="stat-label">国会会期</div>
+			<div class="cta-visual">
+				<div class="visual-card">
+					<div class="visual-header">🏆 マッチ結果</div>
+					<div class="visual-item top">
+						<span class="rank">1</span>
+						<span class="name">山田 太郎</span>
+						<span class="score">92%</span>
+					</div>
+					<div class="visual-item">
+						<span class="rank">2</span>
+						<span class="name">鈴木 花子</span>
+						<span class="score">87%</span>
+					</div>
+					<div class="visual-item">
+						<span class="rank">3</span>
+						<span class="name">佐藤 一郎</span>
+						<span class="score">84%</span>
+					</div>
+				</div>
 			</div>
 		</div>
 	</section>
 
 	<!-- Features Section -->
-	<section class="features-section">
-		<h2 class="section-title">分析機能</h2>
+	<section id="features" class="features">
+		<h2 class="section-title">その他の分析機能</h2>
+		<p class="section-subtitle">詳細なデータ分析で政治をもっと身近に</p>
 
 		<div class="features-grid">
-			<a href="/legislation-scores" class="feature-card purple-gradient">
+			<a href="/legislation-scores" class="feature-card">
 				<div class="feature-icon">🎯</div>
-				<h3 class="feature-title">議案別スコア分析</h3>
-				<p class="feature-description">
-					各議案に対する議員の賛成・反対パターンを分析し、
-					議員の政治的立場を数値化して可視化します。
-				</p>
-				<div class="feature-tags">
-					<span class="tag">投票分析</span>
-					<span class="tag">スコアリング</span>
-					<span class="tag">議員評価</span>
-				</div>
-				<div class="feature-arrow">→</div>
+				<h3>議案別スコア分析</h3>
+				<p>各議案に対する議員の賛成・反対パターンを分析し、政治的立場を数値化</p>
+				<span class="feature-link">詳しく見る →</span>
 			</a>
 
-			<a href="/bill-clustering" class="feature-card pink-gradient">
+			<a href="/bill-clustering" class="feature-card">
 				<div class="feature-icon">🔬</div>
-				<h3 class="feature-title">法案クラスタリング分析</h3>
-				<p class="feature-description">
-					機械学習により法案の内容を埋め込みベクトル化し、
-					類似する法案をグループ化して傾向を発見します。
-				</p>
-				<div class="feature-tags">
-					<span class="tag">機械学習</span>
-					<span class="tag">埋め込み</span>
-					<span class="tag">可視化</span>
-				</div>
-				<div class="feature-arrow">→</div>
+				<h3>法案クラスタリング</h3>
+				<p>機械学習で法案をベクトル化し、類似する法案をグループ化して可視化</p>
+				<span class="feature-link">詳しく見る →</span>
 			</a>
 
-			<a href="/member-vectors" class="feature-card blue-gradient">
+			<a href="/member-vectors" class="feature-card">
 				<div class="feature-icon">🧭</div>
-				<h3 class="feature-title">議員ベクトル分析</h3>
-				<p class="feature-description">
-					投票履歴から議員の政治的方向性をベクトル化し、 議員間の類似性や政治的距離を分析します。
-				</p>
-				<div class="feature-tags">
-					<span class="tag">ベクトル分析</span>
-					<span class="tag">類似度</span>
-					<span class="tag">政治マップ</span>
-				</div>
-				<div class="feature-arrow">→</div>
+				<h3>議員ベクトル分析</h3>
+				<p>投票履歴から議員の政治的方向性をベクトル化し、類似性を分析</p>
+				<span class="feature-link">詳しく見る →</span>
 			</a>
 		</div>
 	</section>
 
+	<!-- Footer CTA -->
+	<section class="footer-cta">
+		<h2>あなたに合う議員を見つけよう</h2>
+		<p>数分の質問回答で、あなたの政治的価値観に最も近い国会議員がわかります</p>
+		<a href="/match" class="btn-primary large">
+			マッチングを始める
+			<span class="btn-arrow">→</span>
+		</a>
+	</section>
+
 	<!-- Footer -->
 	<footer class="footer">
-		<p>日本国会議案分析プラットフォーム - データ駆動型政治分析</p>
+		<p>Candidate Match © 2025 - データ駆動型政治分析プラットフォーム</p>
 	</footer>
 </div>
 
 <style>
-	.landing-page {
+	.page {
 		min-height: 100vh;
-		background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
-		padding: 2rem;
+		background: #fafbfc;
 	}
 
 	/* Hero Section */
 	.hero {
 		text-align: center;
-		padding: 4rem 2rem;
-		margin-bottom: 3rem;
-	}
-
-	.hero-content {
+		padding: 6rem 2rem 4rem;
 		max-width: 900px;
 		margin: 0 auto;
-		background: rgba(255, 255, 255, 0.95);
-		backdrop-filter: blur(10px);
-		padding: 3rem;
-		border-radius: 24px;
-		box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+	}
+
+	.hero-badge {
+		display: inline-block;
+		background: linear-gradient(135deg, #eef2ff, #e0e7ff);
+		color: #4f46e5;
+		padding: 0.5rem 1.25rem;
+		border-radius: 100px;
+		font-size: 0.9rem;
+		font-weight: 600;
+		margin-bottom: 2rem;
 	}
 
 	.hero-title {
-		font-size: clamp(2rem, 5vw, 3.5rem);
+		font-size: clamp(2.5rem, 6vw, 4rem);
 		font-weight: 800;
-		background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+		line-height: 1.15;
+		color: #1a1a2e;
+		margin-bottom: 1.5rem;
+		letter-spacing: -0.02em;
+	}
+
+	.gradient-text {
+		background: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%);
 		-webkit-background-clip: text;
 		-webkit-text-fill-color: transparent;
 		background-clip: text;
-		margin-bottom: 1rem;
-		line-height: 1.2;
 	}
 
 	.hero-subtitle {
-		font-size: clamp(1.1rem, 2.5vw, 1.5rem);
-		color: #555;
-		font-weight: 600;
-		margin-bottom: 1.5rem;
+		font-size: 1.25rem;
+		color: #64748b;
+		line-height: 1.7;
+		max-width: 600px;
+		margin: 0 auto 2.5rem;
 	}
 
-	.hero-description {
-		font-size: 1.1rem;
-		color: #666;
-		line-height: 1.8;
-		max-width: 700px;
-		margin: 0 auto;
+	.hero-buttons {
+		display: flex;
+		gap: 1rem;
+		justify-content: center;
+		flex-wrap: wrap;
+		margin-bottom: 4rem;
 	}
 
-	/* Stats Section */
-	.stats-section {
-		max-width: 1200px;
-		margin: 0 auto 4rem;
-	}
-
-	.error-message {
-		background: rgba(255, 100, 100, 0.9);
+	.btn-primary {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
 		color: white;
-		padding: 1rem;
-		border-radius: 8px;
-		text-align: center;
-		margin-bottom: 2rem;
+		padding: 1rem 2rem;
+		border-radius: 12px;
+		font-size: 1.1rem;
 		font-weight: 600;
+		text-decoration: none;
+		box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4);
+		transition: all 0.2s ease;
 	}
 
-	.stats-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-		gap: 1.5rem;
+	.btn-primary:hover {
+		transform: translateY(-2px);
+		box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5);
 	}
 
-	.stat-card {
-		background: rgba(255, 255, 255, 0.95);
-		backdrop-filter: blur(10px);
-		padding: 2rem;
-		border-radius: 16px;
-		text-align: center;
-		box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-		transition:
-			transform 0.3s ease,
-			box-shadow 0.3s ease;
+	.btn-primary.large {
+		padding: 1.25rem 2.5rem;
+		font-size: 1.2rem;
 	}
 
-	.stat-card:hover {
-		transform: translateY(-5px);
-		box-shadow: 0 15px 40px rgba(0, 0, 0, 0.3);
+	.btn-arrow {
+		transition: transform 0.2s ease;
 	}
 
-	.stat-icon {
-		font-size: 3rem;
-		margin-bottom: 0.5rem;
+	.btn-primary:hover .btn-arrow {
+		transform: translateX(4px);
 	}
 
-	.stat-number {
-		font-size: 2.5rem;
+	.btn-secondary {
+		display: inline-flex;
+		align-items: center;
+		background: white;
+		color: #374151;
+		padding: 1rem 2rem;
+		border-radius: 12px;
+		font-size: 1.1rem;
+		font-weight: 600;
+		text-decoration: none;
+		border: 2px solid #e5e7eb;
+		transition: all 0.2s ease;
+	}
+
+	.btn-secondary:hover {
+		border-color: #6366f1;
+		color: #6366f1;
+	}
+
+	/* Trust Section */
+	.trust-section {
+		padding-top: 2rem;
+		border-top: 1px solid #e5e7eb;
+	}
+
+	.trust-label {
+		font-size: 0.85rem;
+		color: #94a3b8;
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		margin-bottom: 1rem;
+	}
+
+	.trust-stats {
+		display: flex;
+		justify-content: center;
+		align-items: center;
+		gap: 2rem;
+		flex-wrap: wrap;
+	}
+
+	.trust-item {
+		display: flex;
+		align-items: baseline;
+		gap: 0.5rem;
+	}
+
+	.trust-number {
+		font-size: 1.75rem;
 		font-weight: 800;
-		color: #667eea;
-		margin-bottom: 0.5rem;
+		color: #1a1a2e;
 	}
 
-	.stat-label {
+	.trust-text {
 		font-size: 1rem;
-		color: #666;
-		font-weight: 600;
+		color: #64748b;
 	}
 
-	/* Features Section */
-	.features-section {
-		max-width: 1200px;
-		margin: 0 auto 4rem;
+	.trust-divider {
+		width: 1px;
+		height: 30px;
+		background: #e5e7eb;
+	}
+
+	/* How It Works */
+	.how-it-works {
+		background: white;
+		padding: 5rem 2rem;
+		border-top: 1px solid #e5e7eb;
+		border-bottom: 1px solid #e5e7eb;
 	}
 
 	.section-title {
 		text-align: center;
+		font-size: 2.25rem;
+		font-weight: 800;
+		color: #1a1a2e;
+		margin-bottom: 1rem;
+	}
+
+	.section-subtitle {
+		text-align: center;
+		font-size: 1.1rem;
+		color: #64748b;
+		margin-bottom: 3rem;
+	}
+
+	.steps {
+		display: flex;
+		justify-content: center;
+		align-items: flex-start;
+		gap: 1.5rem;
+		max-width: 1000px;
+		margin: 3rem auto 0;
+		flex-wrap: wrap;
+	}
+
+	.step {
+		flex: 1;
+		min-width: 200px;
+		max-width: 280px;
+		text-align: center;
+	}
+
+	.step-number {
+		width: 48px;
+		height: 48px;
+		background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+		color: white;
+		font-size: 1.25rem;
+		font-weight: 700;
+		border-radius: 50%;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		margin: 0 auto 1.25rem;
+	}
+
+	.step-content h3 {
+		font-size: 1.1rem;
+		font-weight: 700;
+		color: #1a1a2e;
+		margin-bottom: 0.5rem;
+	}
+
+	.step-content p {
+		font-size: 0.95rem;
+		color: #64748b;
+		line-height: 1.6;
+	}
+
+	.step-arrow {
+		color: #d1d5db;
+		font-size: 1.5rem;
+		padding-top: 0.75rem;
+	}
+
+	/* CTA Section */
+	.cta-section {
+		padding: 5rem 2rem;
+		max-width: 1100px;
+		margin: 0 auto;
+	}
+
+	.cta-card {
+		background: linear-gradient(135deg, #6366f1 0%, #4f46e5 50%, #7c3aed 100%);
+		border-radius: 24px;
+		padding: 3rem;
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 3rem;
+		align-items: center;
+		box-shadow: 0 20px 60px rgba(99, 102, 241, 0.3);
+	}
+
+	.cta-badge {
+		display: inline-block;
+		background: rgba(255, 255, 255, 0.2);
+		color: white;
+		padding: 0.4rem 1rem;
+		border-radius: 100px;
+		font-size: 0.85rem;
+		font-weight: 600;
+		margin-bottom: 1rem;
+	}
+
+	.cta-title {
 		font-size: 2.5rem;
 		font-weight: 800;
 		color: white;
-		margin-bottom: 3rem;
-		text-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+		margin-bottom: 1rem;
+	}
+
+	.cta-description {
+		font-size: 1.1rem;
+		color: rgba(255, 255, 255, 0.9);
+		line-height: 1.7;
+		margin-bottom: 1.5rem;
+	}
+
+	.cta-features {
+		list-style: none;
+		padding: 0;
+		margin: 0 0 2rem 0;
+	}
+
+	.cta-features li {
+		color: rgba(255, 255, 255, 0.9);
+		font-size: 1rem;
+		padding: 0.4rem 0;
+	}
+
+	.cta-button {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		background: white;
+		color: #4f46e5;
+		padding: 1rem 2rem;
+		border-radius: 12px;
+		font-size: 1.1rem;
+		font-weight: 700;
+		text-decoration: none;
+		transition: all 0.2s ease;
+	}
+
+	.cta-button:hover {
+		transform: translateY(-2px);
+		box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+	}
+
+	.cta-visual {
+		display: flex;
+		justify-content: center;
+	}
+
+	.visual-card {
+		background: white;
+		border-radius: 16px;
+		padding: 1.5rem;
+		width: 280px;
+		box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+	}
+
+	.visual-header {
+		font-size: 1rem;
+		font-weight: 700;
+		color: #1a1a2e;
+		margin-bottom: 1rem;
+		padding-bottom: 0.75rem;
+		border-bottom: 1px solid #e5e7eb;
+	}
+
+	.visual-item {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		padding: 0.75rem 0;
+		border-bottom: 1px solid #f3f4f6;
+	}
+
+	.visual-item:last-child {
+		border-bottom: none;
+	}
+
+	.visual-item.top {
+		background: linear-gradient(135deg, #fef3c7, #fde68a);
+		margin: -0.5rem;
+		padding: 1rem;
+		border-radius: 8px;
+		margin-bottom: 0.5rem;
+	}
+
+	.visual-item .rank {
+		width: 24px;
+		height: 24px;
+		background: #6366f1;
+		color: white;
+		font-size: 0.8rem;
+		font-weight: 700;
+		border-radius: 50%;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.visual-item.top .rank {
+		background: #f59e0b;
+	}
+
+	.visual-item .name {
+		flex: 1;
+		font-weight: 600;
+		color: #374151;
+	}
+
+	.visual-item .score {
+		font-weight: 700;
+		color: #10b981;
+	}
+
+	/* Features Section */
+	.features {
+		padding: 5rem 2rem;
+		max-width: 1100px;
+		margin: 0 auto;
 	}
 
 	.features-grid {
 		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-		gap: 2rem;
+		grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+		gap: 1.5rem;
+		margin-top: 3rem;
 	}
 
 	.feature-card {
-		background: rgba(255, 255, 255, 0.95);
-		backdrop-filter: blur(10px);
-		padding: 2.5rem;
-		border-radius: 20px;
+		background: white;
+		border: 1px solid #e5e7eb;
+		border-radius: 16px;
+		padding: 2rem;
 		text-decoration: none;
-		color: inherit;
-		box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
-		transition: all 0.3s ease;
-		position: relative;
-		overflow: hidden;
-		display: flex;
-		flex-direction: column;
-	}
-
-	.feature-card::before {
-		content: '';
-		position: absolute;
-		top: 0;
-		left: 0;
-		right: 0;
-		height: 6px;
-		opacity: 0.8;
-	}
-
-	.feature-card.purple-gradient::before {
-		background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-	}
-
-	.feature-card.pink-gradient::before {
-		background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-	}
-
-	.feature-card.blue-gradient::before {
-		background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+		transition: all 0.2s ease;
 	}
 
 	.feature-card:hover {
-		transform: translateY(-8px);
-		box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+		border-color: #6366f1;
+		box-shadow: 0 10px 30px rgba(99, 102, 241, 0.1);
+		transform: translateY(-4px);
 	}
 
 	.feature-icon {
-		font-size: 3.5rem;
+		font-size: 2.5rem;
 		margin-bottom: 1rem;
 	}
 
-	.feature-title {
-		font-size: 1.5rem;
+	.feature-card h3 {
+		font-size: 1.25rem;
 		font-weight: 700;
-		color: #333;
+		color: #1a1a2e;
+		margin-bottom: 0.75rem;
+	}
+
+	.feature-card p {
+		font-size: 0.95rem;
+		color: #64748b;
+		line-height: 1.6;
 		margin-bottom: 1rem;
 	}
 
-	.feature-description {
-		font-size: 1rem;
-		color: #666;
-		line-height: 1.7;
-		margin-bottom: 1.5rem;
-		flex-grow: 1;
-	}
-
-	.feature-tags {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.5rem;
-		margin-bottom: 1rem;
-	}
-
-	.tag {
-		background: linear-gradient(135deg, #667eea15, #764ba215);
-		color: #667eea;
-		padding: 0.4rem 0.8rem;
-		border-radius: 20px;
-		font-size: 0.85rem;
+	.feature-link {
+		color: #6366f1;
 		font-weight: 600;
+		font-size: 0.95rem;
 	}
 
-	.feature-arrow {
-		font-size: 1.5rem;
-		color: #667eea;
-		font-weight: 700;
-		text-align: right;
+	/* Footer CTA */
+	.footer-cta {
+		background: #1a1a2e;
+		padding: 5rem 2rem;
+		text-align: center;
+	}
+
+	.footer-cta h2 {
+		font-size: 2.25rem;
+		font-weight: 800;
+		color: white;
+		margin-bottom: 1rem;
+	}
+
+	.footer-cta p {
+		font-size: 1.1rem;
+		color: rgba(255, 255, 255, 0.7);
+		margin-bottom: 2rem;
 	}
 
 	/* Footer */
 	.footer {
-		text-align: center;
+		background: #0f0f1a;
 		padding: 2rem;
-		color: white;
-		font-size: 0.95rem;
-		text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+		text-align: center;
 	}
 
-	/* Responsive Design */
+	.footer p {
+		color: rgba(255, 255, 255, 0.5);
+		font-size: 0.9rem;
+	}
+
+	/* Responsive */
 	@media (max-width: 768px) {
-		.landing-page {
-			padding: 1rem;
-		}
-
 		.hero {
-			padding: 2rem 1rem;
+			padding: 4rem 1.5rem 3rem;
 		}
 
-		.hero-content {
-			padding: 2rem 1.5rem;
-		}
-
-		.stats-grid,
-		.features-grid {
+		.cta-card {
 			grid-template-columns: 1fr;
+			padding: 2rem;
 		}
 
-		.section-title {
-			font-size: 2rem;
+		.cta-visual {
+			order: -1;
+		}
+
+		.step-arrow {
+			display: none;
+		}
+
+		.steps {
+			flex-direction: column;
+			align-items: center;
+		}
+
+		.trust-divider {
+			display: none;
+		}
+
+		.trust-stats {
+			gap: 1.5rem;
 		}
 	}
 </style>
