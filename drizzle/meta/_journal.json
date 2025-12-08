@@ -43,6 +43,13 @@
       "when": 1765079437873,
       "tag": "0005_nebulous_meggan",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1765162089556,
+      "tag": "0006_whole_warstar",
+      "breakpoints": true
     }
   ]
 }

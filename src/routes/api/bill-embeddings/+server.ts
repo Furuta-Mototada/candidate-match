@@ -1,8 +1,8 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
-import { billEmbeddings, bill, billDetail } from '$lib/server/db/schema';
-import { eq } from 'drizzle-orm';
+import { billEmbeddings, bill, billDetail, billClusterAssignments } from '$lib/server/db/schema';
+import { eq, isNotNull, and } from 'drizzle-orm';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs/promises';
@@ -20,38 +20,77 @@ export const GET: RequestHandler = async ({ url }) => {
 
 	try {
 		if (clusterId) {
-			// Generate 2D visualization for specific cluster
 			const clusterIdNum = parseInt(clusterId);
-
-			// Check if cluster-specific file already exists
 			const clusterFile = `src/lib/data/bill_embeddings_2d_cluster_${clusterIdNum}.json`;
 
+			// First, try JSON file cache (fastest)
 			try {
-				// Try to read existing file first
 				const existingData = await fs.readFile(clusterFile, 'utf-8');
 				console.log(
 					`✓ Serving cached visualization for cluster ${clusterIdNum} (${(existingData.length / 1024).toFixed(1)} KB)`
 				);
 				return json(JSON.parse(existingData));
-			} catch (readError) {
-				// File doesn't exist, generate it
-				console.log(`⚠ Visualization file not found for cluster ${clusterIdNum}, generating...`);
-				console.error('Read error:', readError);
-				try {
-					const startTime = Date.now();
-					await execAsync(`python scripts/visualize_embeddings_2d.py ${clusterIdNum}`, {
-						cwd: process.cwd()
-					});
-					const elapsed = Date.now() - startTime;
-					console.log(`✓ Generated visualization in ${(elapsed / 1000).toFixed(1)}s`);
+			} catch {
+				// JSON file doesn't exist, try database
+			}
 
-					// Read the generated file
-					const vizData = await fs.readFile(clusterFile, 'utf-8');
-					return json(JSON.parse(vizData));
-				} catch (error) {
-					console.error('Failed to generate visualization:', error);
-					return json({ error: 'Failed to generate visualization' }, { status: 500 });
-				}
+			// Fallback: try database (source of truth)
+			const dbData = await db
+				.select({
+					billId: billClusterAssignments.billId,
+					clusterLabel: billClusterAssignments.clusterLabel,
+					x: billClusterAssignments.x,
+					y: billClusterAssignments.y,
+					type: bill.type,
+					session: bill.submissionSession,
+					number: bill.number,
+					title: billDetail.title
+				})
+				.from(billClusterAssignments)
+				.leftJoin(bill, eq(billClusterAssignments.billId, bill.id))
+				.leftJoin(billDetail, eq(bill.id, billDetail.billId))
+				.where(
+					and(
+						eq(billClusterAssignments.clusterId, clusterIdNum),
+						isNotNull(billClusterAssignments.x),
+						isNotNull(billClusterAssignments.y)
+					)
+				);
+
+			if (dbData.length > 0) {
+				// Return data from database
+				const vizData = dbData.map((row) => ({
+					billId: row.billId,
+					type: row.type,
+					session: row.session,
+					number: row.number,
+					title: row.title || 'Untitled',
+					x: row.x,
+					y: row.y,
+					cluster: row.clusterLabel
+				}));
+				console.log(
+					`✓ Serving visualization from database for cluster ${clusterIdNum} (${vizData.length} bills)`
+				);
+				return json(vizData);
+			}
+
+			// Last resort: generate it (this will update both database and JSON file)
+			console.log(`⚠ Visualization not found for cluster ${clusterIdNum}, generating...`);
+			try {
+				const startTime = Date.now();
+				await execAsync(`python scripts/visualize_embeddings_2d.py ${clusterIdNum}`, {
+					cwd: process.cwd()
+				});
+				const elapsed = Date.now() - startTime;
+				console.log(`✓ Generated visualization in ${(elapsed / 1000).toFixed(1)}s`);
+
+				// Read the generated file
+				const vizData = await fs.readFile(clusterFile, 'utf-8');
+				return json(JSON.parse(vizData));
+			} catch (error) {
+				console.error('Failed to generate visualization:', error);
+				return json({ error: 'Failed to generate visualization' }, { status: 500 });
 			}
 		}
 

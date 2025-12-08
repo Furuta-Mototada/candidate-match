@@ -7,7 +7,8 @@ import {
 	date,
 	unique,
 	primaryKey,
-	pgEnum
+	pgEnum,
+	real
 } from 'drizzle-orm/pg-core';
 
 // Enums
@@ -287,7 +288,9 @@ export const billClusterAssignments = pgTable(
 			.notNull()
 			.references(() => bill.id),
 		clusterLabel: integer('cluster_label').notNull(), // The cluster number assigned
-		distance: text('distance') // Distance to cluster center (for kmeans) or other metric
+		distance: text('distance'), // Distance to cluster center (for kmeans) or other metric
+		x: real('x'), // 2D visualization x coordinate (from t-SNE/UMAP)
+		y: real('y') // 2D visualization y coordinate (from t-SNE/UMAP)
 	},
 	(table) => [primaryKey({ columns: [table.clusterId, table.billId] })]
 );

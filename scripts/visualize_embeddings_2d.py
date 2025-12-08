@@ -125,16 +125,40 @@ def reduce_embeddings_to_2d(database_url: str, cluster_id: int = None):
 
             print(f"Loaded cluster assignments from cluster {cluster_id}")
 
-    # Create visualization data
+    # Create visualization data and prepare database updates
     viz_data = []
+    db_updates = []
     for i, bill_info in enumerate(bills_info):
+        x_val = float(reduced[i, 0])
+        y_val = float(reduced[i, 1])
+        cluster_label = cluster_assignments.get(bill_info["billId"], -1)
+
         viz_data.append(
             {
                 **bill_info,
-                "x": float(reduced[i, 0]),
-                "y": float(reduced[i, 1]),
-                "cluster": cluster_assignments.get(bill_info["billId"], -1),
+                "x": x_val,
+                "y": y_val,
+                "cluster": cluster_label,
             }
+        )
+
+        # Only add to updates if we have a valid cluster assignment
+        if cluster_id is not None and bill_info["billId"] in cluster_assignments:
+            db_updates.append((x_val, y_val, cluster_id, bill_info["billId"]))
+
+    # Update x, y coordinates in database
+    if db_updates:
+        cursor.executemany(
+            """
+            UPDATE bill_cluster_assignments 
+            SET x = %s, y = %s
+            WHERE cluster_id = %s AND bill_id = %s
+            """,
+            db_updates,
+        )
+        conn.commit()
+        print(
+            f"\n✓ Updated {len(db_updates)} bill_cluster_assignments with x, y coordinates"
         )
 
     # Save to cluster-specific file if cluster_id is provided, otherwise use default
@@ -146,7 +170,7 @@ def reduce_embeddings_to_2d(database_url: str, cluster_id: int = None):
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(viz_data, f, ensure_ascii=False, indent=2)
 
-    print(f"\n✓ Saved 2D visualization data to {output_file}")
+    print(f"✓ Saved 2D visualization data to {output_file}")
     print(f"  {len(viz_data)} bills")
     if cluster_id is not None:
         print(f"  Cluster ID: {cluster_id}")
