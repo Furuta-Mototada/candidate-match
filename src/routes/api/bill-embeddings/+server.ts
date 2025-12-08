@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
-import type { RequestHandler } from './$types';
-import { db } from '$lib/server/db';
-import { billEmbeddings, bill, billDetail, billClusterAssignments } from '$lib/server/db/schema';
+import type { RequestHandler } from './$types.js';
+import { db } from '$lib/server/db/index.js';
+import { billEmbeddings, bill, billDetail, billClusterAssignments } from '$lib/server/db/schema.js';
 import { eq, isNotNull, and } from 'drizzle-orm';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -15,7 +15,7 @@ const execAsync = promisify(exec);
  * Query params:
  * - clusterId: Get 2D visualization data for specific cluster
  */
-export const GET: RequestHandler = async ({ url }) => {
+export const GET: RequestHandler = async ({ url }): Promise<Response> => {
 	const clusterId = url.searchParams.get('clusterId');
 
 	try {

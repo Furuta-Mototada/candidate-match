@@ -1,4 +1,4 @@
-import type { PageServerLoad } from './$types';
+import type { PageServerLoad } from './$types.js';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
 

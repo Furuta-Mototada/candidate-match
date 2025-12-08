@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { PageData } from './$types';
+	import type { PageData } from './$types.js';
+	import { PageHero, LoadingSpinner, EmptyState } from '$lib/components/index.js';
 
 	interface MemberLegislationScore {
 		memberId: number;
@@ -289,11 +290,11 @@
 
 <div class="page">
 	<!-- Hero Section -->
-	<section class="hero">
-		<div class="hero-badge">🎯 議案分析</div>
-		<h1 class="hero-title">議案別スコア分析</h1>
-		<p class="hero-subtitle">各議案に対する全議員のスコアを分析・可視化します</p>
-	</section>
+	<PageHero
+		badge="🎯 議案分析"
+		title="議案別スコア分析"
+		description="各議案に対する全議員のスコアを分析・可視化します"
+	/>
 
 	<!-- Scoring Explanation Section -->
 	<section class="explanation-section">
@@ -628,39 +629,6 @@
 	.page {
 		min-height: 100vh;
 		background: #fafbfc;
-	}
-
-	/* ===== HERO SECTION ===== */
-	.hero {
-		text-align: center;
-		padding: 4rem 2rem 3rem;
-		background: white;
-		border-bottom: 1px solid #e5e7eb;
-	}
-
-	.hero-badge {
-		display: inline-block;
-		background: linear-gradient(135deg, #eef2ff, #e0e7ff);
-		color: #4f46e5;
-		padding: 0.5rem 1.25rem;
-		border-radius: 100px;
-		font-size: 0.9rem;
-		font-weight: 600;
-		margin-bottom: 1.5rem;
-	}
-
-	.hero-title {
-		font-size: clamp(2rem, 5vw, 2.75rem);
-		font-weight: 800;
-		color: #1a1a2e;
-		margin: 0 0 0.75rem 0;
-		letter-spacing: -0.02em;
-	}
-
-	.hero-subtitle {
-		font-size: 1.1rem;
-		color: #64748b;
-		margin: 0;
 	}
 
 	/* ===== EXPLANATION SECTION ===== */
@@ -1513,10 +1481,6 @@
 	}
 
 	@media (max-width: 768px) {
-		.hero {
-			padding: 3rem 1.5rem 2rem;
-		}
-
 		.explanation-section,
 		.controls-section,
 		.bills-section {

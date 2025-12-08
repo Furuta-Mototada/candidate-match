@@ -1,5 +1,6 @@
 <script lang="ts">
-	import type { PageData } from './$types';
+	import type { PageData } from './$types.js';
+	import { PageHero, LoadingSpinner } from '$lib/components/index.js';
 
 	interface SavedVectorInfo {
 		id: number;
@@ -65,7 +66,7 @@
 	let { data }: { data: PageData } = $props();
 
 	// State
-	let savedVectors: SavedVectorInfo[] = $state(data.savedVectors || []);
+	let savedVectors: SavedVectorInfo[] = $state((data.savedVectors || []) as SavedVectorInfo[]);
 	let selectedSavedVectorKey: string | null = $state(null);
 
 	let phase: MatchingPhase = $state('setup');

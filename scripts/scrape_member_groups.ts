@@ -4,21 +4,11 @@ dotenv.config();
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import * as schema from '../src/lib/server/db/schema';
-import { eq, and, or } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 const KOKKAI_API_BASE = 'https://kokkai.ndl.go.jp/api/speech';
 const DELAY_BETWEEN_REQUESTS = 3000; // 3 seconds as recommended by API docs
-
-/**
- * Normalize a member name by removing spaces
- */
-function normalizeMemberName(name: string): string {
-	return name
-		.replace(/\u3000/g, '') // Remove full-width space (U+3000)
-		.replace(/ /g, '') // Remove half-width space
-		.trim();
-}
 
 /**
  * Sleep for a given number of milliseconds

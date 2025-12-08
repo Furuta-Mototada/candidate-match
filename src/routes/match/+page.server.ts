@@ -1,6 +1,6 @@
-import type { PageServerLoad } from './$types';
+import type { PageServerLoad } from './$types.js';
 
-export const load: PageServerLoad = async ({ fetch }) => {
+export const load: PageServerLoad = async ({ fetch }): Promise<{ savedVectors: unknown[] }> => {
 	try {
 		const response = await fetch('/api/match');
 		if (!response.ok) {

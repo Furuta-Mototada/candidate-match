@@ -1,14 +1,14 @@
 import { json } from '@sveltejs/kit';
-import type { RequestHandler } from './$types';
+import type { RequestHandler } from './$types.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { db } from '$lib/server/db';
+import { db } from '$lib/server/db/index.js';
 import {
 	billClusters,
 	billClusterAssignments,
 	clusterVectorResults,
 	member
-} from '$lib/server/db/schema';
+} from '$lib/server/db/schema.js';
 import { eq, inArray, desc } from 'drizzle-orm';
 import {
 	initializeMatchingState,
@@ -22,7 +22,7 @@ import {
 	type UserAnswer,
 	type ClusterVectorData,
 	type MatchResult
-} from '$lib/server/matching';
+} from '$lib/server/matching.js';
 
 const execAsync = promisify(exec);
 
@@ -69,7 +69,7 @@ setInterval(cleanupSessions, 10 * 60 * 1000);
  * - action: "results" - Get current matching results
  * - action: "skip" - Skip current question and get next
  */
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async ({ request }): Promise<Response> => {
 	try {
 		const body = await request.json();
 		const {
@@ -469,37 +469,29 @@ export const GET: RequestHandler = async () => {
 
 		// Get cluster labels for each cluster
 		const clustersWithLabels = await Promise.all(
-			clusters.map(
-				async (cluster: {
-					id: number;
-					name: string;
-					algorithm: string;
-					parameters: Record<string, unknown> | null;
-					createdAt: Date;
-				}) => {
-					const assignments = await db
-						.select({ clusterLabel: billClusterAssignments.clusterLabel })
-						.from(billClusterAssignments)
-						.where(eq(billClusterAssignments.clusterId, cluster.id));
+			clusters.map(async (cluster) => {
+				const assignments = await db
+					.select({ clusterLabel: billClusterAssignments.clusterLabel })
+					.from(billClusterAssignments)
+					.where(eq(billClusterAssignments.clusterId, cluster.id));
 
-					const labelCounts: Record<number, number> = {};
-					for (const a of assignments) {
-						labelCounts[a.clusterLabel] = (labelCounts[a.clusterLabel] || 0) + 1;
-					}
-
-					const labels = Object.entries(labelCounts)
-						.map(([label, count]) => ({
-							label: parseInt(label),
-							billCount: count
-						}))
-						.sort((a, b) => a.label - b.label);
-
-					return {
-						...cluster,
-						labels
-					};
+				const labelCounts: Record<number, number> = {};
+				for (const a of assignments) {
+					labelCounts[a.clusterLabel] = (labelCounts[a.clusterLabel] || 0) + 1;
 				}
-			)
+
+				const labels = Object.entries(labelCounts)
+					.map(([label, count]) => ({
+						label: parseInt(label),
+						billCount: count
+					}))
+					.sort((a, b) => a.label - b.label);
+
+				return {
+					...cluster,
+					labels
+				};
+			})
 		);
 
 		// Get saved vector results

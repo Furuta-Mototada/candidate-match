@@ -1,6 +1,22 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { PageData } from './$types';
+	import type { PageData } from './$types.js';
+	import { PageHero, ClusterCard, LoadingSpinner, EmptyState } from '$lib/components/index.js';
+
+	interface BillWithDetails {
+		billId: number;
+		clusterLabel: number;
+		distance: string | null;
+		billType: string;
+		submissionSession: number;
+		billNumber: number;
+		title: string | null;
+		description: string | null;
+		deliberationCompleted: boolean | null;
+		passed: boolean | null;
+		pdfUrl?: string;
+		committees: Array<{ name: string | null; chamber: string | null }>;
+	}
 
 	let { data }: { data: PageData } = $props();
 
@@ -14,14 +30,25 @@
 
 	// State for visualization
 	let selectedClusterId = $state<number | null>(null);
-	let clusterData = $state<any>(null);
-	let billsByCluster = $state<any>(null);
+	let clusterData = $state<Record<string, unknown> | null>(null);
+	let billsByCluster = $state<Record<string, BillWithDetails[]> | null>(null);
 	let isLoadingCluster = $state(false);
 	let selectedBillId = $state<number | null>(null);
-	let selectedBill = $state<any>(null);
+	let selectedBill = $state<BillWithDetails | null>(null);
 
 	// 2D visualization data
-	let visualizationData = $state<any[]>([]);
+	let visualizationData = $state<
+		Array<{
+			billId: number;
+			type: string;
+			session: number;
+			number: number;
+			title: string;
+			x: number;
+			y: number;
+			cluster: number;
+		}>
+	>([]);
 	let isLoadingViz = $state(false);
 
 	// Cluster label names from LLM
@@ -153,18 +180,29 @@
 		}
 	}
 
-	function selectBill(bill: any) {
+	function selectBill(bill: BillWithDetails) {
 		selectedBillId = bill.billId;
 		selectedBill = bill;
 	}
 
-	function selectBillFromViz(point: any) {
+	interface VisualizationPoint {
+		billId: number;
+		type: string;
+		session: number;
+		number: number;
+		title: string;
+		x: number;
+		y: number;
+		cluster: number;
+	}
+
+	function selectBillFromViz(point: VisualizationPoint) {
 		selectedBillId = point.billId;
 
 		// Try to find the full bill data from billsByCluster
 		if (billsByCluster) {
 			for (const bills of Object.values(billsByCluster)) {
-				const foundBill = (bills as any[]).find((b: any) => b.billId === point.billId);
+				const foundBill = bills.find((b) => b.billId === point.billId);
 				if (foundBill) {
 					selectedBill = foundBill;
 					return;
@@ -179,7 +217,12 @@
 			submissionSession: point.session,
 			billNumber: point.number,
 			title: point.title,
-			clusterLabel: point.cluster
+			clusterLabel: point.cluster,
+			distance: null,
+			description: null,
+			deliberationCompleted: null,
+			passed: null,
+			committees: []
 		};
 	}
 
@@ -202,11 +245,11 @@
 
 <div class="page">
 	<!-- Hero Section -->
-	<section class="hero">
-		<div class="hero-badge">📊 クラスタリング</div>
-		<h1 class="hero-title">法案クラスタリング分析</h1>
-		<p class="hero-subtitle">法案を類似性に基づいてグループ化し、政策トピックを可視化します</p>
-	</section>
+	<PageHero
+		badge="📊 クラスタリング"
+		title="法案クラスタリング分析"
+		description="法案を類似性に基づいてグループ化し、政策トピックを可視化します"
+	/>
 
 	<!-- Clustering Generation Section -->
 	<section class="generation-section">
@@ -275,24 +318,21 @@
 		</div>
 
 		{#if data.clusters.length === 0}
-			<p class="empty-state">
-				クラスタリング結果がありません。上記のフォームから新しいクラスタリングを生成してください。
-			</p>
+			<EmptyState
+				message="クラスタリング結果がありません。上記のフォームから新しいクラスタリングを生成してください。"
+				icon="📊"
+			/>
 		{:else}
 			<div class="cluster-list">
 				{#each data.clusters as cluster}
-					<button
-						class="cluster-card"
-						class:active={selectedClusterId === cluster.id}
+					<ClusterCard
+						name={cluster.name}
+						algorithm={cluster.algorithm}
+						createdAt={cluster.createdAt}
+						parameters={cluster.parameters}
+						active={selectedClusterId === cluster.id}
 						onclick={() => loadCluster(cluster.id)}
-					>
-						<div class="cluster-name">{cluster.name}</div>
-						<div class="cluster-meta">
-							<span class="badge">{cluster.algorithm.toUpperCase()}</span>
-							<span class="text-sm">{new Date(cluster.createdAt).toLocaleDateString('ja-JP')}</span>
-						</div>
-						<div class="cluster-params">{cluster.parameters}</div>
-					</button>
+					/>
 				{/each}
 			</div>
 		{/if}
@@ -349,6 +389,9 @@
 										class="data-point"
 										class:selected={selectedBillId === point.billId}
 										onclick={() => selectBillFromViz(point)}
+										onkeydown={(e) => {
+											if (e.key === 'Enter' || e.key === ' ') selectBillFromViz(point);
+										}}
 										role="button"
 										tabindex="0"
 									>
@@ -520,39 +563,6 @@
 		background: #fafbfc;
 	}
 
-	/* ===== HERO SECTION ===== */
-	.hero {
-		text-align: center;
-		padding: 4rem 2rem 3rem;
-		background: white;
-		border-bottom: 1px solid #e5e7eb;
-	}
-
-	.hero-badge {
-		display: inline-block;
-		background: linear-gradient(135deg, #eef2ff, #e0e7ff);
-		color: #4f46e5;
-		padding: 0.5rem 1.25rem;
-		border-radius: 100px;
-		font-size: 0.9rem;
-		font-weight: 600;
-		margin-bottom: 1.5rem;
-	}
-
-	.hero-title {
-		font-size: clamp(2rem, 5vw, 2.75rem);
-		font-weight: 800;
-		color: #1a1a2e;
-		margin: 0 0 0.75rem 0;
-		letter-spacing: -0.02em;
-	}
-
-	.hero-subtitle {
-		font-size: 1.1rem;
-		color: #64748b;
-		margin: 0;
-	}
-
 	/* ===== SECTION STYLES ===== */
 	.generation-section,
 	.results-section,
@@ -653,69 +663,6 @@
 	.cluster-list {
 		display: grid;
 		gap: 0.75rem;
-	}
-
-	.cluster-card {
-		background: white;
-		padding: 1rem 1.25rem;
-		border: 1px solid #e5e7eb;
-		border-radius: 10px;
-		text-align: left;
-		cursor: pointer;
-		transition: all 0.2s;
-	}
-
-	.cluster-card:hover {
-		border-color: #6366f1;
-		background: #fafbff;
-	}
-
-	.cluster-card.active {
-		border-color: #6366f1;
-		background: #eef2ff;
-	}
-
-	.cluster-name {
-		font-size: 1rem;
-		font-weight: 600;
-		margin-bottom: 0.5rem;
-		color: #1a1a2e;
-	}
-
-	.cluster-meta {
-		display: flex;
-		gap: 0.75rem;
-		align-items: center;
-		margin-bottom: 0.35rem;
-	}
-
-	.badge {
-		background: #6366f1;
-		color: white;
-		padding: 0.2rem 0.6rem;
-		border-radius: 100px;
-		font-size: 0.75rem;
-		font-weight: 600;
-	}
-
-	.text-sm {
-		font-size: 0.8rem;
-		color: #64748b;
-	}
-
-	.cluster-params {
-		font-size: 0.8rem;
-		color: #64748b;
-		font-family: monospace;
-	}
-
-	.empty-state {
-		text-align: center;
-		color: #64748b;
-		padding: 2rem;
-		background: white;
-		border-radius: 12px;
-		border: 1px solid #e5e7eb;
 	}
 
 	/* ===== SCATTER PLOT ===== */
@@ -1012,10 +959,6 @@
 	}
 
 	@media (max-width: 768px) {
-		.hero {
-			padding: 3rem 1.5rem 2rem;
-		}
-
 		.generation-section,
 		.results-section,
 		.visualization-section {

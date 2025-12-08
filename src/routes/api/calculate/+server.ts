@@ -1,7 +1,7 @@
 import { exec } from 'child_process';
-import type { RequestHandler } from './$types';
+import type { RequestHandler } from './$types.js';
 
-export const POST: RequestHandler = async () => {
+export const POST: RequestHandler = async (): Promise<Response> => {
 	const stream = new ReadableStream({
 		start(controller) {
 			const encoder = new TextEncoder();

@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
-import type { RequestHandler } from './$types';
-import { db } from '$lib/server/db';
+import type { RequestHandler } from './$types.js';
+import { db } from '$lib/server/db/index.js';
 import {
 	billClusters,
 	billClusterAssignments,
@@ -10,14 +10,14 @@ import {
 	billEmbeddings,
 	committee,
 	committeeBill
-} from '$lib/server/db/schema';
-import { eq, desc, inArray } from 'drizzle-orm';
+} from '$lib/server/db/schema.js';
+import { eq, desc, inArray, sql } from 'drizzle-orm';
 
 /**
  * GET /api/bill-clusters
  * List all clustering results or get details of a specific cluster
  */
-export const GET: RequestHandler = async ({ url }) => {
+export const GET: RequestHandler = async ({ url }): Promise<Response> => {
 	const clusterId = url.searchParams.get('id');
 
 	try {
@@ -55,7 +55,7 @@ export const GET: RequestHandler = async ({ url }) => {
 				.leftJoin(billDetail, eq(bill.id, billDetail.billId))
 				.leftJoin(billEmbeddings, eq(bill.id, billEmbeddings.billId))
 				.where(eq(billClusterAssignments.clusterId, clusterIdNum)); // Get committee assignments for all bills
-			const billIds = assignments.map((a: any) => a.billId);
+			const billIds = assignments.map((a) => a.billId);
 
 			const committees =
 				billIds.length > 0
@@ -75,13 +75,14 @@ export const GET: RequestHandler = async ({ url }) => {
 				billId: number;
 				clusterLabel: number;
 				distance: string | null;
-				billType: string;
-				submissionSession: number;
-				billNumber: number;
+				billType: string | null;
+				submissionSession: number | null;
+				billNumber: number | null;
 				title: string | null;
 				description: string | null;
 				deliberationCompleted: boolean | null;
 				passed: boolean | null;
+				pdfUrl: string | null;
 				committees: Array<{ name: string | null; chamber: string | null }>;
 			}
 
@@ -96,7 +97,17 @@ export const GET: RequestHandler = async ({ url }) => {
 				const billCommittees = committees.filter((c) => c.billId === assignment.billId);
 
 				billsByCluster[label].push({
-					...assignment,
+					billId: assignment.billId,
+					clusterLabel: assignment.clusterLabel,
+					distance: assignment.distance,
+					billType: assignment.billType,
+					submissionSession: assignment.submissionSession,
+					billNumber: assignment.billNumber,
+					title: assignment.title,
+					description: assignment.description,
+					deliberationCompleted: assignment.deliberationCompleted,
+					passed: assignment.passed,
+					pdfUrl: assignment.pdfUrl,
 					committees: billCommittees.map((c) => ({
 						name: c.committeeName,
 						chamber: c.chamber
@@ -133,7 +144,7 @@ export const GET: RequestHandler = async ({ url }) => {
 			const counts = await db
 				.select({
 					clusterId: billClusterAssignments.clusterId,
-					count: db.raw<number>('count(*)::int')
+					count: sql<number>`count(*)::int`
 				})
 				.from(billClusterAssignments)
 				.groupBy(billClusterAssignments.clusterId);

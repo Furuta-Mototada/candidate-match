@@ -12,8 +12,8 @@
  * - Uncertainty: Which dimensions are still uncertain for the user
  */
 
-import { db } from './db';
-import { bill, billDetail, group, memberGroup } from './db/schema';
+import { db } from './db/index.js';
+import { bill, billDetail, group, memberGroup } from './db/schema.js';
 import { eq, inArray } from 'drizzle-orm';
 
 // ============================================================================

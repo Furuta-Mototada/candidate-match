@@ -1,15 +1,15 @@
 import { json } from '@sveltejs/kit';
-import type { RequestHandler } from './$types';
+import type { RequestHandler } from './$types.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { db } from '$lib/server/db';
+import { db } from '$lib/server/db/index.js';
 import {
 	billClusters,
 	billClusterAssignments,
 	billClusterLabelNames,
 	clusterVectorResults,
 	member
-} from '$lib/server/db/schema';
+} from '$lib/server/db/schema.js';
 import { eq, inArray, desc } from 'drizzle-orm';
 
 const execAsync = promisify(exec);
@@ -44,7 +44,7 @@ interface CalculationResult {
  * Calculate cluster-specific member vectors using weighted PCA/SVD
  * If saveImmediately is true and saveName is provided, saves all calculated clusters to the database
  */
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async ({ request }): Promise<Response> => {
 	try {
 		const body = await request.json();
 		const { clusterId, clusterLabel, nComponents = 3, saveImmediately = false, saveName } = body;
@@ -193,7 +193,7 @@ export const POST: RequestHandler = async ({ request }) => {
  * PUT /api/cluster-vectors
  * Save calculated cluster vectors to the database for later use in matching
  */
-export const PUT: RequestHandler = async ({ request }) => {
+export const PUT: RequestHandler = async ({ request }): Promise<Response> => {
 	try {
 		const body = await request.json();
 		const { clusterId, clusterLabel, nComponents, name, clusterData } = body;
@@ -262,7 +262,7 @@ export const PUT: RequestHandler = async ({ request }) => {
  * - saved: optional - if "true", return saved vector results instead of available labels
  * - all: optional - if "true", return all saved results across all clusters
  */
-export const GET: RequestHandler = async ({ url }) => {
+export const GET: RequestHandler = async ({ url }): Promise<Response> => {
 	const clusterId = url.searchParams.get('clusterId');
 	const savedParam = url.searchParams.get('saved');
 	const allParam = url.searchParams.get('all');
