@@ -28,13 +28,27 @@ Instead of calculating a total score per member, this system calculates scores f
 ### 3. Score Calculation Logic
 
 #### Bill Submission (議案提出)
-- **Bill Sponsor**: +10 points
-- **Sponsoring Group Members**: +2 points (members in the group on submission date)
-- **Bill Supporters**: +5 points
+- **Bill Sponsor (議案提出者)**: +10 points
+  - Can be multiple members
+  - For Cabinet Bills (閣法), the Prime Minister (内閣総理大臣) at the time of submission is set as the sponsor
+- **Bill Supporters (賛成者)**: +5 points
+- **Sponsoring Group Members (所属会派メンバー)**: +2 points
+  - Members in the same parliamentary group as the sponsor on the submission date
+  - Excludes bill sponsors and supporters (to avoid double counting)
 
 #### Bill Voting (議案採決)
-- **House of Representatives (衆議院)**: ±2 points per group vote
-- **House of Councillors (参議院)**: ±5 points per individual vote
+
+**House of Representatives (衆議院) - Standing Vote (起立投票)**
+- Points are applied to all members belonging to the parliamentary group that voted
+- **For (賛成)**: +2 points for each member in groups that voted yes
+- **Against (反対)**: -2 points for each member in groups that voted no
+
+**House of Councillors (参議院) - Push-button Voting (押しボタン式投票)**
+- Based on individual member voting records
+- **For (賛成)**: +5 points
+- **Against (反対)**: -5 points
+
+**Note**: Other voting methods (記名投票, etc.) are not yet implemented.
 
 ## Usage
 
