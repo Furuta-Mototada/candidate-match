@@ -1,32 +1,22 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import type { PageData } from './$types.js';
-	import { PageHero, LoadingSpinner, LatentSpaceVisualization } from '$lib/components/index.js';
-
-	interface SavedVectorInfo {
-		id: number;
-		clusterId: number;
-		clusterLabel: number;
-		clusterLabelName: string | null;
-		nComponents: number;
-		name: string;
-		dimensions: number;
-		memberCount: number;
-		billCount: number;
-		createdAt: string;
-	}
-
-	interface GroupedSavedVector {
-		key: string; // "name|clusterId" for grouping
-		name: string;
-		clusterId: number;
-		nComponents: number;
-		dimensions: number;
-		clusterCount: number;
-		totalMembers: number;
-		totalBills: number;
-		vectors: SavedVectorInfo[]; // All cluster labels in this group
-		createdAt: string;
-	}
+	import {
+		SetupPhase,
+		QuestioningPhase,
+		ClusterReviewPhase,
+		GlobalResultsPhase
+	} from '$lib/components/index.js';
+	import type {
+		SavedVectorInfo,
+		GroupedSavedVector,
+		Bill,
+		MemberMatch,
+		ClusterResult,
+		GlobalMemberScore,
+		MatchingPhase,
+		MemberVectorForViz
+	} from '$lib/types/index.js';
 
 	interface NextQuestion {
 		billId: number;
@@ -37,40 +27,6 @@
 		dimensionTarget: number;
 	}
 
-	interface MemberMatch {
-		memberId: number;
-		name: string;
-		group: string | null;
-		similarity: number;
-		rank: number;
-		latentVector?: number[];
-	}
-
-	interface ClusterResult {
-		clusterLabel: number;
-		clusterLabelName: string | null;
-		matches: MemberMatch[];
-		answeredCount: number;
-		importance: number; // 1-5 stars
-		userVector: number[];
-		// Visualization data
-		memberVectorsForViz: MemberVectorForViz[];
-		explainedVariance: number[];
-		userVectorHistory: number[][];
-		xDimension: number;
-		yDimension: number;
-	}
-
-	interface GlobalMemberScore {
-		memberId: number;
-		name: string;
-		group: string | null;
-		globalScore: number;
-		clusterScores: Record<number, number>; // clusterLabel -> similarity
-	}
-
-	type MatchingPhase = 'setup' | 'questioning' | 'rating' | 'cluster-results' | 'global-results';
-
 	let { data }: { data: PageData } = $props();
 
 	// State
@@ -80,6 +36,7 @@
 	let phase: MatchingPhase = $state('setup');
 	let isLoading: boolean = $state(false);
 	let error: string | null = $state(null);
+	let mounted: boolean = $state(false);
 
 	// Multi-cluster state
 	let clusterLabelsToProcess: number[] = $state([]);
@@ -535,673 +492,436 @@
 	function getStars(count: number): string {
 		return '★'.repeat(count) + '☆'.repeat(5 - count);
 	}
+
+	// Trigger animations on mount
+	onMount(() => {
+		setTimeout(() => {
+			mounted = true;
+		}, 100);
+	});
 </script>
 
 <svelte:head>
 	<title>議員マッチング | Candidate Match</title>
 </svelte:head>
 
-<main class="container mx-auto max-w-4xl px-4 py-8">
-	<h1 class="mb-2 text-3xl font-bold text-gray-800">🗳️ あなたに合う議員を見つけよう</h1>
-	<p class="mb-8 text-gray-600">
-		各分野（クラスター）ごとに法案への賛否を答え、分野ごとの重要度を設定することで総合マッチ度を算出します。
-	</p>
-
-	{#if error}
-		<div class="mb-6 rounded border border-red-400 bg-red-100 px-4 py-3 text-red-700">
-			<span class="font-bold">エラー:</span>
-			{error}
-		</div>
-	{/if}
-
-	<!-- Progress bar for multi-cluster -->
-	{#if phase !== 'setup' && phase !== 'global-results'}
-		<div class="mb-6 rounded-lg bg-white p-4 shadow">
-			<div class="mb-2 flex items-center justify-between">
-				<span class="text-sm text-gray-600">
-					{currentClusterDisplayName || `クラスター${currentClusterIndex + 1}`}
-				</span>
-				<span class="text-sm text-gray-600">
-					分野 {currentClusterIndex + 1}/{clusterLabelsToProcess.length}
-				</span>
-			</div>
-			<div class="h-2 w-full rounded-full bg-gray-200">
-				<div
-					class="h-2 rounded-full bg-purple-600 transition-all duration-300"
-					style="width: {progress}%"
-				></div>
-			</div>
-
-			<!-- Cluster list -->
-			<div class="mt-3 flex flex-wrap gap-2">
-				{#each clusterLabelsToProcess as label, idx (label)}
-					{@const displayName = getClusterDisplayName(label)}
-					<span
-						class="rounded-full px-3 py-1 text-xs font-medium transition-colors"
-						class:bg-green-100={idx < currentClusterIndex}
-						class:text-green-800={idx < currentClusterIndex}
-						class:bg-purple-100={idx === currentClusterIndex}
-						class:text-purple-800={idx === currentClusterIndex}
-						class:bg-gray-100={idx > currentClusterIndex}
-						class:text-gray-600={idx > currentClusterIndex}
-					>
-						{#if idx < currentClusterIndex}
-							✓
-						{:else if idx === currentClusterIndex}
-							▶
-						{/if}
-						{displayName}
-					</span>
-				{/each}
-			</div>
-		</div>
-	{/if}
-
+<div class="page" class:mounted>
+	<!-- Hero Section (shown only in setup) -->
 	{#if phase === 'setup'}
-		<!-- Setup Phase -->
-		<div class="rounded-lg bg-white p-6 shadow-lg">
-			<h2 class="mb-4 text-xl font-semibold">マッチング設定</h2>
-
-			<div class="space-y-6">
-				<!-- Saved Vectors Section -->
-				{#if groupedSavedVectors.length > 0}
-					<div>
-						<label for="savedVector" class="mb-2 block text-sm font-medium text-gray-700">
-							💾 保存済みベクトル設定を選択
-						</label>
-						<p class="mb-3 text-sm text-gray-500">
-							メンバーベクトルページで計算・保存された設定を使用してマッチングを行います。
-						</p>
-						<select
-							id="savedVector"
-							class="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-green-500 focus:ring-2 focus:ring-green-500"
-							bind:value={selectedSavedVectorKey}
-							disabled={isLoading}
-						>
-							<option value={null}>-- 保存済み設定を選択 --</option>
-							{#each groupedSavedVectors as group (group.key)}
-								<option value={group.key}>
-									{group.name} ({group.clusterCount}クラスター, {group.dimensions}D, {group.totalMembers}議員,
-									{group.totalBills}法案)
-								</option>
-							{/each}
-						</select>
-
-						{#if selectedGroupedVector}
-							<div class="mt-4 rounded-lg bg-gray-50 p-4">
-								<h3 class="mb-2 text-sm font-medium text-gray-700">
-									選択中: {selectedGroupedVector.name}
-								</h3>
-								<div class="flex flex-wrap gap-2">
-									{#each selectedGroupedVector.vectors.sort((a, b) => a.clusterLabel - b.clusterLabel) as v (v.id)}
-										<span
-											class="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800"
-										>
-											{v.clusterLabelName || `クラスター${v.clusterLabel}`} ({v.billCount}法案)
-										</span>
-									{/each}
-								</div>
-							</div>
-
-							<button
-								onclick={startWithSavedVector}
-								disabled={isLoading}
-								class="mt-4 w-full rounded-lg bg-green-600 px-6 py-3 font-semibold text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-400"
-							>
-								{#if isLoading}
-									<span class="mr-2 inline-block animate-spin">⏳</span>
-									準備中...
-								{:else}
-									🚀 マッチング開始（{selectedGroupedVector.clusterCount}クラスター）
-								{/if}
-							</button>
-						{/if}
-					</div>
-				{:else}
-					<!-- No saved vectors available -->
-					<div class="rounded-lg bg-yellow-50 p-6 text-center">
-						<div class="mb-3 text-4xl">📊</div>
-						<h3 class="mb-2 text-lg font-medium text-yellow-800">保存済みベクトルがありません</h3>
-						<p class="mb-4 text-sm text-yellow-700">
-							マッチングを行うには、まずメンバーベクトルページでベクトル分析を実行し、結果を保存してください。
-						</p>
-						<a
-							href="/member-vectors"
-							class="inline-block rounded-lg bg-yellow-600 px-6 py-2 font-semibold text-white transition-colors hover:bg-yellow-700"
-						>
-							メンバーベクトルページへ →
-						</a>
-					</div>
-				{/if}
+		<section class="hero">
+			<div class="hero-badge animate-in" style="--delay: 0">🗳️ AI議員マッチング</div>
+			<h1 class="hero-title animate-in" style="--delay: 1">
+				<span class="gradient-text">マッチング診断</span>を<br />
+				開始しましょう
+			</h1>
+			<p class="hero-subtitle animate-in" style="--delay: 2">
+				保存済みのベクトル設定を選択し、各分野（クラスター）ごとに法案への賛否を答えることで、あなたの政治的立場と議員との総合マッチ度を算出します。
+			</p>
+		</section>
+	{:else}
+		<!-- Compact Header for other phases -->
+		<header class="compact-header">
+			<div class="container">
+				<h1 class="compact-title">🗳️ 議員マッチング</h1>
 			</div>
-		</div>
-
-		<!-- How it works -->
-		<div class="mt-8 rounded-lg bg-gray-50 p-6">
-			<h3 class="mb-3 text-lg font-semibold">📖 マッチングの仕組み</h3>
-			<ul class="space-y-2 text-gray-700">
-				<li><span class="font-medium">1.</span> 各クラスター（分野）ごとに法案への賛否を回答</li>
-				<li><span class="font-medium">2.</span> 各クラスターの重要度を★1〜★5で評価</li>
-				<li><span class="font-medium">3.</span> 分野ごとのマッチング結果と総合マッチ度を表示</li>
-				<li><span class="font-medium">4.</span> 総合スコア = Σ(重要度 × 類似度) で算出</li>
-			</ul>
-		</div>
-	{:else if phase === 'questioning'}
-		<!-- Questioning Phase -->
-		<div class="space-y-6">
-			<div class="rounded-lg bg-purple-50 p-4">
-				<h2 class="text-lg font-semibold text-purple-800">
-					📂 {currentClusterDisplayName}
-				</h2>
-				<p class="text-sm text-purple-600">
-					回答済み: {answeredCount}問 / 全{currentClusterBillCount}法案 | 信頼度: {confidence.toFixed(
-						0
-					)}%
-				</p>
-			</div>
-
-			{#if currentQuestion}
-				<!-- Question Card -->
-				<div class="rounded-lg bg-white p-6 shadow-lg">
-					<div class="mb-4 flex items-start justify-between">
-						<span
-							class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium"
-							class:bg-green-100={currentQuestion.passed}
-							class:text-green-800={currentQuestion.passed}
-							class:bg-yellow-100={!currentQuestion.passed}
-							class:text-yellow-800={!currentQuestion.passed}
-						>
-							{currentQuestion.passed ? '成立' : '審議中/廃案'}
-						</span>
-					</div>
-
-					<h2 class="mb-4 text-xl font-semibold text-gray-800">
-						{currentQuestion.title}
-					</h2>
-
-					{#if currentQuestion.description}
-						<p class="mb-6 text-sm leading-relaxed text-gray-600">
-							{currentQuestion.description}
-						</p>
-					{/if}
-
-					<!-- Vote Buttons -->
-					<div class="grid grid-cols-3 gap-4">
-						<button
-							onclick={() => submitAnswer(1)}
-							disabled={isLoading}
-							class="flex flex-col items-center rounded-lg bg-green-500 px-6 py-4 font-semibold text-white transition-colors hover:bg-green-600 disabled:opacity-50"
-						>
-							<span class="mb-1 text-2xl">👍</span>
-							<span>賛成</span>
-						</button>
-						<button
-							onclick={() => submitAnswer(0)}
-							disabled={isLoading}
-							class="flex flex-col items-center rounded-lg bg-gray-400 px-6 py-4 font-semibold text-white transition-colors hover:bg-gray-500 disabled:opacity-50"
-						>
-							<span class="mb-1 text-2xl">🤔</span>
-							<span>わからない</span>
-						</button>
-						<button
-							onclick={() => submitAnswer(-1)}
-							disabled={isLoading}
-							class="flex flex-col items-center rounded-lg bg-red-500 px-6 py-4 font-semibold text-white transition-colors hover:bg-red-600 disabled:opacity-50"
-						>
-							<span class="mb-1 text-2xl">👎</span>
-							<span>反対</span>
-						</button>
-					</div>
-
-					<!-- Skip / Actions -->
-					<div class="mt-4 flex items-center justify-between">
-						<button
-							onclick={skipQuestion}
-							disabled={isLoading}
-							class="text-sm text-gray-500 hover:text-gray-700"
-						>
-							スキップ →
-						</button>
-						<button
-							onclick={finishCurrentCluster}
-							disabled={isLoading || answeredCount < 2}
-							class="text-sm text-blue-600 hover:text-blue-800 disabled:text-gray-400"
-						>
-							{answeredCount >= 2
-								? 'このクラスターを終了'
-								: `あと${2 - answeredCount}問回答してください`}
-						</button>
-					</div>
-				</div>
-			{:else}
-				<div class="rounded-lg bg-white p-6 text-center shadow-lg">
-					<p class="text-gray-600">このクラスターの質問が完了しました</p>
-				</div>
-			{/if}
-
-			<!-- Top Matches Preview -->
-			{#if topMatches.length > 0 && answeredCount >= 2}
-				<div class="rounded-lg bg-white p-4 shadow">
-					<h3 class="mb-3 text-sm font-medium text-gray-700">暫定マッチング</h3>
-					<div class="space-y-2">
-						{#each topMatches.slice(0, 3) as match (match.memberId)}
-							<div class="flex items-center justify-between text-sm">
-								<span class="font-medium">{match.name}</span>
-								<span class={getSimilarityColor(match.similarity)}>
-									{formatSimilarity(match.similarity)}
-								</span>
-							</div>
-						{/each}
-					</div>
-				</div>
-			{/if}
-
-			<!-- 2D Position Visualization (below matches) -->
-			{#if memberVectorsForViz.length > 0 && showVisualization}
-				<div class="rounded-lg bg-white p-4 shadow-lg">
-					<div class="mb-2 flex items-center justify-between">
-						<h3 class="text-sm font-medium text-gray-700">📍 あなたの位置</h3>
-						<button
-							onclick={() => (showVisualization = false)}
-							class="text-xs text-gray-400 hover:text-gray-600"
-							title="閉じる"
-						>
-							✕
-						</button>
-					</div>
-
-					<LatentSpaceVisualization
-						members={memberVectorsForViz}
-						{explainedVariance}
-						bind:xDimension
-						bind:yDimension
-						{userVector}
-						{userVectorHistory}
-						highlightedMembers={highlightedMembersForViz}
-						width={500}
-						height={380}
-						showDimensionSelectors={userVector.length > 2}
-						title=""
-						showLegend={true}
-						compact={true}
-					/>
-
-					<!-- Position info -->
-					{#if answeredCount > 0 && userVector.length > 0 && userVector.some((v) => v !== 0)}
-						<div class="mt-3 rounded bg-emerald-50 p-2 text-xs text-emerald-700">
-							<span class="font-medium">現在位置:</span>
-							[{userVector
-								.slice(0, 3)
-								.map((v) => v.toFixed(2))
-								.join(', ')}{userVector.length > 3 ? '...' : ''}]
-							{#if userVectorHistory.length > 0}
-								<span class="ml-2 text-emerald-600">
-									({userVectorHistory.length}回移動)
-								</span>
-							{/if}
-						</div>
-					{:else if answeredCount === 0}
-						<div class="mt-3 rounded bg-gray-50 p-2 text-xs text-gray-500">
-							質問に回答すると、あなたの位置が可視化されます
-						</div>
-					{/if}
-				</div>
-			{:else if memberVectorsForViz.length > 0 && !showVisualization}
-				<button
-					onclick={() => (showVisualization = true)}
-					class="w-full rounded-lg border border-dashed border-gray-300 p-3 text-sm text-gray-500 transition-colors hover:border-purple-400 hover:text-purple-600"
-				>
-					📍 2D可視化を表示
-				</button>
-			{/if}
-
-			<button onclick={reset} class="text-sm text-gray-500 underline hover:text-gray-700">
-				最初からやり直す
-			</button>
-		</div>
-	{:else if phase === 'rating'}
-		<!-- Importance Rating Phase -->
-		<div class="space-y-6">
-			<div class="rounded-lg bg-white p-6 shadow-lg">
-				<h2 class="mb-4 text-xl font-semibold text-gray-800">
-					📊 {currentClusterDisplayName} の重要度を設定
-				</h2>
-				<p class="mb-6 text-gray-600">この分野の法案はあなたにとってどれくらい重要ですか？</p>
-
-				<!-- Star Rating -->
-				<div class="mb-6 flex justify-center gap-2">
-					{#each [1, 2, 3, 4, 5] as star (star)}
-						<button
-							onclick={() => (pendingImportance = star)}
-							class="text-4xl transition-transform hover:scale-110"
-							class:text-yellow-400={star <= pendingImportance}
-							class:text-gray-300={star > pendingImportance}
-						>
-							★
-						</button>
-					{/each}
-				</div>
-
-				<p class="mb-6 text-center text-lg font-medium text-gray-700">
-					{#if pendingImportance === 1}
-						あまり重要ではない
-					{:else if pendingImportance === 2}
-						少し重要
-					{:else if pendingImportance === 3}
-						普通に重要
-					{:else if pendingImportance === 4}
-						かなり重要
-					{:else}
-						最も重要
-					{/if}
-				</p>
-
-				<!-- Top matches preview -->
-				<div class="mb-6 rounded-lg bg-gray-50 p-4">
-					<h3 class="mb-2 text-sm font-medium text-gray-700">このクラスターでのトップ3</h3>
-					{#each currentClusterMatches.slice(0, 3) as match, idx (match.memberId)}
-						<div class="flex items-center justify-between py-1">
-							<span class="text-sm">
-								{idx + 1}. {match.name}
-								{#if match.group}
-									<span class="text-gray-500">({match.group})</span>
-								{/if}
-							</span>
-							<span class="text-sm {getSimilarityColor(match.similarity)}">
-								{formatSimilarity(match.similarity)}
-							</span>
-						</div>
-					{/each}
-				</div>
-
-				<button
-					onclick={saveImportanceAndContinue}
-					class="w-full rounded-lg bg-blue-600 px-6 py-3 font-semibold text-white transition-colors hover:bg-blue-700"
-				>
-					{#if currentClusterIndex < clusterLabelsToProcess.length - 1}
-						次のクラスターへ進む →
-					{:else}
-						総合結果を見る 🎉
-					{/if}
-				</button>
-			</div>
-		</div>
-	{:else if phase === 'cluster-results'}
-		<!-- Cluster Results Phase (between clusters) -->
-		<div class="space-y-6">
-			<div class="rounded-lg bg-white p-6 shadow-lg">
-				<h2 class="mb-4 text-xl font-semibold text-gray-800">
-					✅ {clusterResults[clusterResults.length - 1]?.clusterLabelName ||
-						`クラスター${clusterResults[clusterResults.length - 1]?.clusterLabel}`} 完了
-				</h2>
-
-				<div class="mb-6 rounded-lg bg-gray-50 p-4">
-					<div class="mb-2 flex items-center justify-between">
-						<span class="text-gray-600">回答数</span>
-						<span class="font-medium"
-							>{clusterResults[clusterResults.length - 1]?.answeredCount}問</span
-						>
-					</div>
-					<div class="flex items-center justify-between">
-						<span class="text-gray-600">重要度</span>
-						<span class="font-medium text-yellow-500">
-							{getStars(clusterResults[clusterResults.length - 1]?.importance || 0)}
-						</span>
-					</div>
-				</div>
-
-				<!-- Visualization for completed cluster -->
-				{#if clusterResults[clusterResults.length - 1]}
-					{@const lastResult = clusterResults[clusterResults.length - 1]}
-					<div class="mb-6 rounded-lg bg-gray-50 p-4">
-						<h3 class="mb-3 text-sm font-semibold text-gray-700">あなたの位置の軌跡</h3>
-						<LatentSpaceVisualization
-							members={lastResult.memberVectorsForViz}
-							explainedVariance={lastResult.explainedVariance}
-							xDimension={lastResult.xDimension}
-							yDimension={lastResult.yDimension}
-							userVector={lastResult.userVector}
-							userVectorHistory={lastResult.userVectorHistory}
-							highlightedMembers={lastResult.matches
-								.slice(0, 5)
-								.map((m) => ({ memberId: m.memberId, similarity: m.similarity }))}
-							width={500}
-							height={380}
-							showDimensionSelectors={lastResult.userVector.length > 2}
-							title=""
-							showLegend={true}
-							compact={true}
-						/>
-					</div>
-				{/if}
-
-				<p class="mb-4 text-gray-600">
-					次は「{getClusterDisplayName(clusterLabelsToProcess[currentClusterIndex])}」を分析します。
-				</p>
-
-				<button
-					onclick={continueToNextCluster}
-					disabled={isLoading}
-					class="w-full rounded-lg bg-blue-600 px-6 py-3 font-semibold text-white transition-colors hover:bg-blue-700 disabled:bg-gray-400"
-				>
-					{#if isLoading}
-						<span class="mr-2 inline-block animate-spin">⏳</span>
-						読み込み中...
-					{:else}
-						{getClusterDisplayName(clusterLabelsToProcess[currentClusterIndex])} を開始 →
-					{/if}
-				</button>
-			</div>
-
-			<!-- Progress summary -->
-			<div class="rounded-lg bg-white p-4 shadow">
-				<h3 class="mb-3 text-sm font-medium text-gray-700">完了したクラスター</h3>
-				<div class="space-y-2">
-					{#each clusterResults as result (result.clusterLabel)}
-						<div class="flex items-center justify-between text-sm">
-							<span>{result.clusterLabelName || `クラスター${result.clusterLabel}`}</span>
-							<span class="text-yellow-500">{getStars(result.importance)}</span>
-						</div>
-					{/each}
-				</div>
-			</div>
-		</div>
-	{:else if phase === 'global-results'}
-		<!-- Global Results Phase -->
-		<div class="space-y-6">
-			<div class="rounded-lg bg-white p-6 shadow-lg">
-				<h2 class="mb-2 text-2xl font-bold text-gray-800">🎉 総合マッチング結果</h2>
-				<p class="mb-4 text-gray-600">
-					{clusterResults.length}つのクラスターの結果を重要度で加重平均しました。
-				</p>
-
-				<!-- Cluster importance summary -->
-				<div class="mb-6 grid grid-cols-2 gap-2 md:grid-cols-4">
-					{#each clusterResults as result (result.clusterLabel)}
-						<div class="rounded bg-gray-50 p-2 text-center">
-							<div
-								class="truncate text-xs text-gray-500"
-								title={result.clusterLabelName || `クラスター${result.clusterLabel}`}
-							>
-								{result.clusterLabelName || `クラスター${result.clusterLabel}`}
-							</div>
-							<div class="text-sm text-yellow-500">{getStars(result.importance)}</div>
-						</div>
-					{/each}
-				</div>
-			</div>
-
-			<!-- All Cluster Trajectories Visualization -->
-			<div class="rounded-lg bg-white p-6 shadow-lg">
-				<h3 class="mb-4 text-xl font-semibold">📊 全クラスターの軌跡</h3>
-				<div class="space-y-6">
-					{#each clusterResults as result (result.clusterLabel)}
-						<div class="rounded-lg border border-gray-200 p-4">
-							<h4 class="mb-3 text-sm font-semibold text-gray-700">
-								{result.clusterLabelName || `クラスター${result.clusterLabel}`}
-								<span class="ml-2 text-yellow-500">{getStars(result.importance)}</span>
-								<span class="ml-2 text-xs text-gray-500">({result.answeredCount}問回答)</span>
-							</h4>
-							<LatentSpaceVisualization
-								members={result.memberVectorsForViz}
-								explainedVariance={result.explainedVariance}
-								xDimension={result.xDimension}
-								yDimension={result.yDimension}
-								userVector={result.userVector}
-								userVectorHistory={result.userVectorHistory}
-								highlightedMembers={result.matches
-									.slice(0, 5)
-									.map((m) => ({ memberId: m.memberId, similarity: m.similarity }))}
-								width={500}
-								height={380}
-								showDimensionSelectors={result.userVector.length > 2}
-								title=""
-								showLegend={true}
-								compact={true}
-							/>
-						</div>
-					{/each}
-				</div>
-			</div>
-
-			<!-- Global Top 10 -->
-			<div class="rounded-lg bg-white p-6 shadow-lg">
-				<h3 class="mb-4 text-xl font-semibold">🏆 総合マッチTOP10</h3>
-
-				<div class="space-y-3">
-					{#each globalScores.slice(0, 10) as member, idx (member.memberId)}
-						<div
-							class="rounded-lg p-4 transition-colors"
-							class:bg-yellow-50={idx === 0}
-							class:bg-gray-50={idx > 0}
-						>
-							<div class="flex items-center justify-between">
-								<div class="flex items-center gap-4">
-									<div
-										class="flex h-8 w-8 items-center justify-center rounded-full font-bold"
-										class:bg-yellow-400={idx === 0}
-										class:text-white={idx === 0}
-										class:bg-gray-300={idx > 0}
-										class:text-gray-700={idx > 0}
-									>
-										{idx + 1}
-									</div>
-									<div>
-										<div class="font-semibold text-gray-800">{member.name}</div>
-										{#if member.group}
-											<div class="text-sm text-gray-500">{member.group}</div>
-										{/if}
-									</div>
-								</div>
-								<div class="text-right">
-									<div class="text-lg font-bold {getSimilarityColor(member.globalScore)}">
-										{formatSimilarity(member.globalScore)}
-									</div>
-									<div class="text-xs text-gray-500">総合スコア</div>
-								</div>
-							</div>
-
-							<!-- Cluster breakdown -->
-							<div class="mt-2 flex flex-wrap gap-1">
-								{#each clusterResults as result (result.clusterLabel)}
-									{@const score = member.clusterScores[result.clusterLabel] || 0}
-									{@const shortName = result.clusterLabelName
-										? result.clusterLabelName.slice(0, 6)
-										: `C${result.clusterLabel}`}
-									<span
-										class="rounded px-1.5 py-0.5 text-xs"
-										class:bg-green-100={score >= 0.6}
-										class:text-green-800={score >= 0.6}
-										class:bg-yellow-100={score >= 0.3 && score < 0.6}
-										class:text-yellow-800={score >= 0.3 && score < 0.6}
-										class:bg-red-100={score < 0.3}
-										class:text-red-800={score < 0.3}
-										title={result.clusterLabelName || `クラスター${result.clusterLabel}`}
-									>
-										{shortName}: {(score * 100).toFixed(0)}%
-									</span>
-								{/each}
-							</div>
-						</div>
-					{/each}
-				</div>
-			</div>
-
-			<!-- Per-cluster results -->
-			<details class="rounded-lg bg-white p-4 shadow">
-				<summary class="cursor-pointer text-sm font-medium text-gray-700">
-					クラスター別の詳細結果
-				</summary>
-				<div class="mt-4 space-y-4">
-					{#each clusterResults as result (result.clusterLabel)}
-						<div class="border-t pt-4">
-							<h4 class="mb-2 font-medium text-gray-800">
-								{result.clusterLabelName || `クラスター${result.clusterLabel}`}
-								<span class="ml-2 text-yellow-500">{getStars(result.importance)}</span>
-							</h4>
-							<div class="space-y-1">
-								{#each result.matches.slice(0, 5) as match, idx (match.memberId)}
-									<div class="flex justify-between text-sm">
-										<span>{idx + 1}. {match.name}</span>
-										<span class={getSimilarityColor(match.similarity)}>
-											{formatSimilarity(match.similarity)}
-										</span>
-									</div>
-								{/each}
-							</div>
-						</div>
-					{/each}
-				</div>
-			</details>
-
-			<!-- All members table -->
-			{#if globalScores.length > 10}
-				<details class="rounded-lg bg-white p-4 shadow">
-					<summary class="cursor-pointer text-sm font-medium text-gray-700">
-						全議員の総合スコア ({globalScores.length}名)
-					</summary>
-					<div class="mt-4 max-h-96 overflow-y-auto">
-						<table class="w-full text-sm">
-							<thead class="sticky top-0 bg-gray-50">
-								<tr>
-									<th class="p-2 text-left">順位</th>
-									<th class="p-2 text-left">氏名</th>
-									<th class="p-2 text-left">所属</th>
-									<th class="p-2 text-right">総合スコア</th>
-								</tr>
-							</thead>
-							<tbody>
-								{#each globalScores as member, idx (member.memberId)}
-									<tr class="border-t hover:bg-gray-50">
-										<td class="p-2">{idx + 1}</td>
-										<td class="p-2 font-medium">{member.name}</td>
-										<td class="p-2 text-gray-600">{member.group || '-'}</td>
-										<td class="p-2 text-right {getSimilarityColor(member.globalScore)}">
-											{formatSimilarity(member.globalScore)}
-										</td>
-									</tr>
-								{/each}
-							</tbody>
-						</table>
-					</div>
-				</details>
-			{/if}
-
-			<!-- Actions -->
-			<div class="flex gap-4">
-				<button
-					onclick={reset}
-					class="flex-1 rounded-lg bg-blue-600 px-6 py-3 font-semibold text-white transition-colors hover:bg-blue-700"
-				>
-					🔄 もう一度やり直す
-				</button>
-			</div>
-		</div>
+		</header>
 	{/if}
-</main>
+
+	<main class="main-container">
+		{#if error}
+			<div class="error-alert animate-in">
+				<div class="error-icon">⚠️</div>
+				<div>
+					<span class="error-title">エラー</span>
+					<p class="error-message">{error}</p>
+				</div>
+			</div>
+		{/if}
+
+		<!-- Progress bar for multi-cluster -->
+		{#if phase !== 'setup' && phase !== 'global-results'}
+			<div class="progress-card animate-in">
+				<div class="progress-header">
+					<span class="progress-cluster-name">
+						{currentClusterDisplayName || `クラスター${currentClusterIndex + 1}`}
+					</span>
+					<span class="progress-count">
+						分野 {currentClusterIndex + 1}/{clusterLabelsToProcess.length}
+					</span>
+				</div>
+				<div class="progress-bar-container">
+					<div class="progress-bar" style="width: {progress}%"></div>
+				</div>
+
+				<!-- Cluster chips -->
+				<div class="cluster-chips">
+					{#each clusterLabelsToProcess as label, idx (label)}
+						{@const displayName = getClusterDisplayName(label)}
+						<span
+							class="cluster-chip"
+							class:completed={idx < currentClusterIndex}
+							class:active={idx === currentClusterIndex}
+							class:pending={idx > currentClusterIndex}
+						>
+							{#if idx < currentClusterIndex}
+								<span class="chip-icon">✓</span>
+							{:else if idx === currentClusterIndex}
+								<span class="chip-icon">▶</span>
+							{/if}
+							{displayName}
+						</span>
+					{/each}
+				</div>
+			</div>
+		{/if}
+
+		{#if phase === 'setup'}
+			<SetupPhase
+				{groupedSavedVectors}
+				bind:selectedSavedVectorKey
+				{selectedGroupedVector}
+				{isLoading}
+				onStart={startWithSavedVector}
+			/>
+		{:else if phase === 'questioning'}
+			<QuestioningPhase
+				{currentClusterDisplayName}
+				{answeredCount}
+				{currentClusterBillCount}
+				{confidence}
+				{currentQuestion}
+				{isLoading}
+				{topMatches}
+				{memberVectorsForViz}
+				bind:showVisualization
+				{explainedVariance}
+				bind:xDimension
+				bind:yDimension
+				{userVector}
+				{userVectorHistory}
+				{highlightedMembersForViz}
+				onSubmitAnswer={submitAnswer}
+				onSkipQuestion={skipQuestion}
+				onFinishCluster={finishCurrentCluster}
+				onToggleVisualization={(show) => (showVisualization = show)}
+			/>
+		{:else if phase === 'rating' || phase === 'cluster-results'}
+			<!-- Cluster Review Phase (Rating + Results between clusters) -->
+			<ClusterReviewPhase
+				showRating={phase === 'rating'}
+				{currentClusterDisplayName}
+				{currentClusterMatches}
+				bind:pendingImportance
+				{currentClusterIndex}
+				totalClusters={clusterLabelsToProcess.length}
+				showResults={phase === 'cluster-results'}
+				lastCompletedResult={clusterResults[clusterResults.length - 1] || null}
+				nextClusterName={getClusterDisplayName(clusterLabelsToProcess[currentClusterIndex])}
+				allCompletedResults={clusterResults}
+				{isLoading}
+				onSetImportance={(importance) => (pendingImportance = importance)}
+				onSaveAndContinue={saveImportanceAndContinue}
+				onContinueToNext={continueToNextCluster}
+			/>
+		{:else if phase === 'global-results'}
+			<!-- Global Results Phase -->
+			<GlobalResultsPhase {clusterResults} {globalScores} onReset={reset} />
+		{/if}
+	</main>
+</div>
 
 <style>
+	/* ===== KEYFRAME ANIMATIONS ===== */
+	@keyframes fadeInUp {
+		from {
+			opacity: 0;
+			transform: translateY(30px);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
+	}
+
+	@keyframes pulse {
+		0%,
+		100% {
+			transform: scale(1);
+		}
+		50% {
+			transform: scale(1.05);
+		}
+	}
+
+	@keyframes gradientShift {
+		0% {
+			background-position: 0% 50%;
+		}
+		50% {
+			background-position: 100% 50%;
+		}
+		100% {
+			background-position: 0% 50%;
+		}
+	}
+
+	@keyframes shimmer {
+		0% {
+			transform: translateX(-100%);
+		}
+		100% {
+			transform: translateX(100%);
+		}
+	}
+
+	/* ===== BASE STYLES ===== */
 	:global(body) {
-		background-color: #f7fafc;
+		background-color: #fafbfc;
+	}
+
+	.page {
+		min-height: 100vh;
+		background: #fafbfc;
+	}
+
+	.animate-in {
+		opacity: 0;
+		transform: translateY(30px);
+	}
+
+	.page.mounted .animate-in {
+		animation: fadeInUp 0.8s ease forwards;
+		animation-delay: calc(var(--delay, 0) * 0.15s);
+	}
+
+	/* ===== HERO SECTION ===== */
+	.hero {
+		text-align: center;
+		padding: 4rem 2rem 3rem;
+		max-width: 900px;
+		margin: 0 auto;
+	}
+
+	.hero-badge {
+		display: inline-block;
+		background: linear-gradient(135deg, #eef2ff, #e0e7ff);
+		color: #4f46e5;
+		padding: 0.5rem 1.25rem;
+		border-radius: 100px;
+		font-size: 0.9rem;
+		font-weight: 600;
+		margin-bottom: 1.5rem;
+	}
+
+	.hero-title {
+		font-size: clamp(2rem, 5vw, 3.5rem);
+		font-weight: 800;
+		line-height: 1.15;
+		color: #1a1a2e;
+		margin-bottom: 1.5rem;
+		letter-spacing: -0.02em;
+	}
+
+	.gradient-text {
+		background: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%);
+		background-size: 200% 200%;
+		-webkit-background-clip: text;
+		-webkit-text-fill-color: transparent;
+		background-clip: text;
+		animation: gradientShift 4s ease infinite;
+	}
+
+	.hero-subtitle {
+		font-size: 1.1rem;
+		color: #64748b;
+		line-height: 1.7;
+		max-width: 600px;
+		margin: 0 auto 2rem;
+	}
+
+	/* ===== COMPACT HEADER ===== */
+	.compact-header {
+		background: white;
+		border-bottom: 1px solid #e5e7eb;
+		padding: 1rem 0;
+		position: sticky;
+		top: 0;
+		z-index: 50;
+		backdrop-filter: blur(10px);
+		background: rgba(255, 255, 255, 0.95);
+	}
+
+	.compact-title {
+		font-size: 1.25rem;
+		font-weight: 700;
+		color: #1a1a2e;
+	}
+
+	.container {
+		max-width: 1024px;
+		margin: 0 auto;
+		padding: 0 1rem;
+	}
+
+	/* ===== MAIN LAYOUT ===== */
+	.main-container {
+		max-width: 64rem;
+		margin: 0 auto;
+		padding: 2rem 1rem;
+	}
+
+	/* ===== ERROR ALERT ===== */
+	.error-alert {
+		display: flex;
+		align-items: flex-start;
+		gap: 1rem;
+		background: linear-gradient(135deg, #fee2e2, #fecaca);
+		border: 1px solid #fca5a5;
+		border-radius: 12px;
+		padding: 1rem 1.5rem;
+		margin-bottom: 1.5rem;
+		box-shadow: 0 4px 12px rgba(239, 68, 68, 0.1);
+	}
+
+	.error-icon {
+		font-size: 1.5rem;
+		line-height: 1;
+	}
+
+	.error-title {
+		display: block;
+		font-weight: 700;
+		color: #991b1b;
+		margin-bottom: 0.25rem;
+	}
+
+	.error-message {
+		color: #7f1d1d;
+		font-size: 0.95rem;
+		line-height: 1.5;
+	}
+
+	/* ===== PROGRESS CARD ===== */
+	.progress-card {
+		background: white;
+		border-radius: 16px;
+		padding: 1.5rem;
+		margin-bottom: 2rem;
+		box-shadow:
+			0 4px 6px rgba(0, 0, 0, 0.05),
+			0 10px 20px rgba(0, 0, 0, 0.05);
+		border: 1px solid #e5e7eb;
+	}
+
+	.progress-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 1rem;
+	}
+
+	.progress-cluster-name {
+		font-size: 1rem;
+		font-weight: 700;
+		color: #6366f1;
+	}
+
+	.progress-count {
+		font-size: 0.9rem;
+		color: #64748b;
+		font-weight: 600;
+	}
+
+	.progress-bar-container {
+		height: 8px;
+		background: #e5e7eb;
+		border-radius: 100px;
+		overflow: hidden;
+		margin-bottom: 1rem;
+		position: relative;
+	}
+
+	.progress-bar {
+		height: 100%;
+		background: linear-gradient(90deg, #6366f1 0%, #a855f7 100%);
+		border-radius: 100px;
+		transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+		position: relative;
+		overflow: hidden;
+	}
+
+	.progress-bar::after {
+		content: '';
+		position: absolute;
+		top: 0;
+		left: 0;
+		bottom: 0;
+		right: 0;
+		background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+		animation: shimmer 2s infinite;
+	}
+
+	/* ===== CLUSTER CHIPS ===== */
+	.cluster-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+
+	.cluster-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25rem;
+		padding: 0.5rem 0.75rem;
+		border-radius: 100px;
+		font-size: 0.85rem;
+		font-weight: 600;
+		transition: all 0.3s ease;
+	}
+
+	.cluster-chip.completed {
+		background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+		color: #065f46;
+	}
+
+	.cluster-chip.active {
+		background: linear-gradient(135deg, #ddd6fe, #c4b5fd);
+		color: #5b21b6;
+		animation: pulse 2s ease-in-out infinite;
+	}
+
+	.cluster-chip.pending {
+		background: #f3f4f6;
+		color: #6b7280;
+	}
+
+	.chip-icon {
+		font-size: 0.75rem;
+	}
+
+	/* ===== RESPONSIVE ===== */
+	@media (max-width: 768px) {
+		.hero {
+			padding: 3rem 1.5rem 2rem;
+		}
+
+		.hero-title {
+			font-size: 2rem;
+		}
+
+		.cluster-chips {
+			justify-content: center;
+		}
+	}
+
+	/* Reduce animations for users who prefer reduced motion */
+	@media (prefers-reduced-motion: reduce) {
+		*,
+		*::before,
+		*::after {
+			animation-duration: 0.01ms !important;
+			animation-iteration-count: 1 !important;
+			transition-duration: 0.01ms !important;
+		}
 	}
 </style>
