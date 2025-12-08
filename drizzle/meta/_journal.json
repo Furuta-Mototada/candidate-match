@@ -64,6 +64,13 @@
       "when": 1765163721551,
       "tag": "0008_spooky_killmonger",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1765175126803,
+      "tag": "0009_tan_fat_cobra",
+      "breakpoints": true
     }
   ]
 }

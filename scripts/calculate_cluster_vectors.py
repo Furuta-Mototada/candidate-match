@@ -167,7 +167,12 @@ def build_voting_matrix(
         weight = get_bill_weight(info, title)
         weights.append(weight)
         bill_details.append(
-            {"billId": bill_id, "title": title, "passed": info.get("passed", False)}
+            {
+                "billId": bill_id,
+                "title": title,
+                "passed": info.get("passed", False),
+                "deliberationCompleted": info.get("deliberation_completed", False),
+            }
         )
 
     return matrix, member_ids, bill_ids, weights, bill_details

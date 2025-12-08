@@ -315,3 +315,27 @@ export const billClusterLabelNames = pgTable(
 
 export type BillClusterLabelName = typeof billClusterLabelNames.$inferSelect;
 export type NewBillClusterLabelName = typeof billClusterLabelNames.$inferInsert;
+
+// Cluster vector results table - stores pre-calculated member vectors for matching
+export const clusterVectorResults = pgTable('cluster_vector_results', {
+	id: serial('id').primaryKey(),
+	clusterId: integer('cluster_id')
+		.notNull()
+		.references(() => billClusters.id),
+	clusterLabel: integer('cluster_label').notNull(), // The cluster number this result is for
+	nComponents: integer('n_components').notNull(), // Number of PCA dimensions
+	name: text('name').notNull(), // User-provided name for this calculation
+	memberVectors: text('member_vectors').notNull(), // JSON: Record<string, number[]>
+	memberNames: text('member_names').notNull(), // JSON: Record<string, string>
+	billLoadings: text('bill_loadings').notNull(), // JSON: number[][]
+	billIds: text('bill_ids').notNull(), // JSON: number[]
+	explainedVariance: text('explained_variance').notNull(), // JSON: number[]
+	dimensions: integer('dimensions').notNull(),
+	memberCount: integer('member_count').notNull(),
+	billCount: integer('bill_count').notNull(),
+	representativeBills: text('representative_bills'), // JSON: RepresentativeBill[][]
+	createdAt: date('created_at').notNull().defaultNow()
+});
+
+export type ClusterVectorResult = typeof clusterVectorResults.$inferSelect;
+export type NewClusterVectorResult = typeof clusterVectorResults.$inferInsert;

@@ -20,6 +20,7 @@
 		billId: number;
 		title: string;
 		passed: boolean;
+		deliberationCompleted: boolean;
 		loading: number;
 		absLoading: number;
 	}
@@ -42,6 +43,31 @@
 		latentVector: number[];
 	}
 
+	interface SavedVectorInfo {
+		id: number;
+		clusterId: number;
+		clusterLabel: number;
+		nComponents: number;
+		name: string;
+		dimensions: number;
+		memberCount: number;
+		billCount: number;
+		createdAt: string;
+	}
+
+	interface GroupedSavedVector {
+		key: string;
+		name: string;
+		clusterId: number;
+		clusterName: string;
+		nComponents: number;
+		dimensions: number;
+		clusterCount: number;
+		totalBills: number;
+		vectors: SavedVectorInfo[];
+		createdAt: string;
+	}
+
 	let { data }: { data: PageData } = $props();
 
 	let availableClusters: ClusterInfo[] = $state(data.clusters || []);
@@ -51,12 +77,49 @@
 	let isLoadingLabels: boolean = $state(false);
 	let isCalculating: boolean = $state(false);
 	let nComponents: number = $state(3);
+	let vectorizationName: string = $state(''); // Name for saving (entered before calculation)
 
 	let calculationResult: Record<string, ClusterVectorResult> | null = $state<Record<
 		string,
 		ClusterVectorResult
 	> | null>(null);
 	let currentClusterData: ClusterVectorResult | null = $state<ClusterVectorResult | null>(null);
+
+	// Saved vectors state
+	let savedVectors: SavedVectorInfo[] = $state([]);
+	let isLoadingSaved: boolean = $state(false);
+	let selectedSavedVectorKey: string | null = $state(null);
+	let loadedVectorizationName: string | null = $state(null);
+
+	// Group saved vectors by name + clusterId
+	let groupedSavedVectors = $derived.by(() => {
+		const groups = new Map<string, GroupedSavedVector>();
+		for (const sv of savedVectors) {
+			const key = `${sv.name}|${sv.clusterId}`;
+			if (!groups.has(key)) {
+				const cluster = availableClusters.find((c) => c.id === sv.clusterId);
+				groups.set(key, {
+					key,
+					name: sv.name,
+					clusterId: sv.clusterId,
+					clusterName: cluster?.name || 'Unknown',
+					nComponents: sv.nComponents,
+					dimensions: sv.dimensions,
+					clusterCount: 0,
+					totalBills: 0,
+					vectors: [],
+					createdAt: sv.createdAt
+				});
+			}
+			const group = groups.get(key)!;
+			group.vectors.push(sv);
+			group.clusterCount++;
+			group.totalBills += sv.billCount;
+		}
+		return Array.from(groups.values()).sort(
+			(a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+		);
+	});
 
 	let searchTerm: string = $state('');
 	let sortBy: 'name' | 'dim0' | 'dim1' | 'dim2' = $state('name');
@@ -437,6 +500,106 @@
 		}
 	});
 
+	// Load saved vectors on mount
+	$effect(() => {
+		loadSavedVectors();
+	});
+
+	// Update default name when nComponents changes
+	$effect(() => {
+		if (selectedClusterId && clusterLabels.length > 0 && !loadedVectorizationName) {
+			const cluster = availableClusters.find((c) => c.id === selectedClusterId);
+			const today = new Date().toLocaleDateString('ja-JP', {
+				year: 'numeric',
+				month: '2-digit',
+				day: '2-digit'
+			});
+			vectorizationName = `${cluster?.name || 'クラスター'} ${nComponents}D - ${today}`;
+		}
+	});
+
+	async function loadSavedVectors() {
+		isLoadingSaved = true;
+		try {
+			const response = await fetch('/api/cluster-vectors?saved=true&all=true');
+			const result = await response.json();
+			if (result.savedResults) {
+				savedVectors = result.savedResults;
+			}
+		} catch (error) {
+			console.error('Failed to load saved vectors:', error);
+		} finally {
+			isLoadingSaved = false;
+		}
+	}
+
+	async function loadSavedVectorization(group: GroupedSavedVector) {
+		isLoadingSaved = true;
+		selectedSavedVectorKey = group.key;
+		loadedVectorizationName = group.name;
+
+		try {
+			// Load full data for each cluster label in the group
+			const loadedClusters: Record<string, ClusterVectorResult> = {};
+
+			for (const sv of group.vectors) {
+				const response = await fetch(`/api/cluster-vectors/${sv.id}`);
+				const result = await response.json();
+
+				if (result.success && result.data) {
+					loadedClusters[String(sv.clusterLabel)] = {
+						memberVectors: JSON.parse(result.data.memberVectors),
+						memberNames: JSON.parse(result.data.memberNames),
+						billLoadings: JSON.parse(result.data.billLoadings),
+						representativeBills: result.data.representativeBills
+							? JSON.parse(result.data.representativeBills)
+							: [],
+						explainedVariance: JSON.parse(result.data.explainedVariance),
+						dimensions: result.data.dimensions,
+						memberCount: result.data.memberCount,
+						billCount: result.data.billCount,
+						billIds: JSON.parse(result.data.billIds)
+					};
+				}
+			}
+
+			if (Object.keys(loadedClusters).length > 0) {
+				calculationResult = loadedClusters;
+				selectedClusterId = group.clusterId;
+				nComponents = group.nComponents;
+
+				// Load cluster labels for this cluster
+				const labelsResponse = await fetch('/api/cluster-vectors?clusterId=' + group.clusterId);
+				const labelsResult = await labelsResponse.json();
+				if (labelsResult.clusterLabels) {
+					clusterLabels = labelsResult.clusterLabels;
+				}
+
+				// Set first cluster as current
+				const labels = Object.keys(loadedClusters);
+				if (labels.length > 0) {
+					currentClusterData = loadedClusters[labels[0]];
+					selectedClusterLabel = parseInt(labels[0]);
+				}
+			}
+		} catch (error) {
+			console.error('Failed to load saved vectorization:', error);
+			alert('保存済みベクトルの読み込みに失敗しました');
+		} finally {
+			isLoadingSaved = false;
+		}
+	}
+
+	function clearLoadedVectorization() {
+		calculationResult = null;
+		currentClusterData = null;
+		selectedClusterLabel = null;
+		selectedSavedVectorKey = null;
+		loadedVectorizationName = null;
+		selectedClusterId = null;
+		clusterLabels = [];
+	}
+
 	async function loadClusterLabels(clusterId: number) {
 		selectedClusterId = clusterId;
 		isLoadingLabels = true;
@@ -455,6 +618,15 @@
 			}
 
 			clusterLabels = result.clusterLabels;
+
+			// Auto-generate a default saving name
+			const cluster = availableClusters.find((c) => c.id === clusterId);
+			const today = new Date().toLocaleDateString('ja-JP', {
+				year: 'numeric',
+				month: '2-digit',
+				day: '2-digit'
+			});
+			vectorizationName = `${cluster?.name || 'クラスター'} ${nComponents}D - ${today}`;
 		} catch (error) {
 			console.error('Failed to load cluster labels:', error);
 			alert('Failed to load cluster labels');
@@ -463,28 +635,30 @@
 		}
 	}
 
-	async function calculateVectors() {
+	async function calculateAndSaveVectors() {
 		if (!selectedClusterId) {
-			alert('Please select a cluster');
+			alert('クラスタリング設定を選択してください');
+			return;
+		}
+
+		if (!vectorizationName.trim()) {
+			alert('保存名を入力してください');
 			return;
 		}
 
 		isCalculating = true;
 
 		try {
-			const body: Record<string, unknown> = {
-				clusterId: selectedClusterId,
-				nComponents
-			};
-
-			if (selectedClusterLabel !== null) {
-				body.clusterLabel = selectedClusterLabel;
-			}
-
+			// Calculate vectors for ALL cluster labels (no specific label)
 			const response = await fetch('/api/cluster-vectors', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify(body)
+				body: JSON.stringify({
+					clusterId: selectedClusterId,
+					nComponents,
+					saveImmediately: true,
+					saveName: vectorizationName.trim()
+				})
 			});
 
 			const result = await response.json();
@@ -496,18 +670,21 @@
 
 			calculationResult = result.clusters;
 
-			if (selectedClusterLabel !== null && calculationResult) {
-				currentClusterData = calculationResult[String(selectedClusterLabel)] || null;
-			} else if (calculationResult) {
+			// Set the first cluster as currently viewed
+			if (calculationResult) {
 				const labels = Object.keys(calculationResult);
 				if (labels.length > 0) {
 					currentClusterData = calculationResult[labels[0]];
 					selectedClusterLabel = parseInt(labels[0]);
 				}
 			}
+
+			alert(
+				`ベクトル計算が完了し、保存されました！\n保存された数: ${result.savedCount || Object.keys(result.clusters || {}).length} クラスター`
+			);
 		} catch (error) {
 			console.error('Failed to calculate vectors:', error);
-			alert('Failed to calculate vectors');
+			alert('ベクトル計算に失敗しました');
 		} finally {
 			isCalculating = false;
 		}
@@ -742,78 +919,30 @@
 		</details>
 	</section>
 
+	<!-- New Vectorization Section -->
 	<section class="content-section">
 		<div class="section-header">
-			<h2>1. クラスタリング結果を選択</h2>
+			<h2>新規ベクトル分析</h2>
 		</div>
 
-		{#if availableClusters.length === 0}
-			<p class="empty-state">
-				クラスタリング結果がありません。<a href="/bill-clustering"
-					>先に法案クラスタリングを実行してください。</a
+		<div class="form-grid">
+			<div class="form-group">
+				<label for="clusterSelect">クラスタリング設定</label>
+				<select
+					id="clusterSelect"
+					class="select"
+					bind:value={selectedClusterId}
+					onchange={() => selectedClusterId && loadClusterLabels(selectedClusterId)}
 				>
-			</p>
-		{:else}
-			<div class="cluster-list">
-				{#each availableClusters as cluster}
-					<button
-						class="cluster-card"
-						class:active={selectedClusterId === cluster.id}
-						onclick={() => loadClusterLabels(cluster.id)}
-					>
-						<div class="cluster-name">{cluster.name}</div>
-						<div class="cluster-meta">
-							<span class="badge">{cluster.algorithm.toUpperCase()}</span>
-							<span class="text-sm">{new Date(cluster.createdAt).toLocaleDateString('ja-JP')}</span>
-						</div>
-						<div class="cluster-params">{cluster.parameters}</div>
-					</button>
-				{/each}
-			</div>
-		{/if}
-	</section>
-
-	{#if selectedClusterId && clusterLabels.length > 0}
-		<section class="content-section">
-			<div class="section-header">
-				<h2>2. クラスターラベルを選択（任意）</h2>
-			</div>
-			<p class="help-text">特定のクラスターを選択するか、全てを一括で計算できます。</p>
-
-			<div class="label-list">
-				<button
-					class="label-card"
-					class:active={selectedClusterLabel === null}
-					onclick={() => (selectedClusterLabel = null)}
-				>
-					<span class="label-name">全て</span>
-					<span class="label-count"
-						>{clusterLabels.reduce((sum, l) => sum + l.billCount, 0)} 件の法案</span
-					>
-				</button>
-				{#each clusterLabels as { label, billCount, name, description }}
-					<button
-						class="label-card"
-						class:active={selectedClusterLabel === label}
-						onclick={() => (selectedClusterLabel = label)}
-						title={description || ''}
-					>
-						<span class="label-name">{name || 'クラスター ' + label}</span>
-						<span class="label-count">{billCount} 件の法案</span>
-					</button>
-				{/each}
-			</div>
-		</section>
-	{/if}
-
-	{#if selectedClusterId}
-		<section class="content-section">
-			<div class="section-header">
-				<h2>3. ベクトルを計算</h2>
+					<option value={null}>-- 選択してください --</option>
+					{#each availableClusters as cluster}
+						<option value={cluster.id}>{cluster.name}</option>
+					{/each}
+				</select>
 			</div>
 
-			<div class="param-row">
-				<label for="nComponents">潜在次元数:</label>
+			<div class="form-group">
+				<label for="nComponents">潜在次元数</label>
 				<select id="nComponents" bind:value={nComponents} class="select">
 					<option value={1}>1次元</option>
 					<option value={2}>2次元</option>
@@ -823,24 +952,94 @@
 				</select>
 			</div>
 
-			<button
-				class="btn-primary"
-				onclick={calculateVectors}
-				disabled={isCalculating || isLoadingLabels}
-			>
-				{#if isCalculating}
-					計算中...
-				{:else}
-					潜在ベクトルを計算
-				{/if}
-			</button>
-		</section>
-	{/if}
+			<div class="form-group full-width">
+				<label for="vectorizationName">保存名</label>
+				<input
+					type="text"
+					id="vectorizationName"
+					bind:value={vectorizationName}
+					placeholder="例: 2024年分析 (3次元)"
+					class="input-text"
+				/>
+			</div>
+		</div>
+
+		{#if isLoadingLabels}
+			<p class="loading-state">クラスター情報を読み込み中...</p>
+		{:else if selectedClusterId && clusterLabels.length > 0}
+			<div class="cluster-preview-box">
+				<div class="preview-header">
+					<span class="preview-title">計算対象クラスター（{clusterLabels.length}件）</span>
+					<a href="/bill-clustering?id={selectedClusterId}" class="preview-link" target="_blank">
+						クラスタリング結果を見る →
+					</a>
+				</div>
+				<div class="preview-tags">
+					{#each clusterLabels as { label, billCount, name }}
+						<span class="preview-tag">
+							{name || 'クラスター ' + label}
+							<span class="tag-count">({billCount}法案)</span>
+						</span>
+					{/each}
+				</div>
+			</div>
+		{/if}
+
+		<button
+			class="btn-primary"
+			onclick={calculateAndSaveVectors}
+			disabled={isCalculating || !selectedClusterId || !vectorizationName.trim() || isLoadingLabels}
+		>
+			{#if isCalculating}
+				計算中...
+			{:else}
+				ベクトル分析を実行
+			{/if}
+		</button>
+	</section>
+
+	<!-- Saved Vectorizations Section -->
+	<section class="content-section">
+		<div class="section-header">
+			<h2>保存済みベクトル分析</h2>
+		</div>
+
+		{#if isLoadingSaved}
+			<p class="loading-state">読み込み中...</p>
+		{:else if groupedSavedVectors.length === 0}
+			<p class="empty-state">
+				保存済みのベクトル分析がありません。上記のフォームから新しい分析を実行してください。
+			</p>
+		{:else}
+			<div class="saved-list">
+				{#each groupedSavedVectors as group (group.key)}
+					<button
+						class="saved-card"
+						class:active={selectedSavedVectorKey === group.key}
+						onclick={() => loadSavedVectorization(group)}
+					>
+						<div class="saved-name">{group.name}</div>
+						<div class="saved-meta">
+							<span class="badge">{group.clusterName}</span>
+							<span class="text-sm">{group.dimensions}次元</span>
+							<span class="text-sm">{group.clusterCount}クラスター</span>
+						</div>
+						<div class="saved-stats">
+							{group.totalBills}法案 • {new Date(group.createdAt).toLocaleDateString('ja-JP')}
+						</div>
+					</button>
+				{/each}
+			</div>
+		{/if}
+	</section>
 
 	{#if calculationResult && currentClusterData}
 		<section class="content-section results-section">
 			<div class="section-header">
-				<h2>4. 分析結果</h2>
+				<h2>分析結果: {loadedVectorizationName || vectorizationName}</h2>
+				{#if loadedVectorizationName}
+					<button class="btn-secondary" onclick={clearLoadedVectorization}>✕ クリア</button>
+				{/if}
 			</div>
 
 			{#if Object.keys(calculationResult).length > 1}
@@ -879,7 +1078,14 @@
 			</div>
 
 			<div class="representative-bills">
-				<h3>次元別の代表法案</h3>
+				<div class="representative-bills-header">
+					<h3>次元別の代表法案</h3>
+					<div class="bills-legend">
+						<span class="legend-item"><span class="legend-dot passed"></span> 可決</span>
+						<span class="legend-item"><span class="legend-dot completed"></span> 審議終了</span>
+						<span class="legend-item"><span class="legend-dot pending"></span> 審議中</span>
+					</div>
+				</div>
 				{#each currentClusterData.representativeBills as bills, dimIndex}
 					<div class="dimension-section">
 						<h4>
@@ -890,7 +1096,12 @@
 						</h4>
 						<div class="bills-list">
 							{#each bills as bill}
-								<div class="bill-item" class:passed={bill.passed}>
+								<div
+									class="bill-item"
+									class:passed={bill.passed}
+									class:completed={!bill.passed && bill.deliberationCompleted}
+									class:pending={!bill.passed && !bill.deliberationCompleted}
+								>
 									<span class="bill-title">{bill.title || '法案 ' + bill.billId}</span>
 									<span class="bill-loading" title="因子負荷量">
 										{formatLatent(bill.loading)}
@@ -1215,6 +1426,11 @@
 
 	.section-header {
 		margin-bottom: 1.25rem;
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 1rem;
 	}
 
 	.section-header h2 {
@@ -1244,50 +1460,153 @@
 		margin-bottom: 1rem;
 	}
 
-	/* ===== CLUSTER LIST ===== */
-	.cluster-list {
+	/* ===== FORM GRID ===== */
+	.form-grid {
+		display: grid;
+		grid-template-columns: repeat(2, 1fr);
+		gap: 1rem;
+		margin-bottom: 1.5rem;
+	}
+
+	.form-group {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.form-group.full-width {
+		grid-column: 1 / -1;
+	}
+
+	.form-group label {
+		font-weight: 500;
+		font-size: 0.9rem;
+		color: #374151;
+	}
+
+	.cluster-preview-box {
+		background: #f8fafc;
+		border: 1px solid #e2e8f0;
+		border-radius: 12px;
+		padding: 1rem;
+		margin-bottom: 1rem;
+	}
+
+	.preview-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 0.75rem;
+	}
+
+	.preview-title {
+		font-weight: 600;
+		color: #374151;
+		font-size: 0.9rem;
+	}
+
+	.preview-link {
+		font-size: 0.8rem;
+		color: #3b82f6;
+		text-decoration: none;
+		transition: color 0.2s;
+	}
+
+	.preview-link:hover {
+		color: #1d4ed8;
+		text-decoration: underline;
+	}
+
+	.preview-tags {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+
+	.preview-tag {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25rem;
+		padding: 0.35rem 0.75rem;
+		background: white;
+		border: 1px solid #e2e8f0;
+		border-radius: 20px;
+		font-size: 0.8rem;
+		color: #374151;
+	}
+
+	.tag-count {
+		font-size: 0.7rem;
+		color: #64748b;
+	}
+
+	/* ===== SAVED VECTORS SECTION ===== */
+	.saved-list {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.75rem;
 	}
 
-	.cluster-card {
+	.saved-card {
 		padding: 1rem 1.25rem;
-		border: 1px solid #e5e7eb;
+		border: 1px solid #d1fae5;
 		border-radius: 10px;
 		background: white;
 		cursor: pointer;
 		transition: all 0.2s;
 		text-align: left;
+		min-width: 200px;
 	}
 
-	.cluster-card:hover {
-		border-color: #6366f1;
-		background: #fafbff;
+	.saved-card:hover {
+		border-color: #10b981;
+		background: #f0fdf4;
 	}
 
-	.cluster-card.active {
-		border-color: #6366f1;
-		background: #eef2ff;
+	.saved-card.active {
+		border-color: #10b981;
+		background: #ecfdf5;
 	}
 
-	.cluster-name {
+	.saved-name {
 		font-weight: 600;
-		color: #1a1a2e;
+		color: #065f46;
 		margin-bottom: 0.5rem;
 	}
 
-	.cluster-meta {
+	.saved-meta {
 		display: flex;
 		gap: 0.5rem;
 		align-items: center;
 		margin-bottom: 0.25rem;
+		flex-wrap: wrap;
 	}
 
-	.cluster-params {
+	.saved-stats {
 		font-size: 0.8rem;
-		color: #64748b;
-		font-family: monospace;
+		color: #6b7280;
+	}
+
+	.loading-state {
+		color: #6b7280;
+		padding: 2rem;
+		text-align: center;
+	}
+
+	.btn-secondary {
+		background: #f3f4f6;
+		color: #374151;
+		border: 1px solid #d1d5db;
+		padding: 0.5rem 1rem;
+		border-radius: 6px;
+		font-size: 0.85rem;
+		cursor: pointer;
+		transition: all 0.2s;
+	}
+
+	.btn-secondary:hover {
+		background: #e5e7eb;
+		border-color: #9ca3af;
 	}
 
 	.badge {
@@ -1305,58 +1624,7 @@
 		color: #64748b;
 	}
 
-	/* ===== LABEL LIST ===== */
-	.label-list {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.5rem;
-	}
-
-	.label-card {
-		padding: 0.6rem 1rem;
-		border: 1px solid #e5e7eb;
-		border-radius: 8px;
-		background: white;
-		cursor: pointer;
-		transition: all 0.2s;
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-	}
-
-	.label-card:hover {
-		border-color: #6366f1;
-	}
-
-	.label-card.active {
-		border-color: #6366f1;
-		background: #eef2ff;
-	}
-
-	.label-name {
-		font-weight: 500;
-		color: #1a1a2e;
-		font-size: 0.9rem;
-	}
-
-	.label-count {
-		font-size: 0.75rem;
-		color: #64748b;
-	}
-
 	/* ===== FORM STYLES ===== */
-	.param-row {
-		display: flex;
-		align-items: center;
-		gap: 1rem;
-		margin-bottom: 1rem;
-	}
-
-	.param-row label {
-		font-weight: 500;
-		font-size: 0.9rem;
-		color: #374151;
-	}
 
 	.select {
 		padding: 0.5rem 1rem;
@@ -1370,6 +1638,21 @@
 	.select:focus {
 		outline: none;
 		border-color: #6366f1;
+	}
+
+	.input-text {
+		flex: 1;
+		padding: 0.5rem 1rem;
+		border: 1px solid #e5e7eb;
+		border-radius: 8px;
+		font-size: 0.95rem;
+		min-width: 200px;
+	}
+
+	.input-text:focus {
+		outline: none;
+		border-color: #6366f1;
+		box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
 	}
 
 	.btn-primary {
@@ -1745,11 +2028,56 @@
 		margin-bottom: 2rem;
 	}
 
+	.representative-bills-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+		margin-bottom: 1rem;
+	}
+
 	.representative-bills h3 {
 		font-size: 1.1rem;
 		font-weight: 600;
 		color: #1a1a2e;
-		margin-bottom: 1rem;
+		margin: 0;
+	}
+
+	.bills-legend {
+		display: flex;
+		gap: 1rem;
+		font-size: 0.8rem;
+		color: #64748b;
+	}
+
+	.bills-legend .legend-item {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+	}
+
+	.bills-legend .legend-dot {
+		width: 10px;
+		height: 10px;
+		border-radius: 2px;
+		background: #fef3c7;
+		border: 1px solid #f59e0b;
+	}
+
+	.bills-legend .legend-dot.passed {
+		background: #dcfce7;
+		border-color: #22c55e;
+	}
+
+	.bills-legend .legend-dot.completed {
+		background: #dbeafe;
+		border-color: #3b82f6;
+	}
+
+	.bills-legend .legend-dot.pending {
+		background: #fef3c7;
+		border-color: #f59e0b;
 	}
 
 	.dimension-section {
@@ -1791,11 +2119,19 @@
 		padding: 0.5rem 0.75rem;
 		background: #f9fafb;
 		border-radius: 6px;
-		border-left: 3px solid #e5e7eb;
+		border-left: 3px solid #f59e0b;
 	}
 
 	.bill-item.passed {
 		border-left-color: #22c55e;
+	}
+
+	.bill-item.completed {
+		border-left-color: #3b82f6;
+	}
+
+	.bill-item.pending {
+		border-left-color: #f59e0b;
 	}
 
 	.bill-title {

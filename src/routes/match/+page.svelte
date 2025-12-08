@@ -1,13 +1,29 @@
 <script lang="ts">
 	import type { PageData } from './$types';
 
-	interface ClusterInfo {
+	interface SavedVectorInfo {
 		id: number;
+		clusterId: number;
+		clusterLabel: number;
+		nComponents: number;
 		name: string;
-		algorithm: string;
-		parameters: Record<string, unknown> | null;
+		dimensions: number;
+		memberCount: number;
+		billCount: number;
 		createdAt: string;
-		labels: Array<{ label: number; billCount: number }>;
+	}
+
+	interface GroupedSavedVector {
+		key: string; // "name|clusterId" for grouping
+		name: string;
+		clusterId: number;
+		nComponents: number;
+		dimensions: number;
+		clusterCount: number;
+		totalMembers: number;
+		totalBills: number;
+		vectors: SavedVectorInfo[]; // All cluster labels in this group
+		createdAt: string;
 	}
 
 	interface NextQuestion {
@@ -49,9 +65,8 @@
 	let { data }: { data: PageData } = $props();
 
 	// State
-	let clusters: ClusterInfo[] = $state(data.clusters || []);
-	let selectedClusterId: number | null = $state(null);
-	let nComponents: number = $state(3);
+	let savedVectors: SavedVectorInfo[] = $state(data.savedVectors || []);
+	let selectedSavedVectorKey: string | null = $state(null);
 
 	let phase: MatchingPhase = $state('setup');
 	let isLoading: boolean = $state(false);
@@ -75,9 +90,41 @@
 	// Rating state
 	let pendingImportance: number = $state(3);
 
+	// Group saved vectors by name + clusterId
+	let groupedSavedVectors = $derived.by(() => {
+		const groups = new Map<string, GroupedSavedVector>();
+		for (const sv of savedVectors) {
+			const key = `${sv.name}|${sv.clusterId}`;
+			if (!groups.has(key)) {
+				groups.set(key, {
+					key,
+					name: sv.name,
+					clusterId: sv.clusterId,
+					nComponents: sv.nComponents,
+					dimensions: sv.dimensions,
+					clusterCount: 0,
+					totalMembers: sv.memberCount,
+					totalBills: 0,
+					vectors: [],
+					createdAt: sv.createdAt
+				});
+			}
+			const group = groups.get(key)!;
+			group.vectors.push(sv);
+			group.clusterCount++;
+			group.totalBills += sv.billCount;
+		}
+		return Array.from(groups.values()).sort(
+			(a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+		);
+	});
+
+	// Get selected grouped vector
+	let selectedGroupedVector = $derived(
+		groupedSavedVectors.find((g) => g.key === selectedSavedVectorKey) || null
+	);
+
 	// Derived
-	let selectedCluster = $derived(clusters.find((c) => c.id === selectedClusterId));
-	let availableLabels = $derived(selectedCluster?.labels || []);
 	let currentClusterLabel = $derived(clusterLabelsToProcess[currentClusterIndex] ?? null);
 	let progress = $derived.by(() => {
 		if (clusterLabelsToProcess.length === 0) return 0;
@@ -90,44 +137,59 @@
 	});
 
 	/**
-	 * Start multi-cluster matching
+	 * Start matching with a saved vector configuration (all clusters)
 	 */
-	async function startMultiClusterMatching() {
-		if (!selectedClusterId) {
-			error = 'クラスタリング設定を選択してください';
+	async function startWithSavedVector() {
+		if (!selectedGroupedVector) {
+			error = '保存済みベクトルを選択してください';
 			return;
 		}
 
-		const labels = availableLabels.map((l) => l.label);
+		isLoading = true;
+		error = null;
+		clusterResults = [];
+		globalScores = [];
+
+		// Get all cluster labels from the grouped vector, sorted
+		const labels = selectedGroupedVector.vectors.map((v) => v.clusterLabel).sort((a, b) => a - b);
+
 		if (labels.length === 0) {
 			error = 'クラスターが見つかりません';
+			isLoading = false;
 			return;
 		}
 
 		clusterLabelsToProcess = labels;
 		currentClusterIndex = 0;
-		clusterResults = [];
-		globalScores = [];
 
-		await startClusterSession(labels[0]);
+		// Start with the first cluster using its saved vector
+		await startClusterSessionWithSavedVector(labels[0]);
 	}
 
 	/**
-	 * Start session for a specific cluster
+	 * Start session for a specific cluster using saved vector
 	 */
-	async function startClusterSession(clusterLabel: number) {
+	async function startClusterSessionWithSavedVector(clusterLabel: number) {
+		if (!selectedGroupedVector) return;
+
 		isLoading = true;
 		error = null;
 
 		try {
+			const savedVector = selectedGroupedVector.vectors.find(
+				(v) => v.clusterLabel === clusterLabel
+			);
+
+			if (!savedVector) {
+				throw new Error(`クラスター ${clusterLabel} の保存済みベクトルが見つかりません`);
+			}
+
 			const response = await fetch('/api/match', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					action: 'start',
-					clusterId: selectedClusterId,
-					clusterLabel: clusterLabel,
-					nComponents: nComponents
+					savedVectorId: savedVector.id
 				})
 			});
 
@@ -300,7 +362,7 @@
 	 */
 	async function continueToNextCluster() {
 		const nextLabel = clusterLabelsToProcess[currentClusterIndex];
-		await startClusterSession(nextLabel);
+		await startClusterSessionWithSavedVector(nextLabel);
 	}
 
 	/**
@@ -441,71 +503,76 @@
 			<h2 class="mb-4 text-xl font-semibold">マッチング設定</h2>
 
 			<div class="space-y-6">
-				<!-- Cluster Selection -->
-				<div>
-					<label for="cluster" class="mb-2 block text-sm font-medium text-gray-700">
-						クラスタリング設定を選択
-					</label>
-					<select
-						id="cluster"
-						class="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
-						bind:value={selectedClusterId}
-						disabled={isLoading}
-					>
-						<option value={null}>-- 設定を選択 --</option>
-						{#each clusters as cluster (cluster.id)}
-							<option value={cluster.id}>{cluster.name} ({cluster.labels.length}クラスター)</option>
-						{/each}
-					</select>
-				</div>
-
-				<!-- Show available clusters preview -->
-				{#if availableLabels.length > 0}
-					<div class="rounded-lg bg-gray-50 p-4">
-						<h3 class="mb-2 text-sm font-medium text-gray-700">
-							分析するクラスター（全 {availableLabels.length} 分野）
-						</h3>
-						<div class="flex flex-wrap gap-2">
-							{#each availableLabels as label (label.label)}
-								<span
-									class="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-800"
-								>
-									クラスター{label.label} ({label.billCount}法案)
-								</span>
+				<!-- Saved Vectors Section -->
+				{#if groupedSavedVectors.length > 0}
+					<div>
+						<label for="savedVector" class="mb-2 block text-sm font-medium text-gray-700">
+							💾 保存済みベクトル設定を選択
+						</label>
+						<p class="mb-3 text-sm text-gray-500">
+							メンバーベクトルページで計算・保存された設定を使用してマッチングを行います。
+						</p>
+						<select
+							id="savedVector"
+							class="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-green-500 focus:ring-2 focus:ring-green-500"
+							bind:value={selectedSavedVectorKey}
+							disabled={isLoading}
+						>
+							<option value={null}>-- 保存済み設定を選択 --</option>
+							{#each groupedSavedVectors as group (group.key)}
+								<option value={group.key}>
+									{group.name} ({group.clusterCount}クラスター, {group.dimensions}D, {group.totalMembers}議員,
+									{group.totalBills}法案)
+								</option>
 							{/each}
-						</div>
+						</select>
+
+						{#if selectedGroupedVector}
+							<div class="mt-4 rounded-lg bg-gray-50 p-4">
+								<h3 class="mb-2 text-sm font-medium text-gray-700">
+									選択中: {selectedGroupedVector.name}
+								</h3>
+								<div class="flex flex-wrap gap-2">
+									{#each selectedGroupedVector.vectors.sort((a, b) => a.clusterLabel - b.clusterLabel) as v (v.id)}
+										<span
+											class="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800"
+										>
+											クラスター{v.clusterLabel} ({v.billCount}法案)
+										</span>
+									{/each}
+								</div>
+							</div>
+
+							<button
+								onclick={startWithSavedVector}
+								disabled={isLoading}
+								class="mt-4 w-full rounded-lg bg-green-600 px-6 py-3 font-semibold text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-400"
+							>
+								{#if isLoading}
+									<span class="mr-2 inline-block animate-spin">⏳</span>
+									準備中...
+								{:else}
+									🚀 マッチング開始（{selectedGroupedVector.clusterCount}クラスター）
+								{/if}
+							</button>
+						{/if}
+					</div>
+				{:else}
+					<!-- No saved vectors available -->
+					<div class="rounded-lg bg-yellow-50 p-6 text-center">
+						<div class="mb-3 text-4xl">📊</div>
+						<h3 class="mb-2 text-lg font-medium text-yellow-800">保存済みベクトルがありません</h3>
+						<p class="mb-4 text-sm text-yellow-700">
+							マッチングを行うには、まずメンバーベクトルページでベクトル分析を実行し、結果を保存してください。
+						</p>
+						<a
+							href="/member-vectors"
+							class="inline-block rounded-lg bg-yellow-600 px-6 py-2 font-semibold text-white transition-colors hover:bg-yellow-700"
+						>
+							メンバーベクトルページへ →
+						</a>
 					</div>
 				{/if}
-
-				<!-- Dimensions -->
-				<div>
-					<label for="dimensions" class="mb-2 block text-sm font-medium text-gray-700">
-						分析次元数: {nComponents}
-					</label>
-					<input
-						type="range"
-						id="dimensions"
-						min="2"
-						max="5"
-						bind:value={nComponents}
-						class="w-full"
-						disabled={isLoading}
-					/>
-				</div>
-
-				<!-- Start Button -->
-				<button
-					onclick={startMultiClusterMatching}
-					disabled={isLoading || !selectedClusterId}
-					class="w-full rounded-lg bg-blue-600 px-6 py-3 font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-400"
-				>
-					{#if isLoading}
-						<span class="mr-2 inline-block animate-spin">⏳</span>
-						準備中...
-					{:else}
-						🚀 全クラスターのマッチング開始
-					{/if}
-				</button>
 			</div>
 		</div>
 

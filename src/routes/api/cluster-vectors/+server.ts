@@ -7,9 +7,10 @@ import {
 	billClusters,
 	billClusterAssignments,
 	billClusterLabelNames,
+	clusterVectorResults,
 	member
 } from '$lib/server/db/schema';
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, desc } from 'drizzle-orm';
 
 const execAsync = promisify(exec);
 
@@ -41,14 +42,19 @@ interface CalculationResult {
 /**
  * POST /api/cluster-vectors
  * Calculate cluster-specific member vectors using weighted PCA/SVD
+ * If saveImmediately is true and saveName is provided, saves all calculated clusters to the database
  */
 export const POST: RequestHandler = async ({ request }) => {
 	try {
 		const body = await request.json();
-		const { clusterId, clusterLabel, nComponents = 3 } = body;
+		const { clusterId, clusterLabel, nComponents = 3, saveImmediately = false, saveName } = body;
 
 		if (!clusterId) {
 			return json({ error: 'clusterId is required' }, { status: 400 });
+		}
+
+		if (saveImmediately && !saveName) {
+			return json({ error: 'saveName is required when saveImmediately is true' }, { status: 400 });
 		}
 
 		// Verify cluster exists
@@ -133,12 +139,43 @@ export const POST: RequestHandler = async ({ request }) => {
 			};
 		}
 
+		// Auto-save if requested
+		let savedCount = 0;
+		if (saveImmediately && saveName) {
+			for (const [label, clusterData] of Object.entries(enrichedClusters)) {
+				try {
+					await db.insert(clusterVectorResults).values({
+						clusterId,
+						clusterLabel: parseInt(label),
+						nComponents,
+						name: saveName,
+						memberVectors: JSON.stringify(clusterData.memberVectors),
+						memberNames: JSON.stringify(clusterData.memberNames),
+						billLoadings: JSON.stringify(clusterData.billLoadings),
+						billIds: JSON.stringify(clusterData.billIds),
+						explainedVariance: JSON.stringify(clusterData.explainedVariance),
+						dimensions: clusterData.dimensions,
+						memberCount: clusterData.memberCount,
+						billCount: clusterData.billCount,
+						representativeBills: clusterData.representativeBills
+							? JSON.stringify(clusterData.representativeBills)
+							: null
+					});
+					savedCount++;
+				} catch (saveError) {
+					console.error(`Error saving cluster label ${label}:`, saveError);
+				}
+			}
+		}
+
 		return json({
 			success: true,
 			clusterId: result.clusterId,
 			clusterName: clusterInfo.name,
 			nComponents: result.nComponents,
-			clusters: enrichedClusters
+			clusters: enrichedClusters,
+			savedCount: saveImmediately ? savedCount : undefined,
+			savedName: saveImmediately ? saveName : undefined
 		});
 	} catch (error) {
 		console.error('Error calculating cluster vectors:', error);
@@ -153,11 +190,113 @@ export const POST: RequestHandler = async ({ request }) => {
 };
 
 /**
+ * PUT /api/cluster-vectors
+ * Save calculated cluster vectors to the database for later use in matching
+ */
+export const PUT: RequestHandler = async ({ request }) => {
+	try {
+		const body = await request.json();
+		const { clusterId, clusterLabel, nComponents, name, clusterData } = body;
+
+		if (!clusterId || clusterLabel === undefined || !nComponents || !name || !clusterData) {
+			return json(
+				{ error: 'clusterId, clusterLabel, nComponents, name, and clusterData are required' },
+				{ status: 400 }
+			);
+		}
+
+		// Verify cluster exists
+		const [clusterInfo] = await db
+			.select()
+			.from(billClusters)
+			.where(eq(billClusters.id, clusterId));
+
+		if (!clusterInfo) {
+			return json({ error: 'Cluster not found' }, { status: 404 });
+		}
+
+		// Insert into database
+		const [inserted] = await db
+			.insert(clusterVectorResults)
+			.values({
+				clusterId,
+				clusterLabel,
+				nComponents,
+				name,
+				memberVectors: JSON.stringify(clusterData.memberVectors),
+				memberNames: JSON.stringify(clusterData.memberNames),
+				billLoadings: JSON.stringify(clusterData.billLoadings),
+				billIds: JSON.stringify(clusterData.billIds),
+				explainedVariance: JSON.stringify(clusterData.explainedVariance),
+				dimensions: clusterData.dimensions,
+				memberCount: clusterData.memberCount,
+				billCount: clusterData.billCount,
+				representativeBills: clusterData.representativeBills
+					? JSON.stringify(clusterData.representativeBills)
+					: null
+			})
+			.returning({ id: clusterVectorResults.id });
+
+		return json({
+			success: true,
+			id: inserted.id,
+			message: 'Cluster vectors saved successfully'
+		});
+	} catch (error) {
+		console.error('Error saving cluster vectors:', error);
+		return json(
+			{
+				success: false,
+				error: error instanceof Error ? error.message : 'Unknown error'
+			},
+			{ status: 500 }
+		);
+	}
+};
+
+/**
  * GET /api/cluster-vectors
- * Get available cluster labels for a specific clustering
+ * Get available cluster labels for a specific clustering, or list saved vector results
+ * Query params:
+ * - clusterId: the clustering configuration to query (optional if all=true)
+ * - saved: optional - if "true", return saved vector results instead of available labels
+ * - all: optional - if "true", return all saved results across all clusters
  */
 export const GET: RequestHandler = async ({ url }) => {
 	const clusterId = url.searchParams.get('clusterId');
+	const savedParam = url.searchParams.get('saved');
+	const allParam = url.searchParams.get('all');
+
+	// If requesting all saved results
+	if (savedParam === 'true' && allParam === 'true') {
+		try {
+			const savedResults = await db
+				.select({
+					id: clusterVectorResults.id,
+					clusterId: clusterVectorResults.clusterId,
+					clusterLabel: clusterVectorResults.clusterLabel,
+					nComponents: clusterVectorResults.nComponents,
+					name: clusterVectorResults.name,
+					dimensions: clusterVectorResults.dimensions,
+					memberCount: clusterVectorResults.memberCount,
+					billCount: clusterVectorResults.billCount,
+					createdAt: clusterVectorResults.createdAt
+				})
+				.from(clusterVectorResults)
+				.orderBy(desc(clusterVectorResults.createdAt));
+
+			return json({
+				success: true,
+				savedResults
+			});
+		} catch (error) {
+			console.error('Error fetching all saved vectors:', error);
+			return json(
+				{ error: error instanceof Error ? error.message : 'Unknown error' },
+				{ status: 500 }
+			);
+		}
+	}
 
 	if (!clusterId) {
 		return json({ error: 'clusterId is required' }, { status: 400 });
@@ -174,6 +313,30 @@ export const GET: RequestHandler = async ({ url }) => {
 
 		if (!clusterInfo) {
 			return json({ error: 'Cluster not found' }, { status: 404 });
+		}
+
+		// If requesting saved results
+		if (savedParam === 'true') {
+			const savedResults = await db
+				.select({
+					id: clusterVectorResults.id,
+					clusterLabel: clusterVectorResults.clusterLabel,
+					nComponents: clusterVectorResults.nComponents,
+					name: clusterVectorResults.name,
+					dimensions: clusterVectorResults.dimensions,
+					memberCount: clusterVectorResults.memberCount,
+					billCount: clusterVectorResults.billCount,
+					createdAt: clusterVectorResults.createdAt
+				})
+				.from(clusterVectorResults)
+				.where(eq(clusterVectorResults.clusterId, clusterIdNum))
+				.orderBy(desc(clusterVectorResults.createdAt));
+
+			return json({
+				clusterId: clusterIdNum,
+				clusterName: clusterInfo.name,
+				savedResults
+			});
 		}
 
 		// Get unique cluster labels and bill counts
@@ -215,12 +378,29 @@ export const GET: RequestHandler = async ({ url }) => {
 			}))
 			.sort((a, b) => a.label - b.label);
 
+		// Also get saved results count for each label
+		const savedResults = await db
+			.select({
+				id: clusterVectorResults.id,
+				clusterLabel: clusterVectorResults.clusterLabel,
+				nComponents: clusterVectorResults.nComponents,
+				name: clusterVectorResults.name,
+				dimensions: clusterVectorResults.dimensions,
+				memberCount: clusterVectorResults.memberCount,
+				billCount: clusterVectorResults.billCount,
+				createdAt: clusterVectorResults.createdAt
+			})
+			.from(clusterVectorResults)
+			.where(eq(clusterVectorResults.clusterId, clusterIdNum))
+			.orderBy(desc(clusterVectorResults.createdAt));
+
 		return json({
 			clusterId: clusterIdNum,
 			clusterName: clusterInfo.name,
 			algorithm: clusterInfo.algorithm,
 			parameters: clusterInfo.parameters,
-			clusterLabels
+			clusterLabels,
+			savedResults
 		});
 	} catch (error) {
 		console.error('Error fetching cluster labels:', error);

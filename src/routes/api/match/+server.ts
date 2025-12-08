@@ -3,8 +3,13 @@ import type { RequestHandler } from './$types';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { db } from '$lib/server/db';
-import { billClusters, billClusterAssignments, member } from '$lib/server/db/schema';
-import { eq, inArray } from 'drizzle-orm';
+import {
+	billClusters,
+	billClusterAssignments,
+	clusterVectorResults,
+	member
+} from '$lib/server/db/schema';
+import { eq, inArray, desc } from 'drizzle-orm';
 import {
 	initializeMatchingState,
 	updateMatchingState,
@@ -59,7 +64,7 @@ setInterval(cleanupSessions, 10 * 60 * 1000);
  * POST /api/match
  *
  * Actions:
- * - action: "start" - Start a new matching session
+ * - action: "start" - Start a new matching session (use savedVectorId to load pre-calculated vectors)
  * - action: "answer" - Submit an answer and get next question
  * - action: "results" - Get current matching results
  * - action: "skip" - Skip current question and get next
@@ -67,11 +72,20 @@ setInterval(cleanupSessions, 10 * 60 * 1000);
 export const POST: RequestHandler = async ({ request }) => {
 	try {
 		const body = await request.json();
-		const { action, sessionId, clusterId, clusterLabel, nComponents, billId, score } = body;
+		const {
+			action,
+			sessionId,
+			clusterId,
+			clusterLabel,
+			nComponents,
+			billId,
+			score,
+			savedVectorId
+		} = body;
 
 		switch (action) {
 			case 'start':
-				return await handleStart(clusterId, clusterLabel, nComponents);
+				return await handleStart(clusterId, clusterLabel, nComponents, savedVectorId);
 
 			case 'answer':
 				return await handleAnswer(sessionId, billId, score);
@@ -96,78 +110,130 @@ export const POST: RequestHandler = async ({ request }) => {
 
 /**
  * Start a new matching session
+ * If savedVectorId is provided, load pre-calculated vectors from the database
+ * Otherwise, calculate vectors on the fly (deprecated, for backwards compatibility)
  */
 async function handleStart(
 	clusterId: number,
 	clusterLabel: number | null,
-	nComponents: number = 3
+	nComponents: number = 3,
+	savedVectorId: number | null = null
 ) {
-	if (!clusterId) {
-		return json({ error: 'clusterId is required' }, { status: 400 });
-	}
+	let clusterData: ClusterVectorData;
+	let clusterInfo: { id: number; name: string };
+	let selectedLabel: number;
 
-	// Verify cluster exists
-	const [clusterInfo] = await db.select().from(billClusters).where(eq(billClusters.id, clusterId));
+	// If savedVectorId is provided, load from database
+	if (savedVectorId) {
+		const [savedResult] = await db
+			.select()
+			.from(clusterVectorResults)
+			.where(eq(clusterVectorResults.id, savedVectorId));
 
-	if (!clusterInfo) {
-		return json({ error: 'Cluster not found' }, { status: 404 });
-	}
+		if (!savedResult) {
+			return json({ error: 'Saved vector result not found' }, { status: 404 });
+		}
 
-	// Calculate cluster vectors using Python script
-	let cmd = `source venv/bin/activate && python scripts/calculate_cluster_vectors.py --cluster-id ${clusterId} --n-components ${nComponents}`;
-	if (clusterLabel !== null && clusterLabel !== undefined) {
-		cmd += ` --cluster-label ${clusterLabel}`;
-	}
+		// Get cluster info
+		const [cluster] = await db
+			.select()
+			.from(billClusters)
+			.where(eq(billClusters.id, savedResult.clusterId));
 
-	console.log(`Executing: ${cmd}`);
+		if (!cluster) {
+			return json({ error: 'Cluster not found' }, { status: 404 });
+		}
 
-	const { stdout, stderr } = await execAsync(cmd, {
-		cwd: process.cwd(),
-		env: process.env,
-		shell: '/bin/zsh',
-		maxBuffer: 50 * 1024 * 1024
-	});
+		clusterInfo = cluster;
+		selectedLabel = savedResult.clusterLabel;
 
-	if (stderr) {
-		console.log('Cluster vector calculation stderr:', stderr);
-	}
+		// Parse the saved data
+		clusterData = {
+			memberVectors: JSON.parse(savedResult.memberVectors),
+			memberNames: JSON.parse(savedResult.memberNames),
+			billLoadings: JSON.parse(savedResult.billLoadings),
+			billIds: JSON.parse(savedResult.billIds),
+			explainedVariance: JSON.parse(savedResult.explainedVariance),
+			dimensions: savedResult.dimensions,
+			memberCount: savedResult.memberCount,
+			billCount: savedResult.billCount
+		};
 
-	// Parse JSON output
-	const lines = stdout.trim().split('\n');
-	let jsonOutput = '';
-	let inJson = false;
-	for (const line of lines) {
-		if (line.startsWith('{')) inJson = true;
-		if (inJson) jsonOutput += line;
-	}
+		console.log(`Loaded saved vectors: ${savedResult.name} (ID: ${savedVectorId})`);
+	} else {
+		// Fallback: calculate on the fly (for backwards compatibility)
+		if (!clusterId) {
+			return json({ error: 'clusterId or savedVectorId is required' }, { status: 400 });
+		}
 
-	if (!jsonOutput) {
-		throw new Error('No JSON output from calculation script');
-	}
+		// Verify cluster exists
+		const [cluster] = await db.select().from(billClusters).where(eq(billClusters.id, clusterId));
 
-	const result = JSON.parse(jsonOutput);
+		if (!cluster) {
+			return json({ error: 'Cluster not found' }, { status: 404 });
+		}
 
-	// Get the first cluster if no specific label was provided
-	const clusterLabels = Object.keys(result.clusters);
-	if (clusterLabels.length === 0) {
-		return json({ error: 'No clusters found' }, { status: 404 });
-	}
+		clusterInfo = cluster;
 
-	const selectedLabel = clusterLabel !== null ? String(clusterLabel) : clusterLabels[0];
-	const clusterData: ClusterVectorData = result.clusters[selectedLabel];
+		// Calculate cluster vectors using Python script
+		let cmd = `source venv/bin/activate && python scripts/calculate_cluster_vectors.py --cluster-id ${clusterId} --n-components ${nComponents}`;
+		if (clusterLabel !== null && clusterLabel !== undefined) {
+			cmd += ` --cluster-label ${clusterLabel}`;
+		}
 
-	if (!clusterData) {
-		return json({ error: 'Cluster label not found' }, { status: 404 });
-	}
+		console.log(`Executing: ${cmd}`);
 
-	// Enrich with member names
-	const memberIds = Object.keys(clusterData.memberVectors).map((id) => parseInt(id));
-	const members =
-		memberIds.length > 0 ? await db.select().from(member).where(inArray(member.id, memberIds)) : [];
+		const { stdout, stderr } = await execAsync(cmd, {
+			cwd: process.cwd(),
+			env: process.env,
+			shell: '/bin/zsh',
+			maxBuffer: 50 * 1024 * 1024
+		});
 
-	clusterData.memberNames = {};
-	for (const m of members) {
-		clusterData.memberNames[String(m.id)] = m.name;
+		if (stderr) {
+			console.log('Cluster vector calculation stderr:', stderr);
+		}
+
+		// Parse JSON output
+		const lines = stdout.trim().split('\n');
+		let jsonOutput = '';
+		let inJson = false;
+		for (const line of lines) {
+			if (line.startsWith('{')) inJson = true;
+			if (inJson) jsonOutput += line;
+		}
+
+		if (!jsonOutput) {
+			throw new Error('No JSON output from calculation script');
+		}
+
+		const result = JSON.parse(jsonOutput);
+
+		// Get the first cluster if no specific label was provided
+		const clusterLabels = Object.keys(result.clusters);
+		if (clusterLabels.length === 0) {
+			return json({ error: 'No clusters found' }, { status: 404 });
+		}
+
+		const selectedLabelStr = clusterLabel !== null ? String(clusterLabel) : clusterLabels[0];
+		clusterData = result.clusters[selectedLabelStr];
+		selectedLabel = parseInt(selectedLabelStr);
+
+		if (!clusterData) {
+			return json({ error: 'Cluster label not found' }, { status: 404 });
+		}
+
+		// Enrich with member names
+		const memberIds = Object.keys(clusterData.memberVectors).map((id) => parseInt(id));
+		const members =
+			memberIds.length > 0
+				? await db.select().from(member).where(inArray(member.id, memberIds))
+				: [];
+
+		clusterData.memberNames = {};
+		for (const m of members) {
+			clusterData.memberNames[String(m.id)] = m.name;
+		}
 	}
 
 	// Load bill information from database
@@ -175,7 +241,11 @@ async function handleStart(
 	const billInfoMap = buildBillInfoMap(clusterData, dbBillInfo);
 
 	// Initialize matching state
-	const state = initializeMatchingState(clusterId, parseInt(selectedLabel), clusterData.dimensions);
+	const state = initializeMatchingState(
+		savedVectorId ? clusterInfo.id : clusterId,
+		selectedLabel,
+		clusterData.dimensions
+	);
 
 	// Generate session ID
 	const sessionIdValue = crypto.randomUUID();
@@ -194,8 +264,8 @@ async function handleStart(
 	return json({
 		success: true,
 		sessionId: sessionIdValue,
-		clusterId,
-		clusterLabel: parseInt(selectedLabel),
+		clusterId: savedVectorId ? clusterInfo.id : clusterId,
+		clusterLabel: selectedLabel,
 		clusterName: clusterInfo.name,
 		dimensions: clusterData.dimensions,
 		totalBills: clusterData.billCount,
@@ -383,7 +453,7 @@ async function handleResults(sessionId: string) {
 /**
  * GET /api/match
  *
- * Get available clusters for matching
+ * Get available clusters and saved vector results for matching
  */
 export const GET: RequestHandler = async () => {
 	try {
@@ -432,9 +502,26 @@ export const GET: RequestHandler = async () => {
 			)
 		);
 
+		// Get saved vector results
+		const savedVectors = await db
+			.select({
+				id: clusterVectorResults.id,
+				clusterId: clusterVectorResults.clusterId,
+				clusterLabel: clusterVectorResults.clusterLabel,
+				nComponents: clusterVectorResults.nComponents,
+				name: clusterVectorResults.name,
+				dimensions: clusterVectorResults.dimensions,
+				memberCount: clusterVectorResults.memberCount,
+				billCount: clusterVectorResults.billCount,
+				createdAt: clusterVectorResults.createdAt
+			})
+			.from(clusterVectorResults)
+			.orderBy(desc(clusterVectorResults.createdAt));
+
 		return json({
 			success: true,
-			clusters: clustersWithLabels
+			clusters: clustersWithLabels,
+			savedVectors
 		});
 	} catch (error) {
 		console.error('Error fetching clusters:', error);

@@ -4,16 +4,16 @@ export const load: PageServerLoad = async ({ fetch }) => {
 	try {
 		const response = await fetch('/api/match');
 		if (!response.ok) {
-			console.error('Failed to fetch clusters for matching');
-			return { clusters: [] };
+			console.error('Failed to fetch data for matching');
+			return { savedVectors: [] };
 		}
 
 		const data = await response.json();
 		return {
-			clusters: data.clusters || []
+			savedVectors: data.savedVectors || []
 		};
 	} catch (error) {
 		console.error('Error loading match page data:', error);
-		return { clusters: [] };
+		return { savedVectors: [] };
 	}
 };

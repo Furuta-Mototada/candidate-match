@@ -166,7 +166,7 @@
 				</p>
 				<ul class="cta-features">
 					<li class="feature-item" style="--item-delay: 0">✓ 適応型質問選択で効率的に分析</li>
-					<li class="feature-item" style="--item-delay: 1">✓ 8つの政策分野を個別に評価</li>
+					<li class="feature-item" style="--item-delay: 1">✓ 政策分野を個別に評価</li>
 					<li class="feature-item" style="--item-delay: 2">✓ 重要度ウェイトで総合スコア算出</li>
 					<li class="feature-item" style="--item-delay: 3">✓ 全議員のランキングを表示</li>
 				</ul>
