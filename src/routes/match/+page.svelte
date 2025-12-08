@@ -1,11 +1,12 @@
 <script lang="ts">
 	import type { PageData } from './$types.js';
-	import { PageHero, LoadingSpinner } from '$lib/components/index.js';
+	import { PageHero, LoadingSpinner, LatentSpaceVisualization } from '$lib/components/index.js';
 
 	interface SavedVectorInfo {
 		id: number;
 		clusterId: number;
 		clusterLabel: number;
+		clusterLabelName: string | null;
 		nComponents: number;
 		name: string;
 		dimensions: number;
@@ -47,10 +48,17 @@
 
 	interface ClusterResult {
 		clusterLabel: number;
+		clusterLabelName: string | null;
 		matches: MemberMatch[];
 		answeredCount: number;
 		importance: number; // 1-5 stars
 		userVector: number[];
+		// Visualization data
+		memberVectorsForViz: MemberVectorForViz[];
+		explainedVariance: number[];
+		userVectorHistory: number[][];
+		xDimension: number;
+		yDimension: number;
 	}
 
 	interface GlobalMemberScore {
@@ -75,6 +83,7 @@
 
 	// Multi-cluster state
 	let clusterLabelsToProcess: number[] = $state([]);
+	let clusterLabelNameMap: Record<number, string> = $state({}); // clusterLabel -> name
 	let currentClusterIndex: number = $state(0);
 	let clusterResults: ClusterResult[] = $state([]);
 	let globalScores: GlobalMemberScore[] = $state([]);
@@ -83,6 +92,7 @@
 	let sessionId: string | null = $state(null);
 	let currentQuestion: NextQuestion | null = $state(null);
 	let answeredCount: number = $state(0);
+	let currentClusterBillCount: number = $state(0); // Total bills in current cluster
 	let topMatches: MemberMatch[] = $state([]);
 	let uncertainty: number[] = $state([]);
 	let userVector: number[] = $state([]);
@@ -90,6 +100,20 @@
 
 	// Rating state
 	let pendingImportance: number = $state(3);
+
+	// 2D Visualization state
+	interface MemberVectorForViz {
+		memberId: number;
+		name: string;
+		group: string | null;
+		latentVector: number[];
+	}
+	let memberVectorsForViz: MemberVectorForViz[] = $state([]);
+	let explainedVariance: number[] = $state([]);
+	let xDimension: number = $state(0);
+	let yDimension: number = $state(1);
+	let userVectorHistory: number[][] = $state([]); // Track user position over time
+	let showVisualization: boolean = $state(true);
 
 	// Group saved vectors by name + clusterId
 	let groupedSavedVectors = $derived.by(() => {
@@ -127,6 +151,11 @@
 
 	// Derived
 	let currentClusterLabel = $derived(clusterLabelsToProcess[currentClusterIndex] ?? null);
+	let currentClusterDisplayName = $derived(
+		currentClusterLabel !== null
+			? clusterLabelNameMap[currentClusterLabel] || `クラスター${currentClusterLabel}`
+			: null
+	);
 	let progress = $derived.by(() => {
 		if (clusterLabelsToProcess.length === 0) return 0;
 		return (currentClusterIndex / clusterLabelsToProcess.length) * 100;
@@ -136,6 +165,18 @@
 		const avgUncertainty = uncertainty.reduce((a, b) => a + b, 0) / uncertainty.length;
 		return Math.max(0, Math.min(100, (1 - avgUncertainty) * 100));
 	});
+
+	// Highlighted members for visualization (top matches)
+	let highlightedMembersForViz = $derived(
+		topMatches.map((m) => ({ memberId: m.memberId, similarity: m.similarity }))
+	);
+
+	/**
+	 * Get display name for a cluster label
+	 */
+	function getClusterDisplayName(clusterLabel: number): string {
+		return clusterLabelNameMap[clusterLabel] || `クラスター${clusterLabel}`;
+	}
 
 	/**
 	 * Start matching with a saved vector configuration (all clusters)
@@ -159,6 +200,15 @@
 			isLoading = false;
 			return;
 		}
+
+		// Build cluster label name map
+		const nameMap: Record<number, string> = {};
+		for (const v of selectedGroupedVector.vectors) {
+			if (v.clusterLabelName) {
+				nameMap[v.clusterLabel] = v.clusterLabelName;
+			}
+		}
+		clusterLabelNameMap = nameMap;
 
 		clusterLabelsToProcess = labels;
 		currentClusterIndex = 0;
@@ -203,9 +253,16 @@
 			sessionId = result.sessionId;
 			currentQuestion = result.nextQuestion;
 			answeredCount = 0;
+			currentClusterBillCount = savedVector.billCount; // Set the bill count for current cluster
 			topMatches = [];
 			uncertainty = result.uncertainty || [];
 			userVector = result.userVector || [];
+
+			// Store member vectors for 2D visualization
+			memberVectorsForViz = result.memberVectors || [];
+			explainedVariance = result.explainedVariance || [];
+			userVectorHistory = []; // Reset history for new cluster
+
 			phase = 'questioning';
 		} catch (e) {
 			error = e instanceof Error ? e.message : '不明なエラーが発生しました';
@@ -244,6 +301,11 @@
 			answeredCount = result.answeredBills;
 			currentQuestion = result.nextQuestion;
 			uncertainty = result.uncertainty || [];
+
+			// Track user position history for visualization
+			if (userVector.length > 0 && userVector.some((v) => v !== 0)) {
+				userVectorHistory = [...userVectorHistory, [...userVector]];
+			}
 			userVector = result.userVector || [];
 			topMatches = result.topMatches || [];
 
@@ -341,10 +403,17 @@
 		// Save current cluster result
 		const newResult: ClusterResult = {
 			clusterLabel: currentClusterLabel!,
+			clusterLabelName: clusterLabelNameMap[currentClusterLabel!] || null,
 			matches: currentClusterMatches,
 			answeredCount: answeredCount,
 			importance: pendingImportance,
-			userVector: [...userVector]
+			userVector: [...userVector],
+			// Save visualization state
+			memberVectorsForViz: [...memberVectorsForViz],
+			explainedVariance: [...explainedVariance],
+			userVectorHistory: userVectorHistory.map((v) => [...v]),
+			xDimension,
+			yDimension
 		};
 		clusterResults = [...clusterResults, newResult];
 
@@ -433,7 +502,14 @@
 		globalScores = [];
 		currentClusterIndex = 0;
 		clusterLabelsToProcess = [];
+		clusterLabelNameMap = {};
 		error = null;
+		// Reset visualization state
+		memberVectorsForViz = [];
+		explainedVariance = [];
+		userVectorHistory = [];
+		xDimension = 0;
+		yDimension = 1;
 	}
 
 	/**
@@ -483,10 +559,10 @@
 		<div class="mb-6 rounded-lg bg-white p-4 shadow">
 			<div class="mb-2 flex items-center justify-between">
 				<span class="text-sm text-gray-600">
-					クラスター {currentClusterIndex + 1} / {clusterLabelsToProcess.length}
+					{currentClusterDisplayName || `クラスター${currentClusterIndex + 1}`}
 				</span>
 				<span class="text-sm text-gray-600">
-					完了: {clusterResults.length} クラスター
+					分野 {currentClusterIndex + 1}/{clusterLabelsToProcess.length}
 				</span>
 			</div>
 			<div class="h-2 w-full rounded-full bg-gray-200">
@@ -494,6 +570,29 @@
 					class="h-2 rounded-full bg-purple-600 transition-all duration-300"
 					style="width: {progress}%"
 				></div>
+			</div>
+
+			<!-- Cluster list -->
+			<div class="mt-3 flex flex-wrap gap-2">
+				{#each clusterLabelsToProcess as label, idx (label)}
+					{@const displayName = getClusterDisplayName(label)}
+					<span
+						class="rounded-full px-3 py-1 text-xs font-medium transition-colors"
+						class:bg-green-100={idx < currentClusterIndex}
+						class:text-green-800={idx < currentClusterIndex}
+						class:bg-purple-100={idx === currentClusterIndex}
+						class:text-purple-800={idx === currentClusterIndex}
+						class:bg-gray-100={idx > currentClusterIndex}
+						class:text-gray-600={idx > currentClusterIndex}
+					>
+						{#if idx < currentClusterIndex}
+							✓
+						{:else if idx === currentClusterIndex}
+							▶
+						{/if}
+						{displayName}
+					</span>
+				{/each}
 			</div>
 		</div>
 	{/if}
@@ -538,7 +637,7 @@
 										<span
 											class="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800"
 										>
-											クラスター{v.clusterLabel} ({v.billCount}法案)
+											{v.clusterLabelName || `クラスター${v.clusterLabel}`} ({v.billCount}法案)
 										</span>
 									{/each}
 								</div>
@@ -592,10 +691,12 @@
 		<div class="space-y-6">
 			<div class="rounded-lg bg-purple-50 p-4">
 				<h2 class="text-lg font-semibold text-purple-800">
-					📂 クラスター {currentClusterLabel}
+					📂 {currentClusterDisplayName}
 				</h2>
 				<p class="text-sm text-purple-600">
-					回答済み: {answeredCount}問 | 信頼度: {confidence.toFixed(0)}%
+					回答済み: {answeredCount}問 / 全{currentClusterBillCount}法案 | 信頼度: {confidence.toFixed(
+						0
+					)}%
 				</p>
 			</div>
 
@@ -695,6 +796,65 @@
 				</div>
 			{/if}
 
+			<!-- 2D Position Visualization (below matches) -->
+			{#if memberVectorsForViz.length > 0 && showVisualization}
+				<div class="rounded-lg bg-white p-4 shadow-lg">
+					<div class="mb-2 flex items-center justify-between">
+						<h3 class="text-sm font-medium text-gray-700">📍 あなたの位置</h3>
+						<button
+							onclick={() => (showVisualization = false)}
+							class="text-xs text-gray-400 hover:text-gray-600"
+							title="閉じる"
+						>
+							✕
+						</button>
+					</div>
+
+					<LatentSpaceVisualization
+						members={memberVectorsForViz}
+						{explainedVariance}
+						bind:xDimension
+						bind:yDimension
+						{userVector}
+						{userVectorHistory}
+						highlightedMembers={highlightedMembersForViz}
+						width={500}
+						height={380}
+						showDimensionSelectors={userVector.length > 2}
+						title=""
+						showLegend={true}
+						compact={true}
+					/>
+
+					<!-- Position info -->
+					{#if answeredCount > 0 && userVector.length > 0 && userVector.some((v) => v !== 0)}
+						<div class="mt-3 rounded bg-emerald-50 p-2 text-xs text-emerald-700">
+							<span class="font-medium">現在位置:</span>
+							[{userVector
+								.slice(0, 3)
+								.map((v) => v.toFixed(2))
+								.join(', ')}{userVector.length > 3 ? '...' : ''}]
+							{#if userVectorHistory.length > 0}
+								<span class="ml-2 text-emerald-600">
+									({userVectorHistory.length}回移動)
+								</span>
+							{/if}
+						</div>
+					{:else if answeredCount === 0}
+						<div class="mt-3 rounded bg-gray-50 p-2 text-xs text-gray-500">
+							質問に回答すると、あなたの位置が可視化されます
+						</div>
+					{/if}
+				</div>
+			{:else if memberVectorsForViz.length > 0 && !showVisualization}
+				<button
+					onclick={() => (showVisualization = true)}
+					class="w-full rounded-lg border border-dashed border-gray-300 p-3 text-sm text-gray-500 transition-colors hover:border-purple-400 hover:text-purple-600"
+				>
+					📍 2D可視化を表示
+				</button>
+			{/if}
+
 			<button onclick={reset} class="text-sm text-gray-500 underline hover:text-gray-700">
 				最初からやり直す
 			</button>
@@ -704,7 +864,7 @@
 		<div class="space-y-6">
 			<div class="rounded-lg bg-white p-6 shadow-lg">
 				<h2 class="mb-4 text-xl font-semibold text-gray-800">
-					📊 クラスター {currentClusterLabel} の重要度を設定
+					📊 {currentClusterDisplayName} の重要度を設定
 				</h2>
 				<p class="mb-6 text-gray-600">この分野の法案はあなたにとってどれくらい重要ですか？</p>
 
@@ -771,7 +931,8 @@
 		<div class="space-y-6">
 			<div class="rounded-lg bg-white p-6 shadow-lg">
 				<h2 class="mb-4 text-xl font-semibold text-gray-800">
-					✅ クラスター {clusterResults[clusterResults.length - 1]?.clusterLabel} 完了
+					✅ {clusterResults[clusterResults.length - 1]?.clusterLabelName ||
+						`クラスター${clusterResults[clusterResults.length - 1]?.clusterLabel}`} 完了
 				</h2>
 
 				<div class="mb-6 rounded-lg bg-gray-50 p-4">
@@ -789,8 +950,33 @@
 					</div>
 				</div>
 
+				<!-- Visualization for completed cluster -->
+				{#if clusterResults[clusterResults.length - 1]}
+					{@const lastResult = clusterResults[clusterResults.length - 1]}
+					<div class="mb-6 rounded-lg bg-gray-50 p-4">
+						<h3 class="mb-3 text-sm font-semibold text-gray-700">あなたの位置の軌跡</h3>
+						<LatentSpaceVisualization
+							members={lastResult.memberVectorsForViz}
+							explainedVariance={lastResult.explainedVariance}
+							xDimension={lastResult.xDimension}
+							yDimension={lastResult.yDimension}
+							userVector={lastResult.userVector}
+							userVectorHistory={lastResult.userVectorHistory}
+							highlightedMembers={lastResult.matches
+								.slice(0, 5)
+								.map((m) => ({ memberId: m.memberId, similarity: m.similarity }))}
+							width={500}
+							height={380}
+							showDimensionSelectors={lastResult.userVector.length > 2}
+							title=""
+							showLegend={true}
+							compact={true}
+						/>
+					</div>
+				{/if}
+
 				<p class="mb-4 text-gray-600">
-					次はクラスター {clusterLabelsToProcess[currentClusterIndex]} を分析します。
+					次は「{getClusterDisplayName(clusterLabelsToProcess[currentClusterIndex])}」を分析します。
 				</p>
 
 				<button
@@ -802,7 +988,7 @@
 						<span class="mr-2 inline-block animate-spin">⏳</span>
 						読み込み中...
 					{:else}
-						クラスター {clusterLabelsToProcess[currentClusterIndex]} を開始 →
+						{getClusterDisplayName(clusterLabelsToProcess[currentClusterIndex])} を開始 →
 					{/if}
 				</button>
 			</div>
@@ -813,7 +999,7 @@
 				<div class="space-y-2">
 					{#each clusterResults as result (result.clusterLabel)}
 						<div class="flex items-center justify-between text-sm">
-							<span>クラスター {result.clusterLabel}</span>
+							<span>{result.clusterLabelName || `クラスター${result.clusterLabel}`}</span>
 							<span class="text-yellow-500">{getStars(result.importance)}</span>
 						</div>
 					{/each}
@@ -833,8 +1019,46 @@
 				<div class="mb-6 grid grid-cols-2 gap-2 md:grid-cols-4">
 					{#each clusterResults as result (result.clusterLabel)}
 						<div class="rounded bg-gray-50 p-2 text-center">
-							<div class="text-xs text-gray-500">クラスター {result.clusterLabel}</div>
+							<div
+								class="truncate text-xs text-gray-500"
+								title={result.clusterLabelName || `クラスター${result.clusterLabel}`}
+							>
+								{result.clusterLabelName || `クラスター${result.clusterLabel}`}
+							</div>
 							<div class="text-sm text-yellow-500">{getStars(result.importance)}</div>
+						</div>
+					{/each}
+				</div>
+			</div>
+
+			<!-- All Cluster Trajectories Visualization -->
+			<div class="rounded-lg bg-white p-6 shadow-lg">
+				<h3 class="mb-4 text-xl font-semibold">📊 全クラスターの軌跡</h3>
+				<div class="space-y-6">
+					{#each clusterResults as result (result.clusterLabel)}
+						<div class="rounded-lg border border-gray-200 p-4">
+							<h4 class="mb-3 text-sm font-semibold text-gray-700">
+								{result.clusterLabelName || `クラスター${result.clusterLabel}`}
+								<span class="ml-2 text-yellow-500">{getStars(result.importance)}</span>
+								<span class="ml-2 text-xs text-gray-500">({result.answeredCount}問回答)</span>
+							</h4>
+							<LatentSpaceVisualization
+								members={result.memberVectorsForViz}
+								explainedVariance={result.explainedVariance}
+								xDimension={result.xDimension}
+								yDimension={result.yDimension}
+								userVector={result.userVector}
+								userVectorHistory={result.userVectorHistory}
+								highlightedMembers={result.matches
+									.slice(0, 5)
+									.map((m) => ({ memberId: m.memberId, similarity: m.similarity }))}
+								width={500}
+								height={380}
+								showDimensionSelectors={result.userVector.length > 2}
+								title=""
+								showLegend={true}
+								compact={true}
+							/>
 						</div>
 					{/each}
 				</div>
@@ -881,6 +1105,9 @@
 							<div class="mt-2 flex flex-wrap gap-1">
 								{#each clusterResults as result (result.clusterLabel)}
 									{@const score = member.clusterScores[result.clusterLabel] || 0}
+									{@const shortName = result.clusterLabelName
+										? result.clusterLabelName.slice(0, 6)
+										: `C${result.clusterLabel}`}
 									<span
 										class="rounded px-1.5 py-0.5 text-xs"
 										class:bg-green-100={score >= 0.6}
@@ -889,8 +1116,9 @@
 										class:text-yellow-800={score >= 0.3 && score < 0.6}
 										class:bg-red-100={score < 0.3}
 										class:text-red-800={score < 0.3}
+										title={result.clusterLabelName || `クラスター${result.clusterLabel}`}
 									>
-										C{result.clusterLabel}: {(score * 100).toFixed(0)}%
+										{shortName}: {(score * 100).toFixed(0)}%
 									</span>
 								{/each}
 							</div>
@@ -908,7 +1136,7 @@
 					{#each clusterResults as result (result.clusterLabel)}
 						<div class="border-t pt-4">
 							<h4 class="mb-2 font-medium text-gray-800">
-								クラスター {result.clusterLabel}
+								{result.clusterLabelName || `クラスター${result.clusterLabel}`}
 								<span class="ml-2 text-yellow-500">{getStars(result.importance)}</span>
 							</h4>
 							<div class="space-y-1">

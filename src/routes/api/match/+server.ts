@@ -7,9 +7,10 @@ import {
 	billClusters,
 	billClusterAssignments,
 	clusterVectorResults,
+	billClusterLabelNames,
 	member
 } from '$lib/server/db/schema.js';
-import { eq, inArray, desc } from 'drizzle-orm';
+import { eq, inArray, desc, and } from 'drizzle-orm';
 import {
 	initializeMatchingState,
 	updateMatchingState,
@@ -261,6 +262,18 @@ async function handleStart(
 	// Get first question
 	const nextQuestion = selectNextQuestion(state, clusterData, billInfoMap);
 
+	// Prepare member vectors for 2D visualization
+	// Include member names and group info
+	const memberIds = Object.keys(clusterData.memberVectors).map((id) => parseInt(id));
+	const groupMap = await loadMemberGroups(memberIds);
+
+	const memberVectorsForViz = Object.entries(clusterData.memberVectors).map(([id, vector]) => ({
+		memberId: parseInt(id),
+		name: clusterData.memberNames[id] || `Member ${id}`,
+		group: groupMap.get(parseInt(id)) || null,
+		latentVector: vector
+	}));
+
 	return json({
 		success: true,
 		sessionId: sessionIdValue,
@@ -282,7 +295,9 @@ async function handleStart(
 				}
 			: null,
 		uncertainty: state.uncertainty,
-		userVector: state.userVector
+		userVector: state.userVector,
+		memberVectors: memberVectorsForViz,
+		explainedVariance: clusterData.explainedVariance
 	});
 }
 
@@ -494,7 +509,7 @@ export const GET: RequestHandler = async () => {
 			})
 		);
 
-		// Get saved vector results
+		// Get saved vector results with cluster label names
 		const savedVectors = await db
 			.select({
 				id: clusterVectorResults.id,
@@ -505,9 +520,17 @@ export const GET: RequestHandler = async () => {
 				dimensions: clusterVectorResults.dimensions,
 				memberCount: clusterVectorResults.memberCount,
 				billCount: clusterVectorResults.billCount,
-				createdAt: clusterVectorResults.createdAt
+				createdAt: clusterVectorResults.createdAt,
+				clusterLabelName: billClusterLabelNames.name
 			})
 			.from(clusterVectorResults)
+			.leftJoin(
+				billClusterLabelNames,
+				and(
+					eq(clusterVectorResults.clusterId, billClusterLabelNames.clusterId),
+					eq(clusterVectorResults.clusterLabel, billClusterLabelNames.clusterLabel)
+				)
+			)
 			.orderBy(desc(clusterVectorResults.createdAt));
 
 		return json({
