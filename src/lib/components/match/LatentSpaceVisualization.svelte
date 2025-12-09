@@ -46,6 +46,12 @@
 		showLegend?: boolean;
 		/** Compact mode for smaller displays */
 		compact?: boolean;
+		/** Whether the visualization can be collapsed */
+		collapsible?: boolean;
+		/** Label for the button when collapsed */
+		collapsedLabel?: string;
+		/** Label for the button when expanded */
+		expandedLabel?: string;
 	}
 
 	let {
@@ -61,11 +67,15 @@
 		showDimensionSelectors = true,
 		title = '2D 可視化',
 		showLegend = true,
-		compact = false
+		compact = false,
+		collapsible = false,
+		collapsedLabel = '表示',
+		expandedLabel = '隠す'
 	}: Props = $props();
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let hoveredMember: MemberPoint | null = $state(null);
+	let isExpanded = $state(!collapsible);
 
 	// Available dimensions based on vector length
 	let availableDimensions = $derived(
@@ -162,9 +172,8 @@
 		// Scale context to match DPI
 		ctx.scale(dpr, dpr);
 
-		// Set CSS size to display size
-		canvasElement.style.width = displayWidth + 'px';
-		canvasElement.style.height = displayHeight + 'px';
+		// Note: We rely on CSS for display size to ensure responsiveness
+		// The inline style in the template handles width/height/aspect-ratio
 
 		const bounds = visualizationBounds;
 		const padding = compact ? 45 : 55;
@@ -482,61 +491,73 @@
 	});
 </script>
 
-<div class="latent-space-viz">
-	{#if title || showDimensionSelectors}
-		<div class="viz-header">
-			{#if title}
-				<h3 class="viz-title">{title}</h3>
-			{/if}
-			{#if showDimensionSelectors && availableDimensions.length > 2}
-				<div class="dimension-selectors">
-					<select bind:value={xDimension} class="dim-select">
-						{#each availableDimensions as dim}
-							<option value={dim}>X: 次元{dim + 1}</option>
-						{/each}
-					</select>
-					<select bind:value={yDimension} class="dim-select">
-						{#each availableDimensions as dim}
-							<option value={dim}>Y: 次元{dim + 1}</option>
-						{/each}
-					</select>
-				</div>
-			{/if}
+<div class="latent-space-viz" class:collapsed={!isExpanded && collapsible}>
+	{#if collapsible}
+		<div class="viz-toggle-container">
+			<button class="viz-toggle-btn" onclick={() => (isExpanded = !isExpanded)}>
+				{isExpanded ? expandedLabel : collapsedLabel}
+			</button>
 		</div>
 	{/if}
 
-	<div class="canvas-container">
-		<canvas
-			bind:this={canvasElement}
-			class="viz-canvas"
-			style="max-width: 100%; height: auto; aspect-ratio: {width} / {height};"
-			onmousemove={handleCanvasMouseMove}
-			onmouseleave={handleCanvasMouseLeave}
-		></canvas>
-	</div>
+	{#if !collapsible || isExpanded}
+		<div class="viz-content" class:fade-in={collapsible}>
+			{#if title || showDimensionSelectors}
+				<div class="viz-header">
+					{#if title}
+						<h3 class="viz-title">{title}</h3>
+					{/if}
+					{#if showDimensionSelectors && availableDimensions.length >= 2}
+						<div class="dimension-selectors">
+							<select bind:value={xDimension} class="dim-select">
+								{#each availableDimensions as dim}
+									<option value={dim}>X: 次元{dim + 1}</option>
+								{/each}
+							</select>
+							<select bind:value={yDimension} class="dim-select">
+								{#each availableDimensions as dim}
+									<option value={dim}>Y: 次元{dim + 1}</option>
+								{/each}
+							</select>
+						</div>
+					{/if}
+				</div>
+			{/if}
 
-	{#if showLegend}
-		<div class="viz-legend">
-			{#if userVector.length > 0}
-				<div class="legend-item">
-					<span class="legend-dot user"></span>
-					<span>あなた</span>
-				</div>
-			{/if}
-			{#if highlightedMembers.length > 0}
-				<div class="legend-item">
-					<span class="legend-dot highlighted"></span>
-					<span>上位マッチ</span>
-				</div>
-			{/if}
-			<div class="legend-item">
-				<span class="legend-dot member"></span>
-				<span>議員</span>
+			<div class="canvas-container">
+				<canvas
+					bind:this={canvasElement}
+					class="viz-canvas"
+					style="width: 100%; max-width: {width}px; height: auto; aspect-ratio: {width} / {height};"
+					onmousemove={handleCanvasMouseMove}
+					onmouseleave={handleCanvasMouseLeave}
+				></canvas>
 			</div>
-			{#if userVectorHistory.length > 0}
-				<div class="legend-item">
-					<span class="legend-line"></span>
-					<span>移動軌跡</span>
+
+			{#if showLegend}
+				<div class="viz-legend">
+					{#if userVector.length > 0}
+						<div class="legend-item">
+							<span class="legend-dot user"></span>
+							<span>あなた</span>
+						</div>
+					{/if}
+					{#if highlightedMembers.length > 0}
+						<div class="legend-item">
+							<span class="legend-dot highlighted"></span>
+							<span>上位マッチ</span>
+						</div>
+					{/if}
+					<div class="legend-item">
+						<span class="legend-dot member"></span>
+						<span>議員</span>
+					</div>
+					{#if userVectorHistory.length > 0}
+						<div class="legend-item">
+							<span class="legend-line"></span>
+							<span>移動軌跡</span>
+						</div>
+					{/if}
 				</div>
 			{/if}
 		</div>
@@ -553,36 +574,48 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		margin-bottom: 0.75rem;
+		margin-bottom: 1rem;
 		flex-wrap: wrap;
-		gap: 0.5rem;
+		gap: 0.75rem;
 	}
 
 	.viz-title {
-		font-size: 0.875rem;
-		font-weight: 500;
-		color: #374151;
+		font-size: 1rem;
+		font-weight: 600;
+		color: #1f2937;
 		margin: 0;
 	}
 
 	.dimension-selectors {
 		display: flex;
-		gap: 0.5rem;
+		gap: 0.75rem;
 	}
 
 	.dim-select {
-		padding: 0.25rem 0.5rem;
-		font-size: 0.75rem;
-		border: 1px solid #d1d5db;
-		border-radius: 0.25rem;
-		background: white;
+		padding: 0.375rem 2rem 0.375rem 0.75rem;
+		font-size: 0.875rem;
+		border: 1px solid #e5e7eb;
+		border-radius: 0.5rem;
+		background-color: #f9fafb;
 		color: #374151;
+		cursor: pointer;
+		appearance: none;
+		background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+		background-position: right 0.5rem center;
+		background-repeat: no-repeat;
+		background-size: 1.5em 1.5em;
+		transition: all 0.2s;
+	}
+
+	.dim-select:hover {
+		border-color: #d1d5db;
+		background-color: #fff;
 	}
 
 	.dim-select:focus {
 		outline: none;
 		border-color: #6366f1;
-		box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+		box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.1);
 	}
 
 	.canvas-container {
@@ -601,10 +634,13 @@
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
-		gap: 1rem;
-		margin-top: 0.75rem;
-		font-size: 0.75rem;
-		color: #6b7280;
+		justify-content: center;
+		gap: 1.5rem;
+		margin-top: 1rem;
+		padding-top: 1rem;
+		border-top: 1px solid #f3f4f6;
+		font-size: 0.875rem;
+		color: #4b5563;
 	}
 
 	.legend-item {
@@ -635,5 +671,54 @@
 		width: 1rem;
 		height: 0;
 		border-top: 2px dashed #10b981;
+	}
+
+	/* Collapsible styles */
+	.latent-space-viz.collapsed {
+		background: transparent;
+		border: none;
+	}
+
+	.viz-toggle-container {
+		display: flex;
+		justify-content: center;
+		padding: 0.5rem;
+	}
+
+	.viz-toggle-btn {
+		background: white;
+		border: 1px solid #e5e7eb;
+		color: #4b5563;
+		padding: 0.75rem 1.5rem;
+		border-radius: 2rem;
+		font-size: 0.875rem;
+		font-weight: 500;
+		cursor: pointer;
+		transition: all 0.2s;
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+	}
+
+	.viz-toggle-btn:hover {
+		background: #f9fafb;
+		border-color: #d1d5db;
+		color: #1f2937;
+	}
+
+	.fade-in {
+		animation: fadeIn 0.4s ease;
+	}
+
+	@keyframes fadeIn {
+		from {
+			opacity: 0;
+			transform: translateY(10px);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
 	}
 </style>

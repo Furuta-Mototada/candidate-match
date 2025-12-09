@@ -1,5 +1,6 @@
 <script lang="ts">
-	import LatentSpaceVisualization from '$lib/components/LatentSpaceVisualization.svelte';
+	import LatentSpaceVisualization from '$lib/components/match/LatentSpaceVisualization.svelte';
+	import MemberRankingList from '$lib/components/match/MemberRankingList.svelte';
 	import type { ClusterResult, GlobalMemberScore } from '$lib/types/index.js';
 
 	interface Props {
@@ -62,24 +63,30 @@
 						<span class="trajectory-stars">{getStars(result.importance)}</span>
 						<span class="trajectory-count">({result.answeredCount}問回答)</span>
 					</div>
-					<div class="viz-container">
-						<LatentSpaceVisualization
-							members={result.memberVectorsForViz}
-							explainedVariance={result.explainedVariance}
-							xDimension={result.xDimension}
-							yDimension={result.yDimension}
-							userVector={result.userVector}
-							userVectorHistory={result.userVectorHistory}
-							highlightedMembers={result.matches
-								.slice(0, 5)
-								.map((m) => ({ memberId: m.memberId, similarity: m.similarity }))}
-							width={500}
-							height={380}
-							showDimensionSelectors={result.userVector.length > 2}
-							title=""
-							showLegend={true}
-							compact={true}
-						/>
+
+					<div class="viz-section">
+						<div class="viz-container">
+							<LatentSpaceVisualization
+								members={result.memberVectorsForViz}
+								explainedVariance={result.explainedVariance}
+								xDimension={result.xDimension}
+								yDimension={result.yDimension}
+								userVector={result.userVector}
+								userVectorHistory={result.userVectorHistory}
+								highlightedMembers={result.matches
+									.slice(0, 5)
+									.map((m) => ({ memberId: m.memberId, similarity: m.similarity }))}
+								width={500}
+								height={380}
+								showDimensionSelectors={result.userVector.length > 2}
+								title=""
+								showLegend={true}
+								compact={true}
+								collapsible={true}
+								collapsedLabel="📍 軌跡を表示"
+								expandedLabel="グラフを隠す"
+							/>
+						</div>
 					</div>
 				</div>
 			{/each}
@@ -88,51 +95,34 @@
 
 	<!-- Global Top 10 -->
 	<section class="top-members-section">
-		<h3 class="section-heading">🏆 総合マッチTOP10</h3>
+		<MemberRankingList
+			title="🏆 総合マッチTOP10"
+			members={globalScores.map((m) => ({ ...m, score: m.globalScore }))}
+			limit={10}
+			scoreLabel="総合スコア"
+			extraContent={clusterChips}
+		/>
+	</section>
 
-		<div class="top-members-list">
-			{#each globalScores.slice(0, 10) as member, idx (member.memberId)}
-				<div class="member-item" class:top-rank={idx === 0}>
-					<div class="member-info">
-						<div class="rank-badge" class:gold={idx === 0}>
-							{idx + 1}
-						</div>
-						<div class="member-details">
-							<div class="member-name">{member.name}</div>
-							{#if member.group}
-								<div class="member-group">{member.group}</div>
-							{/if}
-						</div>
-					</div>
-					<div class="score-display">
-						<div class="score-value {getSimilarityColor(member.globalScore)}">
-							{formatSimilarity(member.globalScore)}
-						</div>
-						<div class="score-label">総合スコア</div>
-					</div>
-				</div>
-
-				<!-- Cluster breakdown chips -->
-				<div class="cluster-chips">
-					{#each clusterResults as result (result.clusterLabel)}
-						{@const score = member.clusterScores[result.clusterLabel] || 0}
-						{@const shortName = result.clusterLabelName
-							? result.clusterLabelName.slice(0, 6)
-							: `C${result.clusterLabel}`}
-						<span
-							class="cluster-chip"
-							class:high-score={score >= 0.6}
-							class:med-score={score >= 0.3 && score < 0.6}
-							class:low-score={score < 0.3}
-							title={result.clusterLabelName || `クラスター${result.clusterLabel}`}
-						>
-							{shortName}: {(score * 100).toFixed(0)}%
-						</span>
-					{/each}
-				</div>
+	{#snippet clusterChips(member: any)}
+		<div class="cluster-chips">
+			{#each clusterResults as result (result.clusterLabel)}
+				{@const score = member.clusterScores[result.clusterLabel] || 0}
+				{@const shortName = result.clusterLabelName
+					? result.clusterLabelName.slice(0, 6)
+					: `C${result.clusterLabel}`}
+				<span
+					class="cluster-chip"
+					class:high-score={score >= 0.6}
+					class:med-score={score >= 0.3 && score < 0.6}
+					class:low-score={score < 0.3}
+					title={result.clusterLabelName || `クラスター${result.clusterLabel}`}
+				>
+					{shortName}: {(score * 100).toFixed(0)}%
+				</span>
 			{/each}
 		</div>
-	</section>
+	{/snippet}
 
 	<!-- Per-cluster details (collapsible) -->
 	<details class="details-section">
@@ -144,16 +134,12 @@
 						{result.clusterLabelName || `クラスター${result.clusterLabel}`}
 						<span class="detail-stars">{getStars(result.importance)}</span>
 					</h4>
-					<div class="detail-list">
-						{#each result.matches.slice(0, 5) as match, idx (match.memberId)}
-							<div class="detail-item">
-								<span>{idx + 1}. {match.name}</span>
-								<span class={getSimilarityColor(match.similarity)}>
-									{formatSimilarity(match.similarity)}
-								</span>
-							</div>
-						{/each}
-					</div>
+					<MemberRankingList
+						members={result.matches.map((m) => ({ ...m, score: m.similarity }))}
+						limit={5}
+						compact={true}
+						showGroup={false}
+					/>
 				</div>
 			{/each}
 		</div>
@@ -198,269 +184,170 @@
 
 <style>
 	.results-container {
-		max-width: 900px;
+		max-width: 800px;
 		margin: 0 auto;
 	}
 
 	.results-hero {
 		background: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%);
-		border-radius: 20px;
-		padding: 3rem 2rem;
+		border-radius: 16px;
+		padding: 2rem 1.5rem;
 		text-align: center;
 		margin-bottom: 2rem;
-		box-shadow: 0 20px 60px rgba(99, 102, 241, 0.3);
 	}
 
 	.results-title {
-		font-size: 2.25rem;
-		font-weight: 800;
+		font-size: 1.75rem;
+		font-weight: 700;
 		color: white;
-		margin-bottom: 0.75rem;
-		text-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+		margin-bottom: 0.5rem;
 	}
 
 	.results-subtitle {
-		font-size: 1.1rem;
-		color: rgba(255, 255, 255, 0.95);
-		margin-bottom: 2rem;
+		font-size: 0.9375rem;
+		color: rgba(255, 255, 255, 0.9);
+		margin-bottom: 1.5rem;
 	}
 
 	.cluster-importance-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-		gap: 0.75rem;
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: center;
+		gap: 0.5rem;
 	}
 
 	.importance-item {
 		background: rgba(255, 255, 255, 0.15);
-		backdrop-filter: blur(10px);
-		border-radius: 12px;
-		padding: 1rem;
+		border-radius: 8px;
+		padding: 0.5rem 0.75rem;
 		text-align: center;
-		border: 1px solid rgba(255, 255, 255, 0.2);
-		transition: all 0.3s ease;
 	}
 
 	.importance-item:hover {
-		background: rgba(255, 255, 255, 0.25);
-		transform: translateY(-2px);
+		background: rgba(255, 255, 255, 0.2);
 	}
 
 	.importance-name {
-		font-size: 0.85rem;
+		font-size: 0.75rem;
 		color: rgba(255, 255, 255, 0.9);
-		margin-bottom: 0.5rem;
-		font-weight: 600;
+		margin-bottom: 0.25rem;
+		font-weight: 500;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 
 	.importance-stars {
-		font-size: 0.95rem;
+		font-size: 0.8125rem;
 		color: #fbbf24;
 	}
 
 	/* ===== TRAJECTORIES & TOP MEMBERS ===== */
 	.trajectories-section,
 	.top-members-section {
-		margin: 3rem 0;
+		margin: 2rem 0;
 	}
 
 	.section-heading {
-		font-size: 1.5rem;
-		font-weight: 700;
-		color: #1f2937;
-		margin-bottom: 2rem;
-		text-align: center;
-		background: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%);
-		-webkit-background-clip: text;
-		-webkit-text-fill-color: transparent;
-		background-clip: text;
+		font-size: 0.875rem;
+		font-weight: 600;
+		color: #6b7280;
+		margin-bottom: 1rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
 	}
 
 	.trajectories-list {
 		display: flex;
 		flex-direction: column;
-		gap: 2rem;
+		gap: 1.5rem;
 	}
 
 	.trajectory-item {
-		background: linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(249, 250, 251, 0.9) 100%);
-		border-radius: 16px;
-		padding: 1.5rem;
-		border: 1px solid rgba(229, 231, 235, 0.5);
-		transition: all 0.3s ease;
+		background: #fafbfc;
+		border-radius: 12px;
+		padding: 1rem;
 	}
 
 	.trajectory-item:hover {
-		transform: translateX(4px);
-		border-color: rgba(99, 102, 241, 0.3);
-		box-shadow: 0 8px 16px rgba(99, 102, 241, 0.1);
+		background: #f3f4f6;
 	}
 
 	.trajectory-header {
 		display: flex;
 		align-items: center;
-		gap: 1rem;
-		margin-bottom: 1rem;
-		padding-bottom: 1rem;
-		border-bottom: 1px solid rgba(229, 231, 235, 0.5);
+		gap: 0.75rem;
+		margin-bottom: 0.75rem;
 	}
 
 	.trajectory-name {
-		font-size: 1rem;
+		font-size: 0.9375rem;
 		font-weight: 600;
 		color: #1f2937;
 	}
 
 	.trajectory-stars {
 		color: #fbbf24;
-		font-size: 1.125rem;
+		font-size: 0.875rem;
 	}
 
 	.trajectory-count {
-		font-size: 0.875rem;
+		font-size: 0.8125rem;
 		color: #6b7280;
 		margin-left: auto;
 	}
 
 	/* ===== TOP MEMBERS LIST ===== */
-	.top-members-list {
-		display: flex;
-		flex-direction: column;
-		gap: 1.5rem;
-	}
-
-	.member-item {
-		background: white;
-		border-radius: 12px;
-		padding: 1.25rem;
-		border: 1px solid rgba(229, 231, 235, 0.5);
-		transition: all 0.3s ease;
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-	}
-
-	.member-item:hover {
-		border-color: rgba(99, 102, 241, 0.3);
-		box-shadow: 0 4px 12px rgba(99, 102, 241, 0.1);
-		transform: translateY(-2px);
-	}
-
-	.member-item.top-rank {
-		background: linear-gradient(135deg, rgba(251, 191, 36, 0.1) 0%, rgba(245, 158, 11, 0.1) 100%);
-		border-color: rgba(251, 191, 36, 0.3);
-	}
-
-	.member-info {
-		display: flex;
-		align-items: center;
-		gap: 1rem;
-	}
-
-	.rank-badge {
-		width: 2.5rem;
-		height: 2.5rem;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		border-radius: 50%;
-		font-weight: 700;
-		font-size: 1rem;
-		background: #e5e7eb;
-		color: #4b5563;
-	}
-
-	.rank-badge.gold {
-		background: #fbbf24;
-		color: white;
-		box-shadow: 0 4px 8px rgba(251, 191, 36, 0.3);
-	}
-
-	.member-details {
-		display: flex;
-		flex-direction: column;
-		gap: 0.25rem;
-	}
-
-	.member-name {
-		font-size: 1rem;
-		font-weight: 600;
-		color: #1f2937;
-	}
-
-	.member-group {
-		font-size: 0.875rem;
-		color: #6b7280;
-	}
-
-	.score-display {
-		text-align: right;
-	}
-
-	.score-value {
-		font-size: 1.25rem;
-		font-weight: 700;
-	}
-
-	.score-label {
-		font-size: 0.75rem;
-		color: #6b7280;
-		margin-top: 0.25rem;
-	}
+	/* Styles removed - replaced by MemberRankingList component */
 
 	.cluster-chips {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.5rem;
-		margin-top: 0.75rem;
+		gap: 0.375rem;
+		margin-top: 0.5rem;
+		margin-left: 2.5rem;
 	}
 
 	.cluster-chip {
-		padding: 0.25rem 0.625rem;
-		border-radius: 6px;
+		padding: 0.1875rem 0.5rem;
+		border-radius: 4px;
 		font-size: 0.75rem;
 		font-weight: 500;
 		transition: all 0.2s ease;
 	}
 
 	.cluster-chip:hover {
-		transform: scale(1.05);
+		opacity: 0.8;
 	}
 
 	.cluster-chip.high-score {
-		background: rgba(34, 197, 94, 0.15);
+		background: rgba(34, 197, 94, 0.1);
 		color: #047857;
 	}
 
 	.cluster-chip.med-score {
-		background: rgba(251, 191, 36, 0.15);
+		background: rgba(251, 191, 36, 0.1);
 		color: #b45309;
 	}
 
 	.cluster-chip.low-score {
-		background: rgba(239, 68, 68, 0.15);
+		background: rgba(239, 68, 68, 0.1);
 		color: #b91c1c;
 	}
 
 	/* ===== DETAILS SECTIONS ===== */
 	.details-section {
-		background: white;
-		border-radius: 12px;
-		padding: 1.5rem;
-		margin: 2rem 0;
-		border: 1px solid rgba(229, 231, 235, 0.5);
+		margin: 1.5rem 0;
+		padding: 1rem 0;
+		border-top: 1px solid #f3f4f6;
 	}
 
 	.details-summary {
 		cursor: pointer;
-		font-size: 0.9375rem;
+		font-size: 0.8125rem;
 		font-weight: 600;
-		color: #4b5563;
+		color: #6b7280;
 		list-style: none;
-		transition: color 0.2s ease;
 	}
 
 	.details-summary:hover {
@@ -472,48 +359,17 @@
 	}
 
 	.details-content {
-		margin-top: 1.5rem;
+		margin-top: 1rem;
 		display: flex;
 		flex-direction: column;
-		gap: 1.5rem;
-	}
-
-	.detail-group {
-		padding-top: 1rem;
-		border-top: 1px solid rgba(229, 231, 235, 0.5);
-	}
-
-	.detail-title {
-		font-size: 1rem;
-		font-weight: 600;
-		color: #1f2937;
-		margin-bottom: 0.75rem;
-	}
-
-	.detail-stars {
-		margin-left: 0.5rem;
-		color: #fbbf24;
-	}
-
-	.detail-list {
-		display: flex;
-		flex-direction: column;
-		gap: 0.5rem;
-	}
-
-	.detail-item {
-		display: flex;
-		justify-content: space-between;
-		font-size: 0.875rem;
-		padding: 0.5rem 0;
+		gap: 1rem;
 	}
 
 	/* ===== ALL MEMBERS TABLE ===== */
 	.all-members-table {
-		margin-top: 1.5rem;
-		max-height: 24rem;
+		margin-top: 1rem;
+		max-height: 20rem;
 		overflow-y: auto;
-		border-radius: 8px;
 	}
 
 	.all-members-table table {
@@ -572,26 +428,23 @@
 	.final-actions {
 		display: flex;
 		justify-content: center;
-		margin: 3rem 0;
+		margin: 2rem 0;
 	}
 
 	.restart-button {
-		background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
+		background: #6b7280;
 		color: white;
 		border: none;
-		padding: 0.875rem 2rem;
-		border-radius: 12px;
-		font-size: 1rem;
+		padding: 0.75rem 1.5rem;
+		border-radius: 8px;
+		font-size: 0.875rem;
 		font-weight: 600;
 		cursor: pointer;
-		transition: all 0.3s ease;
-		box-shadow: 0 4px 6px -1px rgba(107, 114, 128, 0.3);
+		transition: all 0.2s ease;
 	}
 
 	.restart-button:hover {
-		transform: translateY(-2px);
-		box-shadow: 0 8px 12px -2px rgba(107, 114, 128, 0.4);
-		background: linear-gradient(135deg, #4b5563 0%, #374151 100%);
+		background: #4b5563;
 	}
 
 	/* ===== SIMILARITY COLORS ===== */
@@ -621,6 +474,29 @@
 			opacity: 1;
 			transform: translateY(0);
 		}
+	}
+
+	/* ===== VISUALIZATION ===== */
+	.viz-section {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		margin-top: 1rem;
+		gap: 1rem;
+	}
+
+	.viz-container {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+	}
+
+	/* Override visualization styles to remove container look */
+	.viz-container :global(.latent-space-viz) {
+		background: transparent !important;
+		border-radius: 0 !important;
 	}
 
 	/* ===== RESPONSIVE ===== */

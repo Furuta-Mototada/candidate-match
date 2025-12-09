@@ -37,6 +37,7 @@
 					</option>
 				{/each}
 			</select>
+			<a href="/member-vectors" class="create-new-link"> または新しい設定を作成 → </a>
 		</div>
 
 		{#if selectedGroupedVector}
@@ -107,6 +108,21 @@
 		margin-bottom: 1.5rem;
 	}
 
+	.create-new-link {
+		display: inline-block;
+		margin-top: 0.75rem;
+		color: #6366f1;
+		font-size: 0.875rem;
+		font-weight: 500;
+		text-decoration: none;
+		transition: all 0.2s ease;
+	}
+
+	.create-new-link:hover {
+		color: #4f46e5;
+		text-decoration: underline;
+	}
+
 	.vector-select {
 		width: 100%;
 		padding: 0.875rem 1rem;
@@ -135,18 +151,14 @@
 	}
 
 	.selected-vector-info {
-		margin: 1.5rem 0;
-		padding: 1.5rem;
-		background: linear-gradient(135deg, rgba(99, 102, 241, 0.05) 0%, rgba(168, 85, 247, 0.05) 100%);
-		border-radius: 12px;
-		border: 1px solid rgba(99, 102, 241, 0.2);
+		margin: 1.5rem 0 2rem;
 	}
 
 	.selected-vector-title {
-		font-size: 1.125rem;
+		font-size: 1rem;
 		font-weight: 600;
-		color: #1f2937;
-		margin-bottom: 1rem;
+		color: #6b7280;
+		margin-bottom: 0.75rem;
 	}
 
 	.cluster-tags {
@@ -156,11 +168,10 @@
 	}
 
 	.cluster-tag {
-		padding: 0.5rem 0.875rem;
-		background: white;
-		border: 1px solid #e5e7eb;
-		border-radius: 8px;
-		font-size: 0.875rem;
+		padding: 0.375rem 0.75rem;
+		background: #f3f4f6;
+		border-radius: 6px;
+		font-size: 0.8125rem;
 		color: #4b5563;
 		font-weight: 500;
 	}
