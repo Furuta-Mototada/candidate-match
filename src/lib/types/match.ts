@@ -55,6 +55,12 @@ export interface ClusterResult {
 	userVectorHistory: number[][];
 	xDimension: number;
 	yDimension: number;
+	// Answer history
+	answeredBills?: {
+		billId: number;
+		title: string;
+		answer: number; // 1=Agree, -1=Disagree, 0=Neutral/Skip
+	}[];
 }
 
 export interface MemberVectorForViz {

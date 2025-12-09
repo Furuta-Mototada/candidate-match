@@ -54,6 +54,7 @@
 	let uncertainty: number[] = $state([]);
 	let userVector: number[] = $state([]);
 	let currentClusterMatches: MemberMatch[] = $state([]);
+	let currentClusterAnsweredBills: { billId: number; title: string; answer: number }[] = $state([]);
 
 	// Rating state
 	let pendingImportance: number = $state(3);
@@ -212,6 +213,7 @@
 			currentQuestion = result.nextQuestion;
 			answeredCount = 0;
 			currentClusterBillCount = savedVector.billCount; // Set the bill count for current cluster
+			currentClusterAnsweredBills = []; // Reset answered bills
 			topMatches = [];
 			uncertainty = result.uncertainty || [];
 			userVector = result.userVector || [];
@@ -235,6 +237,13 @@
 	async function submitAnswer(score: number) {
 		if (!sessionId || !currentQuestion) return;
 
+		// Capture info before update
+		const billInfo = {
+			billId: currentQuestion.billId,
+			title: currentQuestion.title,
+			answer: score
+		};
+
 		isLoading = true;
 		error = null;
 
@@ -255,6 +264,9 @@
 			if (!response.ok || !result.success) {
 				throw new Error(result.error || '回答の送信に失敗しました');
 			}
+
+			// Record answer
+			currentClusterAnsweredBills = [...currentClusterAnsweredBills, billInfo];
 
 			answeredCount = result.answeredBills;
 			currentQuestion = result.nextQuestion;
@@ -283,6 +295,13 @@
 	async function skipQuestion() {
 		if (!sessionId || !currentQuestion) return;
 
+		// Capture info before update
+		const billInfo = {
+			billId: currentQuestion.billId,
+			title: currentQuestion.title,
+			answer: 0 // 0 for skip/neutral
+		};
+
 		isLoading = true;
 		error = null;
 
@@ -302,6 +321,9 @@
 			if (!response.ok || !result.success) {
 				throw new Error(result.error || 'スキップに失敗しました');
 			}
+
+			// Record answer
+			currentClusterAnsweredBills = [...currentClusterAnsweredBills, billInfo];
 
 			currentQuestion = result.nextQuestion;
 			uncertainty = result.uncertainty || [];
@@ -366,6 +388,7 @@
 			answeredCount: answeredCount,
 			importance: pendingImportance,
 			userVector: [...userVector],
+			answeredBills: [...currentClusterAnsweredBills],
 			// Save visualization state
 			memberVectorsForViz: [...memberVectorsForViz],
 			explainedVariance: [...explainedVariance],
@@ -453,6 +476,7 @@
 		sessionId = null;
 		currentQuestion = null;
 		answeredCount = 0;
+		currentClusterAnsweredBills = [];
 		topMatches = [];
 		uncertainty = [];
 		userVector = [];
