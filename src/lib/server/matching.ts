@@ -383,14 +383,26 @@ export function findMatchingMembers(
 }
 
 /**
- * Update matching state with a new answer
+ * Update matching state with a new answer (or update an existing answer)
  */
 export function updateMatchingState(
 	state: MatchingState,
 	answer: UserAnswer,
 	billLoadings: Map<number, number[]>
 ): MatchingState {
-	const newAnswers = [...state.answeredBills, answer];
+	// Check if this bill was already answered - if so, update the answer
+	const existingIndex = state.answeredBills.findIndex((a) => a.billId === answer.billId);
+	let newAnswers: UserAnswer[];
+
+	if (existingIndex >= 0) {
+		// Update existing answer
+		newAnswers = [...state.answeredBills];
+		newAnswers[existingIndex] = answer;
+	} else {
+		// Add new answer
+		newAnswers = [...state.answeredBills, answer];
+	}
+
 	const { vector, uncertainty } = estimateUserVector(newAnswers, billLoadings, state.dimensions);
 
 	return {

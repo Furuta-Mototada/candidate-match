@@ -9,6 +9,7 @@
 		pendingImportance: number;
 		currentClusterIndex: number;
 		totalClusters: number;
+		isLastClusterInSession: boolean;
 		isLoading: boolean;
 
 		// Visualization props
@@ -30,6 +31,7 @@
 		pendingImportance = $bindable(),
 		currentClusterIndex,
 		totalClusters,
+		isLastClusterInSession,
 		isLoading,
 		memberVectorsForViz,
 		explainedVariance,
@@ -115,10 +117,10 @@
 			{#if isLoading}
 				<span class="loading-spinner">⏳</span>
 				読み込み中...
-			{:else if currentClusterIndex < totalClusters - 1}
-				次の分野へ進む →
-			{:else}
+			{:else if isLastClusterInSession}
 				総合結果を見る 🎉
+			{:else}
+				次の分野へ進む →
 			{/if}
 		</button>
 	</div>

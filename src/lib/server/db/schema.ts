@@ -5,6 +5,7 @@ import {
 	text,
 	boolean,
 	date,
+	timestamp,
 	unique,
 	primaryKey,
 	pgEnum,
@@ -258,7 +259,7 @@ export const billEmbeddings = pgTable('bill_embeddings', {
 	textContent: text('text_content'), // Extracted text content from PDF
 	embedding: text('embedding').notNull(), // JSON serialized vector (array of floats)
 	embeddingModel: text('embedding_model').notNull(), // Model used for embedding (e.g., 'paraphrase-multilingual-mpnet-base-v2')
-	createdAt: date('created_at').notNull().defaultNow()
+	createdAt: timestamp('created_at').notNull().defaultNow()
 });
 
 export type BillEmbedding = typeof billEmbeddings.$inferSelect;
@@ -271,7 +272,7 @@ export const billClusters = pgTable('bill_clusters', {
 	algorithm: text('algorithm').notNull(), // 'kmeans', 'hdbscan', etc.
 	parameters: text('parameters').notNull(), // JSON of clustering parameters
 	embeddingModel: text('embedding_model').notNull(), // Model used for the embeddings
-	createdAt: date('created_at').notNull().defaultNow()
+	createdAt: timestamp('created_at').notNull().defaultNow()
 });
 
 export type BillCluster = typeof billClusters.$inferSelect;
@@ -308,7 +309,7 @@ export const billClusterLabelNames = pgTable(
 		clusterLabel: integer('cluster_label').notNull(), // The cluster number
 		name: text('name').notNull(), // LLM-generated name for this cluster
 		description: text('description'), // LLM-generated description
-		generatedAt: date('generated_at').notNull().defaultNow()
+		generatedAt: timestamp('generated_at').notNull().defaultNow()
 	},
 	(table) => [primaryKey({ columns: [table.clusterId, table.clusterLabel] })]
 );
@@ -334,8 +335,99 @@ export const clusterVectorResults = pgTable('cluster_vector_results', {
 	memberCount: integer('member_count').notNull(),
 	billCount: integer('bill_count').notNull(),
 	representativeBills: text('representative_bills'), // JSON: RepresentativeBill[][]
-	createdAt: date('created_at').notNull().defaultNow()
+	createdAt: timestamp('created_at').notNull().defaultNow()
 });
 
 export type ClusterVectorResult = typeof clusterVectorResults.$inferSelect;
 export type NewClusterVectorResult = typeof clusterVectorResults.$inferInsert;
+
+// Session status enum
+export const sessionStatusEnum = pgEnum('session_status', ['in_progress', 'completed']);
+
+// Saved matching sessions - stores user's complete matching session data
+export const savedMatchingSession = pgTable('saved_matching_session', {
+	id: serial('id').primaryKey(),
+	name: text('name').notNull(),
+	description: text('description'),
+	savedVectorKey: text('saved_vector_key').notNull(), // "name|clusterId" key for the saved vector group
+	clusterId: integer('cluster_id')
+		.notNull()
+		.references(() => billClusters.id),
+	nComponents: integer('n_components').notNull(),
+	status: text('status').notNull().default('in_progress'), // 'in_progress' or 'completed'
+	createdAt: timestamp('created_at').notNull().defaultNow(),
+	updatedAt: timestamp('updated_at').notNull().defaultNow()
+});
+
+export type SavedMatchingSession = typeof savedMatchingSession.$inferSelect;
+export type NewSavedMatchingSession = typeof savedMatchingSession.$inferInsert;
+
+// Session cluster results - stores per-cluster results within a session
+export const sessionClusterResult = pgTable(
+	'session_cluster_result',
+	{
+		id: serial('id').primaryKey(),
+		sessionId: integer('session_id')
+			.notNull()
+			.references(() => savedMatchingSession.id, { onDelete: 'cascade' }),
+		clusterLabel: integer('cluster_label').notNull(),
+		clusterLabelName: text('cluster_label_name'),
+		userVector: text('user_vector').notNull(), // JSON: number[]
+		importance: integer('importance').notNull().default(3), // 1-5 rating
+		answeredCount: integer('answered_count').notNull().default(0),
+		matchesJson: text('matches_json').notNull(), // JSON: MemberMatch[]
+		memberVectorsVizJson: text('member_vectors_viz_json'), // JSON: MemberVectorForViz[]
+		explainedVarianceJson: text('explained_variance_json'), // JSON: number[]
+		userVectorHistoryJson: text('user_vector_history_json'), // JSON: number[][]
+		xDimension: integer('x_dimension').default(0),
+		yDimension: integer('y_dimension').default(1),
+		createdAt: timestamp('created_at').notNull().defaultNow(),
+		updatedAt: timestamp('updated_at').notNull().defaultNow()
+	},
+	(table) => [unique().on(table.sessionId, table.clusterLabel)]
+);
+
+export type SessionClusterResult = typeof sessionClusterResult.$inferSelect;
+export type NewSessionClusterResult = typeof sessionClusterResult.$inferInsert;
+
+// Session answers - individual bill answers within a cluster result
+export const sessionAnswer = pgTable(
+	'session_answer',
+	{
+		id: serial('id').primaryKey(),
+		clusterResultId: integer('cluster_result_id')
+			.notNull()
+			.references(() => sessionClusterResult.id, { onDelete: 'cascade' }),
+		billId: integer('bill_id')
+			.notNull()
+			.references(() => bill.id),
+		billTitle: text('bill_title').notNull(),
+		score: integer('score').notNull(), // -1, 0, or 1
+		answeredAt: timestamp('answered_at').notNull().defaultNow()
+	},
+	(table) => [unique().on(table.clusterResultId, table.billId)]
+);
+
+export type SessionAnswer = typeof sessionAnswer.$inferSelect;
+export type NewSessionAnswer = typeof sessionAnswer.$inferInsert;
+
+// Result snapshots - point-in-time snapshots of matching results
+export const resultSnapshot = pgTable(
+	'result_snapshot',
+	{
+		id: serial('id').primaryKey(),
+		sessionId: integer('session_id')
+			.notNull()
+			.references(() => savedMatchingSession.id, { onDelete: 'cascade' }),
+		snapshotNumber: integer('snapshot_number').notNull().default(1),
+		name: text('name'),
+		globalScoresJson: text('global_scores_json').notNull(), // JSON: GlobalMemberScore[]
+		clusterResultsJson: text('cluster_results_json').notNull(), // JSON: summary of cluster results at this point
+		totalAnswered: integer('total_answered').notNull(),
+		createdAt: timestamp('created_at').notNull().defaultNow()
+	},
+	(table) => [unique().on(table.sessionId, table.snapshotNumber)]
+);
+
+export type ResultSnapshot = typeof resultSnapshot.$inferSelect;
+export type NewResultSnapshot = typeof resultSnapshot.$inferInsert;

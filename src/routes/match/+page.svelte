@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import type { PageData } from './$types.js';
 	import {
 		SetupPhase,
@@ -15,7 +16,8 @@
 		ClusterResult,
 		GlobalMemberScore,
 		MatchingPhase,
-		MemberVectorForViz
+		MemberVectorForViz,
+		SavedSessionWithDetails
 	} from '$lib/types/index.js';
 
 	interface NextQuestion {
@@ -53,8 +55,20 @@
 	let topMatches: MemberMatch[] = $state([]);
 	let uncertainty: number[] = $state([]);
 	let userVector: number[] = $state([]);
+
+	// Save state
+	let isSaving: boolean = $state(false);
+	let savedSessionId: number | null = $state(data.resumeSessionId || null);
+	let isResumeMode: boolean = $state(false);
+	let resumeSession: SavedSessionWithDetails | null = $state(
+		data.resumeSession as SavedSessionWithDetails | null
+	);
+	let clusterId: number | null = $state(null);
+	let nComponents: number = $state(3);
 	let currentClusterMatches: MemberMatch[] = $state([]);
 	let currentClusterAnsweredBills: { billId: number; title: string; answer: number }[] = $state([]);
+	let isEditingAnswer: boolean = $state(false);
+	let previousQuestion: NextQuestion | null = $state(null); // Store previous question for cancel editing
 
 	// Rating state
 	let pendingImportance: number = $state(3);
@@ -130,6 +144,46 @@
 		topMatches.map((m) => ({ memberId: m.memberId, similarity: m.similarity }))
 	);
 
+	// Calculate total unanswered bills across all clusters
+	let totalUnansweredBills = $derived.by(() => {
+		if (!selectedGroupedVector) return 0;
+
+		let total = 0;
+		for (const vectorInfo of selectedGroupedVector.vectors) {
+			const clusterResult = clusterResults.find(
+				(cr) => cr.clusterLabel === vectorInfo.clusterLabel
+			);
+			const answeredCount = clusterResult?.answeredCount || 0;
+			total += Math.max(0, vectorInfo.billCount - answeredCount);
+		}
+		return total;
+	});
+
+	// Check if this is the last cluster in the current session
+	let isLastClusterInSession = $derived.by(() => {
+		if (!isResumeMode) {
+			// In normal mode, just check if we're at the last index
+			return currentClusterIndex >= clusterLabelsToProcess.length - 1;
+		}
+
+		// In resume mode, check if there are more clusters with unanswered bills after current
+		if (!selectedGroupedVector) return true;
+
+		for (let i = currentClusterIndex + 1; i < clusterLabelsToProcess.length; i++) {
+			const label = clusterLabelsToProcess[i];
+			const vectorInfo = selectedGroupedVector.vectors.find((v) => v.clusterLabel === label);
+			const clusterResult = clusterResults.find((cr) => cr.clusterLabel === label);
+
+			if (vectorInfo) {
+				const alreadyAnswered = clusterResult?.answeredCount || 0;
+				if (alreadyAnswered < vectorInfo.billCount) {
+					return false; // There's still a cluster with unanswered bills
+				}
+			}
+		}
+		return true;
+	});
+
 	/**
 	 * Get display name for a cluster label
 	 */
@@ -150,6 +204,12 @@
 		error = null;
 		clusterResults = [];
 		globalScores = [];
+		savedSessionId = null;
+		isResumeMode = false;
+
+		// Store cluster info for saving later
+		clusterId = selectedGroupedVector.clusterId;
+		nComponents = selectedGroupedVector.nComponents;
 
 		// Get all cluster labels from the grouped vector, sorted
 		const labels = selectedGroupedVector.vectors.map((v) => v.clusterLabel).sort((a, b) => a - b);
@@ -174,6 +234,203 @@
 
 		// Start with the first cluster using its saved vector
 		await startClusterSessionWithSavedVector(labels[0]);
+	}
+
+	/**
+	 * Continue answering unanswered bills
+	 */
+	async function continueAnswering() {
+		if (!selectedGroupedVector) return;
+
+		// Enable resume mode when continuing to answer
+		isResumeMode = true;
+
+		// Find the first cluster with unanswered bills
+		let clusterToResume: number | null = null;
+		let clusterVectorInfo = null;
+
+		for (const vectorInfo of selectedGroupedVector.vectors) {
+			const clusterResult = clusterResults.find(
+				(cr) => cr.clusterLabel === vectorInfo.clusterLabel
+			);
+			const answeredCount = clusterResult?.answeredCount || 0;
+
+			if (answeredCount < vectorInfo.billCount) {
+				clusterToResume = vectorInfo.clusterLabel;
+				clusterVectorInfo = vectorInfo;
+				break;
+			}
+		}
+
+		if (clusterToResume === null || !clusterVectorInfo) {
+			error = '全ての法案に回答済みです';
+			return;
+		}
+
+		// Set up the cluster index and labels
+		const labels = selectedGroupedVector.vectors.map((v) => v.clusterLabel).sort((a, b) => a - b);
+		clusterLabelsToProcess = labels;
+		currentClusterIndex = labels.indexOf(clusterToResume);
+
+		// Get the existing result for this cluster
+		const existingResult = clusterResults.find((cr) => cr.clusterLabel === clusterToResume);
+
+		// Start a resumed session for this cluster
+		isLoading = true;
+		error = null;
+
+		try {
+			const response = await fetch('/api/match', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					action: 'resume',
+					savedVectorId: clusterVectorInfo.id,
+					existingUserVector: existingResult?.userVector,
+					answeredBillIds: existingResult?.answeredBills?.map((b) => b.billId) || []
+				})
+			});
+
+			const result = await response.json();
+
+			if (!response.ok || !result.success) {
+				throw new Error(result.error || 'セッションの再開に失敗しました');
+			}
+
+			sessionId = result.sessionId;
+			currentQuestion = result.nextQuestion;
+			answeredCount = existingResult?.answeredCount || 0;
+			currentClusterBillCount = clusterVectorInfo.billCount;
+			currentClusterAnsweredBills = existingResult?.answeredBills || [];
+			topMatches = result.topMatches || [];
+			uncertainty = result.uncertainty || [];
+			userVector = result.userVector || existingResult?.userVector || [];
+
+			// Store member vectors for 2D visualization
+			memberVectorsForViz = result.memberVectors || existingResult?.memberVectorsForViz || [];
+			explainedVariance = result.explainedVariance || existingResult?.explainedVariance || [];
+			userVectorHistory = existingResult?.userVectorHistory || [];
+
+			if (currentQuestion) {
+				phase = 'questioning';
+			} else {
+				// No more questions for this cluster, try the next one
+				await findNextClusterWithUnanswered();
+			}
+		} catch (e) {
+			error = e instanceof Error ? e.message : '不明なエラーが発生しました';
+		} finally {
+			isLoading = false;
+		}
+	}
+
+	/**
+	 * Find the next cluster with unanswered bills (for continue mode)
+	 */
+	async function findNextClusterWithUnanswered() {
+		if (!selectedGroupedVector) return;
+
+		for (let i = currentClusterIndex + 1; i < clusterLabelsToProcess.length; i++) {
+			const label = clusterLabelsToProcess[i];
+			const vectorInfo = selectedGroupedVector.vectors.find((v) => v.clusterLabel === label);
+			const clusterResult = clusterResults.find((cr) => cr.clusterLabel === label);
+
+			if (vectorInfo) {
+				const alreadyAnswered = clusterResult?.answeredCount || 0;
+				if (alreadyAnswered < vectorInfo.billCount) {
+					// Resume this cluster
+					const existingResult = clusterResult;
+
+					const response = await fetch('/api/match', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							action: 'resume',
+							savedVectorId: vectorInfo.id,
+							existingUserVector: existingResult?.userVector,
+							answeredBillIds: existingResult?.answeredBills?.map((b) => b.billId) || []
+						})
+					});
+
+					const result = await response.json();
+
+					if (response.ok && result.success && result.nextQuestion) {
+						// Only update index AFTER successful API call
+						currentClusterIndex = i;
+
+						sessionId = result.sessionId;
+						currentQuestion = result.nextQuestion;
+						answeredCount = existingResult?.answeredCount || 0;
+						currentClusterBillCount = vectorInfo.billCount;
+						currentClusterAnsweredBills = existingResult?.answeredBills || [];
+						topMatches = result.topMatches || [];
+						userVector = result.userVector || existingResult?.userVector || [];
+						memberVectorsForViz = result.memberVectors || existingResult?.memberVectorsForViz || [];
+						explainedVariance = result.explainedVariance || existingResult?.explainedVariance || [];
+						userVectorHistory = existingResult?.userVectorHistory || [];
+
+						phase = 'questioning';
+						return;
+					}
+				}
+			}
+		}
+
+		// No more clusters with unanswered bills - recalculate scores and auto-save with snapshot
+		calculateGlobalScores();
+
+		// Auto-save in resume mode when done with additional answers
+		if (savedSessionId) {
+			await autoSaveWithSnapshot();
+		}
+
+		phase = 'global-results';
+	}
+
+	/**
+	 * Auto-save session with a new snapshot (for resume mode)
+	 */
+	async function autoSaveWithSnapshot() {
+		if (!savedSessionId || !selectedSavedVectorKey || !clusterId) return;
+
+		try {
+			const response = await fetch('/api/saved-sessions', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					action: 'save',
+					sessionId: savedSessionId,
+					name: '', // Will keep existing name
+					description: '',
+					savedVectorKey: selectedSavedVectorKey,
+					clusterId,
+					nComponents,
+					status: 'completed',
+					clusterResults: clusterResults.map((cr) => ({
+						clusterLabel: cr.clusterLabel,
+						clusterLabelName: cr.clusterLabelName,
+						userVector: cr.userVector,
+						importance: cr.importance,
+						answeredCount: cr.answeredCount,
+						matches: cr.matches,
+						memberVectorsForViz: cr.memberVectorsForViz,
+						explainedVariance: cr.explainedVariance,
+						userVectorHistory: cr.userVectorHistory,
+						xDimension: cr.xDimension,
+						yDimension: cr.yDimension,
+						answeredBills: cr.answeredBills || []
+					})),
+					createSnapshot: true
+				})
+			});
+
+			const result = await response.json();
+			if (!response.ok || !result.success) {
+				console.error('Auto-save failed:', result.error);
+			}
+		} catch (e) {
+			console.error('Auto-save error:', e);
+		}
 	}
 
 	/**
@@ -265,22 +522,39 @@
 				throw new Error(result.error || '回答の送信に失敗しました');
 			}
 
-			// Record answer
-			currentClusterAnsweredBills = [...currentClusterAnsweredBills, billInfo];
+			// Record or update answer in currentClusterAnsweredBills
+			const existingIndex = currentClusterAnsweredBills.findIndex(
+				(b) => b.billId === billInfo.billId
+			);
+			if (existingIndex >= 0) {
+				// Update existing answer
+				currentClusterAnsweredBills = currentClusterAnsweredBills.map((b, i) =>
+					i === existingIndex ? billInfo : b
+				);
+			} else {
+				// Add new answer
+				currentClusterAnsweredBills = [...currentClusterAnsweredBills, billInfo];
+			}
 
 			answeredCount = result.answeredBills;
-			currentQuestion = result.nextQuestion;
 			uncertainty = result.uncertainty || [];
 
-			// Track user position history for visualization
-			if (userVector.length > 0 && userVector.some((v) => v !== 0)) {
+			// Track user position history for visualization (only for new answers, not edits)
+			if (!isEditingAnswer && userVector.length > 0 && userVector.some((v) => v !== 0)) {
 				userVectorHistory = [...userVectorHistory, [...userVector]];
 			}
 			userVector = result.userVector || [];
 			topMatches = result.topMatches || [];
 
-			if (result.isComplete || !result.nextQuestion) {
-				await finishCurrentCluster();
+			// Handle next question based on whether we were editing
+			if (isEditingAnswer) {
+				// After editing, go back to showing new questions (or null if cluster is complete)
+				isEditingAnswer = false;
+				currentQuestion = result.nextQuestion;
+			} else {
+				currentQuestion = result.nextQuestion;
+				// Don't auto-advance when all questions are answered
+				// User can manually finish the cluster or navigate to other clusters
 			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : '不明なエラーが発生しました';
@@ -322,17 +596,221 @@
 				throw new Error(result.error || 'スキップに失敗しました');
 			}
 
-			// Record answer
-			currentClusterAnsweredBills = [...currentClusterAnsweredBills, billInfo];
+			// Record or update answer in currentClusterAnsweredBills
+			const existingIndex = currentClusterAnsweredBills.findIndex(
+				(b) => b.billId === billInfo.billId
+			);
+			if (existingIndex >= 0) {
+				// Update existing answer
+				currentClusterAnsweredBills = currentClusterAnsweredBills.map((b, i) =>
+					i === existingIndex ? billInfo : b
+				);
+			} else {
+				// Add new answer
+				currentClusterAnsweredBills = [...currentClusterAnsweredBills, billInfo];
+			}
 
-			currentQuestion = result.nextQuestion;
 			uncertainty = result.uncertainty || [];
 			userVector = result.userVector || [];
 			topMatches = result.topMatches || [];
 
-			if (result.isComplete || !result.nextQuestion) {
-				await finishCurrentCluster();
+			// Handle next question based on whether we were editing
+			if (isEditingAnswer) {
+				// After editing, go back to showing new questions (or null if cluster is complete)
+				isEditingAnswer = false;
+				currentQuestion = result.nextQuestion;
+			} else {
+				currentQuestion = result.nextQuestion;
+				// Don't auto-advance when all questions are answered
+				// User can manually finish the cluster or navigate to other clusters
 			}
+		} catch (e) {
+			error = e instanceof Error ? e.message : '不明なエラーが発生しました';
+		} finally {
+			isLoading = false;
+		}
+	}
+
+	/**
+	 * Select a previously answered bill to edit the answer
+	 */
+	function selectBillToEdit(bill: { billId: number; title: string; answer: number }) {
+		// Store the current question so we can restore it on cancel
+		previousQuestion = currentQuestion;
+
+		// Create a Bill-like object for the current question
+		currentQuestion = {
+			billId: bill.billId,
+			title: bill.title,
+			description: null,
+			passed: true, // We don't have this info, but it's not critical for editing
+			reason: '回答を変更中',
+			dimensionTarget: 0
+		};
+		isEditingAnswer = true;
+	}
+
+	/**
+	 * Cancel editing and restore the previous question
+	 */
+	function cancelEditing() {
+		isEditingAnswer = false;
+		currentQuestion = previousQuestion;
+		previousQuestion = null;
+	}
+
+	/**
+	 * Navigate to a specific cluster by index
+	 */
+	async function navigateToCluster(targetIndex: number) {
+		if (targetIndex === currentClusterIndex) return;
+		if (targetIndex < 0 || targetIndex >= clusterLabelsToProcess.length) return;
+		if (isLoading) return;
+
+		const targetLabel = clusterLabelsToProcess[targetIndex];
+
+		// Save current cluster state first if we have answers
+		if (
+			answeredCount > 0 &&
+			currentClusterLabel !== null &&
+			(phase === 'questioning' || phase === 'rating')
+		) {
+			// Get current matches if we don't have them
+			let matchesToSave = currentClusterMatches;
+			if (matchesToSave.length === 0 && sessionId) {
+				try {
+					const response = await fetch('/api/match', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							action: 'results',
+							sessionId: sessionId
+						})
+					});
+					const result = await response.json();
+					if (response.ok && result.success) {
+						matchesToSave = result.matches || [];
+					}
+				} catch (e) {
+					console.error('Failed to get matches for saving:', e);
+				}
+			}
+
+			// Save current cluster result
+			const currentResult: ClusterResult = {
+				clusterLabel: currentClusterLabel,
+				clusterLabelName: clusterLabelNameMap[currentClusterLabel] || null,
+				matches: matchesToSave,
+				answeredCount: answeredCount,
+				importance: pendingImportance,
+				userVector: [...userVector],
+				answeredBills: [...currentClusterAnsweredBills],
+				memberVectorsForViz: [...memberVectorsForViz],
+				explainedVariance: [...explainedVariance],
+				userVectorHistory: userVectorHistory.map((v) => [...v]),
+				xDimension,
+				yDimension
+			};
+
+			const existingIndex = clusterResults.findIndex(
+				(cr) => cr.clusterLabel === currentClusterLabel
+			);
+			if (existingIndex >= 0) {
+				clusterResults = [
+					...clusterResults.slice(0, existingIndex),
+					currentResult,
+					...clusterResults.slice(existingIndex + 1)
+				];
+			} else {
+				clusterResults = [...clusterResults, currentResult];
+			}
+		}
+
+		isLoading = true;
+		error = null;
+
+		try {
+			// Check if we have an existing result for the target cluster
+			const existingResult = clusterResults.find((cr) => cr.clusterLabel === targetLabel);
+			const vectorInfo = selectedGroupedVector?.vectors.find((v) => v.clusterLabel === targetLabel);
+
+			if (!vectorInfo) {
+				throw new Error(`クラスター ${targetLabel} の情報が見つかりません`);
+			}
+
+			if (existingResult) {
+				// Resume this cluster with existing state
+				const response = await fetch('/api/match', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						action: 'resume',
+						savedVectorId: vectorInfo.id,
+						existingUserVector: existingResult.userVector,
+						answeredBillIds: existingResult.answeredBills?.map((b) => b.billId) || []
+					})
+				});
+
+				const result = await response.json();
+
+				if (!response.ok || !result.success) {
+					throw new Error(result.error || 'セッションの再開に失敗しました');
+				}
+
+				currentClusterIndex = targetIndex;
+				sessionId = result.sessionId;
+				currentQuestion = result.nextQuestion;
+				answeredCount = existingResult.answeredCount;
+				currentClusterBillCount = vectorInfo.billCount;
+				currentClusterAnsweredBills = existingResult.answeredBills || [];
+				topMatches = result.topMatches || [];
+				uncertainty = result.uncertainty || [];
+				userVector = result.userVector || existingResult.userVector || [];
+				memberVectorsForViz = result.memberVectors || existingResult.memberVectorsForViz || [];
+				explainedVariance = result.explainedVariance || existingResult.explainedVariance || [];
+				userVectorHistory = existingResult.userVectorHistory || [];
+				pendingImportance = existingResult.importance;
+				xDimension = existingResult.xDimension ?? 0;
+				yDimension = existingResult.yDimension ?? 1;
+				currentClusterMatches = existingResult.matches || [];
+			} else {
+				// Start fresh for this cluster
+				const response = await fetch('/api/match', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						action: 'start',
+						savedVectorId: vectorInfo.id
+					})
+				});
+
+				const result = await response.json();
+
+				if (!response.ok || !result.success) {
+					throw new Error(result.error || 'セッションの開始に失敗しました');
+				}
+
+				currentClusterIndex = targetIndex;
+				sessionId = result.sessionId;
+				currentQuestion = result.nextQuestion;
+				answeredCount = 0;
+				currentClusterBillCount = vectorInfo.billCount;
+				currentClusterAnsweredBills = [];
+				topMatches = [];
+				uncertainty = result.uncertainty || [];
+				userVector = result.userVector || [];
+				memberVectorsForViz = result.memberVectors || [];
+				explainedVariance = result.explainedVariance || [];
+				userVectorHistory = [];
+				pendingImportance = 3;
+				xDimension = 0;
+				yDimension = 1;
+				currentClusterMatches = [];
+			}
+
+			phase = 'questioning';
+			isEditingAnswer = false;
+			previousQuestion = null;
 		} catch (e) {
 			error = e instanceof Error ? e.message : '不明なエラーが発生しました';
 		} finally {
@@ -367,7 +845,11 @@
 
 			currentClusterMatches = result.matches || [];
 			userVector = result.userVector || [];
-			pendingImportance = 3;
+
+			// In resume mode, use existing importance if available
+			const existingResult = clusterResults.find((cr) => cr.clusterLabel === currentClusterLabel);
+			pendingImportance = existingResult?.importance ?? 3;
+
 			phase = 'rating';
 		} catch (e) {
 			error = e instanceof Error ? e.message : '不明なエラーが発生しました';
@@ -380,31 +862,63 @@
 	 * Save importance rating and move to next cluster or results
 	 */
 	async function saveImportanceAndContinue() {
-		// Save current cluster result
-		const newResult: ClusterResult = {
-			clusterLabel: currentClusterLabel!,
-			clusterLabelName: clusterLabelNameMap[currentClusterLabel!] || null,
-			matches: currentClusterMatches,
-			answeredCount: answeredCount,
-			importance: pendingImportance,
-			userVector: [...userVector],
-			answeredBills: [...currentClusterAnsweredBills],
-			// Save visualization state
-			memberVectorsForViz: [...memberVectorsForViz],
-			explainedVariance: [...explainedVariance],
-			userVectorHistory: userVectorHistory.map((v) => [...v]),
-			xDimension,
-			yDimension
-		};
-		clusterResults = [...clusterResults, newResult];
+		isLoading = true;
+		error = null;
 
-		// Move to next cluster or show results
-		if (currentClusterIndex < clusterLabelsToProcess.length - 1) {
-			currentClusterIndex++;
-			await startClusterSessionWithSavedVector(clusterLabelsToProcess[currentClusterIndex]);
-		} else {
-			calculateGlobalScores();
-			phase = 'global-results';
+		try {
+			// Save current cluster result
+			const newResult: ClusterResult = {
+				clusterLabel: currentClusterLabel!,
+				clusterLabelName: clusterLabelNameMap[currentClusterLabel!] || null,
+				matches: currentClusterMatches,
+				answeredCount: answeredCount,
+				importance: pendingImportance,
+				userVector: [...userVector],
+				answeredBills: [...currentClusterAnsweredBills],
+				// Save visualization state
+				memberVectorsForViz: [...memberVectorsForViz],
+				explainedVariance: [...explainedVariance],
+				userVectorHistory: userVectorHistory.map((v) => [...v]),
+				xDimension,
+				yDimension
+			};
+
+			// Check if this cluster already exists in results (resume mode)
+			const existingIndex = clusterResults.findIndex(
+				(cr) => cr.clusterLabel === currentClusterLabel
+			);
+			if (existingIndex >= 0) {
+				// Update existing result
+				clusterResults = [
+					...clusterResults.slice(0, existingIndex),
+					newResult,
+					...clusterResults.slice(existingIndex + 1)
+				];
+			} else {
+				// Add new result
+				clusterResults = [...clusterResults, newResult];
+			}
+
+			// In resume mode, try to find next cluster with unanswered bills
+			if (isResumeMode) {
+				await findNextClusterWithUnanswered();
+				return;
+			}
+
+			// Move to next cluster or show results
+			if (currentClusterIndex < clusterLabelsToProcess.length - 1) {
+				const nextIndex = currentClusterIndex + 1;
+				await startClusterSessionWithSavedVector(clusterLabelsToProcess[nextIndex]);
+				// Only update the index after successful start
+				currentClusterIndex = nextIndex;
+			} else {
+				calculateGlobalScores();
+				phase = 'global-results';
+			}
+		} catch (e) {
+			error = e instanceof Error ? e.message : '不明なエラーが発生しました';
+		} finally {
+			isLoading = false;
 		}
 	}
 
@@ -469,6 +983,63 @@
 	}
 
 	/**
+	 * Save matching results to database
+	 */
+	async function saveResults(name: string, description: string) {
+		if (!selectedSavedVectorKey || !clusterId) {
+			throw new Error('セッション情報が不足しています');
+		}
+
+		isSaving = true;
+		error = null;
+
+		try {
+			const response = await fetch('/api/saved-sessions', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					action: 'save',
+					sessionId: savedSessionId, // null for new session, id for update
+					name,
+					description,
+					savedVectorKey: selectedSavedVectorKey,
+					clusterId,
+					nComponents,
+					status: 'completed',
+					clusterResults: clusterResults.map((cr) => ({
+						clusterLabel: cr.clusterLabel,
+						clusterLabelName: cr.clusterLabelName,
+						userVector: cr.userVector,
+						importance: cr.importance,
+						answeredCount: cr.answeredCount,
+						matches: cr.matches,
+						memberVectorsForViz: cr.memberVectorsForViz,
+						explainedVariance: cr.explainedVariance,
+						userVectorHistory: cr.userVectorHistory,
+						xDimension: cr.xDimension,
+						yDimension: cr.yDimension,
+						answeredBills: cr.answeredBills || []
+					})),
+					createSnapshot: true
+				})
+			});
+
+			const result = await response.json();
+
+			if (!response.ok || !result.success) {
+				throw new Error(result.error || '保存に失敗しました');
+			}
+
+			savedSessionId = result.sessionId;
+		} catch (e) {
+			error = e instanceof Error ? e.message : '保存に失敗しました';
+			throw e;
+		} finally {
+			isSaving = false;
+		}
+	}
+
+	/**
 	 * Reset and start over
 	 */
 	function reset() {
@@ -492,6 +1063,13 @@
 		userVectorHistory = [];
 		xDimension = 0;
 		yDimension = 1;
+		// Reset save state
+		savedSessionId = null;
+		isResumeMode = false;
+		resumeSession = null;
+		clusterId = null;
+		// Clear URL params
+		goto('/match', { replaceState: true });
 	}
 
 	/**
@@ -518,11 +1096,75 @@
 		return '★'.repeat(count) + '☆'.repeat(5 - count);
 	}
 
+	/**
+	 * Initialize resume mode if we have a resume session
+	 */
+	async function initializeResumeMode() {
+		if (!resumeSession) return;
+
+		isResumeMode = true;
+		savedSessionId = resumeSession.id;
+
+		// Find matching saved vector key
+		selectedSavedVectorKey = resumeSession.savedVectorKey;
+
+		// Find the grouped vector
+		const groupedVector = groupedSavedVectors.find((g) => g.key === selectedSavedVectorKey);
+		if (!groupedVector) {
+			error = '保存済みベクトルが見つかりません';
+			return;
+		}
+
+		clusterId = resumeSession.clusterId;
+		nComponents = resumeSession.nComponents;
+
+		// Load existing cluster results
+		clusterResults = resumeSession.clusterResults.map((cr) => ({
+			clusterLabel: cr.clusterLabel,
+			clusterLabelName: cr.clusterLabelName,
+			matches: cr.matches,
+			answeredCount: cr.answeredCount,
+			importance: cr.importance,
+			userVector: cr.userVector,
+			answeredBills: cr.answeredBills,
+			memberVectorsForViz: cr.memberVectorsForViz || [],
+			explainedVariance: cr.explainedVariance || [],
+			userVectorHistory: cr.userVectorHistory || [],
+			xDimension: cr.xDimension,
+			yDimension: cr.yDimension
+		}));
+
+		// Build cluster label name map
+		const nameMap: Record<number, string> = {};
+		for (const cr of resumeSession.clusterResults) {
+			if (cr.clusterLabelName) {
+				nameMap[cr.clusterLabel] = cr.clusterLabelName;
+			}
+		}
+		clusterLabelNameMap = nameMap;
+
+		// Get all labels and determine which have unanswered bills
+		clusterLabelsToProcess = groupedVector.vectors.map((v) => v.clusterLabel).sort((a, b) => a - b);
+
+		// Calculate global scores from existing results
+		if (clusterResults.length > 0) {
+			calculateGlobalScores();
+		}
+
+		// Directly start answering remaining questions instead of showing results first
+		await continueAnswering();
+	}
+
 	// Trigger animations on mount
 	onMount(() => {
 		setTimeout(() => {
 			mounted = true;
 		}, 100);
+
+		// Initialize resume mode if we have a session to resume
+		if (resumeSession) {
+			initializeResumeMode();
+		}
 	});
 </script>
 
@@ -594,23 +1236,29 @@
 					<div class="progress-bar" style="width: {progress}%"></div>
 				</div>
 
-				<!-- Cluster chips -->
+				<!-- Cluster chips - clickable for navigation -->
 				<div class="cluster-chips">
 					{#each clusterLabelsToProcess as label, idx (label)}
 						{@const displayName = getClusterDisplayName(label)}
-						<span
+						{@const hasAnswers = clusterResults.some(
+							(cr) => cr.clusterLabel === label && cr.answeredCount > 0
+						)}
+						<button
 							class="cluster-chip"
-							class:completed={idx < currentClusterIndex}
+							class:completed={hasAnswers && idx !== currentClusterIndex}
 							class:active={idx === currentClusterIndex}
-							class:pending={idx > currentClusterIndex}
+							class:pending={!hasAnswers && idx !== currentClusterIndex}
+							onclick={() => navigateToCluster(idx)}
+							disabled={isLoading}
+							title={idx === currentClusterIndex ? '現在のクラスター' : `${displayName}に移動`}
 						>
-							{#if idx < currentClusterIndex}
+							{#if hasAnswers && idx !== currentClusterIndex}
 								<span class="chip-icon">✓</span>
 							{:else if idx === currentClusterIndex}
 								<span class="chip-icon">▶</span>
 							{/if}
 							{displayName}
-						</span>
+						</button>
 					{/each}
 				</div>
 			</div>
@@ -631,19 +1279,21 @@
 				{currentClusterBillCount}
 				{currentQuestion}
 				{isLoading}
+				{isEditingAnswer}
 				{topMatches}
 				{memberVectorsForViz}
-				bind:showVisualization
 				{explainedVariance}
 				bind:xDimension
 				bind:yDimension
 				{userVector}
 				{userVectorHistory}
 				{highlightedMembersForViz}
+				{currentClusterAnsweredBills}
 				onSubmitAnswer={submitAnswer}
 				onSkipQuestion={skipQuestion}
 				onFinishCluster={finishCurrentCluster}
-				onToggleVisualization={(show) => (showVisualization = show)}
+				onSelectBillToEdit={selectBillToEdit}
+				onCancelEditing={cancelEditing}
 			/>
 		{:else if phase === 'rating'}
 			<!-- Cluster Review Phase (Rating + Results) -->
@@ -653,6 +1303,7 @@
 				bind:pendingImportance
 				{currentClusterIndex}
 				totalClusters={clusterLabelsToProcess.length}
+				{isLastClusterInSession}
 				{isLoading}
 				{memberVectorsForViz}
 				{explainedVariance}
@@ -665,7 +1316,18 @@
 			/>
 		{:else if phase === 'global-results'}
 			<!-- Global Results Phase -->
-			<GlobalResultsPhase {clusterResults} {globalScores} onReset={reset} />
+			<GlobalResultsPhase
+				{clusterResults}
+				{globalScores}
+				onReset={reset}
+				onSave={saveResults}
+				{isSaving}
+				{savedSessionId}
+				{isResumeMode}
+				onContinue={continueAnswering}
+				{totalUnansweredBills}
+				isContinuing={isLoading}
+			/>
 		{/if}
 	</main>
 
@@ -1178,22 +1840,47 @@
 		font-size: 0.85rem;
 		font-weight: 600;
 		transition: all 0.3s ease;
+		border: 2px solid transparent;
+		cursor: pointer;
+	}
+
+	.cluster-chip:hover:not(:disabled):not(.active) {
+		transform: translateY(-2px);
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+	}
+
+	.cluster-chip:disabled {
+		cursor: not-allowed;
+		opacity: 0.7;
 	}
 
 	.cluster-chip.completed {
 		background: linear-gradient(135deg, #d1fae5, #a7f3d0);
 		color: #065f46;
+		border-color: #10b981;
+	}
+
+	.cluster-chip.completed:hover:not(:disabled) {
+		background: linear-gradient(135deg, #a7f3d0, #6ee7b7);
 	}
 
 	.cluster-chip.active {
 		background: linear-gradient(135deg, #ddd6fe, #c4b5fd);
 		color: #5b21b6;
 		animation: pulse 2s ease-in-out infinite;
+		border-color: #8b5cf6;
+		cursor: default;
 	}
 
 	.cluster-chip.pending {
 		background: #f3f4f6;
 		color: #6b7280;
+		border-color: #e5e7eb;
+	}
+
+	.cluster-chip.pending:hover:not(:disabled) {
+		background: #e5e7eb;
+		border-color: #9ca3af;
 	}
 
 	.chip-icon {

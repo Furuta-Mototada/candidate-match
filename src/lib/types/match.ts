@@ -84,3 +84,104 @@ export type MatchingPhase =
 	| 'rating'
 	| 'cluster-results'
 	| 'global-results';
+
+// ============================================================================
+// Saved Session Types
+// ============================================================================
+
+export type SessionStatus = 'in_progress' | 'completed';
+
+export interface SavedMatchingSession {
+	id: number;
+	name: string;
+	description: string | null;
+	savedVectorKey: string; // "name|clusterId" key for the saved vector group
+	clusterId: number;
+	nComponents: number;
+	status: SessionStatus;
+	createdAt: string;
+	updatedAt: string;
+}
+
+export interface SessionClusterResultData {
+	id: number;
+	sessionId: number;
+	clusterLabel: number;
+	clusterLabelName: string | null;
+	userVector: number[];
+	importance: number;
+	answeredCount: number;
+	matches: MemberMatch[];
+	memberVectorsForViz?: MemberVectorForViz[];
+	explainedVariance?: number[];
+	userVectorHistory?: number[][];
+	xDimension: number;
+	yDimension: number;
+	answeredBills: AnsweredBill[];
+	createdAt: string;
+	updatedAt: string;
+}
+
+export interface AnsweredBill {
+	billId: number;
+	title: string;
+	answer: number; // -1, 0, or 1
+}
+
+export interface ResultSnapshotData {
+	id: number;
+	sessionId: number;
+	snapshotNumber: number;
+	name: string | null;
+	globalScores: GlobalMemberScore[];
+	clusterResults: SnapshotClusterResult[];
+	totalAnswered: number;
+	createdAt: string;
+}
+
+export interface SnapshotClusterResult {
+	clusterLabel: number;
+	clusterLabelName: string | null;
+	answeredCount: number;
+	importance: number;
+	matches: { memberId: number; name: string; group: string | null; similarity: number }[];
+	answeredBills?: { billId: number; title: string; answer: number }[];
+}
+
+export interface ClusterResultSummary {
+	clusterLabel: number;
+	clusterLabelName: string | null;
+	answeredCount: number;
+	importance: number;
+	topMatches: { memberId: number; name: string; similarity: number }[];
+}
+
+export interface SavedSessionWithDetails extends SavedMatchingSession {
+	clusterResults: SessionClusterResultData[];
+	snapshots: ResultSnapshotData[];
+	totalAnswered: number;
+	totalBills: number;
+	globalScores?: GlobalMemberScore[];
+}
+
+export interface SavedSessionListItem {
+	id: number;
+	name: string;
+	description: string | null;
+	status: SessionStatus;
+	totalAnswered: number;
+	totalBills: number;
+	clusterCount: number;
+	latestSnapshotDate: string | null;
+	createdAt: string;
+	updatedAt: string;
+}
+
+// For resuming a session - contains unanswered bills info
+export interface ResumableClusterInfo {
+	clusterLabel: number;
+	clusterLabelName: string | null;
+	answeredBillIds: number[];
+	totalBills: number;
+	remainingBills: number;
+}

@@ -19,7 +19,10 @@
 </script>
 
 <div class="setup-container animate-in" style="--delay: 3">
-	<h2 class="setup-title"><span class="icon">💾</span> 保存済み設定を選択</h2>
+	<div class="setup-header">
+		<h2 class="setup-title"><span class="icon">💾</span> 保存済み設定を選択</h2>
+		<a href="/match/saved" class="view-saved-link"> 📋 過去の結果を見る </a>
+	</div>
 
 	{#if groupedSavedVectors.length > 0}
 		<div class="vector-selector">
@@ -82,19 +85,26 @@
 		margin: 0 auto;
 	}
 
+	.setup-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 2.5rem;
+		flex-wrap: wrap;
+		gap: 1rem;
+	}
+
 	.setup-title {
 		font-size: 1.875rem;
 		font-weight: 700;
 		color: #1f2937;
-		margin-bottom: 2.5rem;
-		text-align: center;
+		margin: 0;
 		background: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%);
 		-webkit-background-clip: text;
 		-webkit-text-fill-color: transparent;
 		background-clip: text;
 		display: flex;
 		align-items: center;
-		justify-content: center;
 		gap: 0.5rem;
 	}
 
@@ -102,6 +112,27 @@
 		background: none;
 		-webkit-text-fill-color: initial;
 		color: #6366f1;
+	}
+
+	.view-saved-link {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.625rem 1rem;
+		background: linear-gradient(135deg, #f3f4f6, #e5e7eb);
+		color: #4b5563;
+		border-radius: 8px;
+		font-weight: 600;
+		font-size: 0.875rem;
+		text-decoration: none;
+		transition: all 0.2s ease;
+		border: 1px solid #e5e7eb;
+	}
+
+	.view-saved-link:hover {
+		background: linear-gradient(135deg, #e5e7eb, #d1d5db);
+		color: #1f2937;
+		border-color: #d1d5db;
 	}
 
 	.vector-selector {

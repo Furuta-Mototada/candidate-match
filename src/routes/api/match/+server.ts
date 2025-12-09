@@ -81,12 +81,17 @@ export const POST: RequestHandler = async ({ request }): Promise<Response> => {
 			nComponents,
 			billId,
 			score,
-			savedVectorId
+			savedVectorId,
+			existingUserVector,
+			answeredBillIds
 		} = body;
 
 		switch (action) {
 			case 'start':
 				return await handleStart(clusterId, clusterLabel, nComponents, savedVectorId);
+
+			case 'resume':
+				return await handleResume(savedVectorId, existingUserVector, answeredBillIds);
 
 			case 'answer':
 				return await handleAnswer(sessionId, billId, score);
@@ -296,6 +301,135 @@ async function handleStart(
 			: null,
 		uncertainty: state.uncertainty,
 		userVector: state.userVector,
+		memberVectors: memberVectorsForViz,
+		explainedVariance: clusterData.explainedVariance
+	});
+}
+
+/**
+ * Resume a matching session with existing user vector and answered bills excluded
+ */
+async function handleResume(
+	savedVectorId: number | null,
+	existingUserVector: number[] | null,
+	answeredBillIds: number[] = []
+) {
+	if (!savedVectorId) {
+		return json({ error: 'savedVectorId is required for resume' }, { status: 400 });
+	}
+
+	// Load saved vector data from database
+	const [savedResult] = await db
+		.select()
+		.from(clusterVectorResults)
+		.where(eq(clusterVectorResults.id, savedVectorId));
+
+	if (!savedResult) {
+		return json({ error: 'Saved vector result not found' }, { status: 404 });
+	}
+
+	// Get cluster info
+	const [cluster] = await db
+		.select()
+		.from(billClusters)
+		.where(eq(billClusters.id, savedResult.clusterId));
+
+	if (!cluster) {
+		return json({ error: 'Cluster not found' }, { status: 404 });
+	}
+
+	// Parse the saved data
+	const clusterData: ClusterVectorData = {
+		memberVectors: JSON.parse(savedResult.memberVectors),
+		memberNames: JSON.parse(savedResult.memberNames),
+		billLoadings: JSON.parse(savedResult.billLoadings),
+		billIds: JSON.parse(savedResult.billIds),
+		explainedVariance: JSON.parse(savedResult.explainedVariance),
+		dimensions: savedResult.dimensions,
+		memberCount: savedResult.memberCount,
+		billCount: savedResult.billCount
+	};
+
+	// Load bill information from database
+	const dbBillInfo = await loadBillInfo(clusterData.billIds);
+	const billInfoMap = buildBillInfoMap(clusterData, dbBillInfo);
+
+	// Initialize matching state
+	const state = initializeMatchingState(
+		savedResult.clusterId,
+		savedResult.clusterLabel,
+		clusterData.dimensions
+	);
+
+	// If we have an existing user vector, restore it
+	if (existingUserVector && existingUserVector.length === clusterData.dimensions) {
+		state.userVector = [...existingUserVector];
+	}
+
+	// Mark answered bills as answered in the state
+	for (const billId of answeredBillIds) {
+		state.answeredBills.push({ billId, score: 0 }); // Score doesn't matter for exclusion
+	}
+
+	// Generate session ID
+	const sessionIdValue = crypto.randomUUID();
+
+	// Store session
+	sessions.set(sessionIdValue, {
+		state,
+		clusterData,
+		billInfoMap,
+		createdAt: new Date()
+	});
+
+	// Get next unanswered question
+	const nextQuestion = selectNextQuestion(state, clusterData, billInfoMap);
+
+	// Prepare member vectors for 2D visualization
+	const memberIds = Object.keys(clusterData.memberVectors).map((id) => parseInt(id));
+	const groupMap = await loadMemberGroups(memberIds);
+
+	const memberVectorsForViz = Object.entries(clusterData.memberVectors).map(([id, vector]) => ({
+		memberId: parseInt(id),
+		name: clusterData.memberNames[id] || `Member ${id}`,
+		group: groupMap.get(parseInt(id)) || null,
+		latentVector: vector
+	}));
+
+	// Get current matches with the existing user vector
+	const matches = findMatchingMembers(state.userVector, clusterData);
+	const matchResults = matches.slice(0, 5).map((m) => ({
+		memberId: m.member.memberId,
+		name: m.member.name,
+		group: groupMap.get(m.member.memberId) || null,
+		similarity: m.similarity,
+		rank: m.rank,
+		latentVector: clusterData.memberVectors[String(m.member.memberId)]
+	}));
+
+	return json({
+		success: true,
+		sessionId: sessionIdValue,
+		clusterId: savedResult.clusterId,
+		clusterLabel: savedResult.clusterLabel,
+		clusterName: cluster.name,
+		dimensions: clusterData.dimensions,
+		totalBills: clusterData.billCount,
+		totalMembers: clusterData.memberCount,
+		questionCount: answeredBillIds.length,
+		nextQuestion: nextQuestion
+			? {
+					billId: nextQuestion.bill.billId,
+					title: nextQuestion.bill.title,
+					description: nextQuestion.bill.description,
+					passed: nextQuestion.bill.passed,
+					reason: nextQuestion.reason,
+					dimensionTarget: nextQuestion.dimensionTarget
+				}
+			: null,
+		uncertainty: state.uncertainty,
+		userVector: state.userVector,
+		topMatches: matchResults,
 		memberVectors: memberVectorsForViz,
 		explainedVariance: clusterData.explainedVariance
 	});

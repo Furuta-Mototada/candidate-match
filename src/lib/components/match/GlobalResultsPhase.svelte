@@ -9,14 +9,40 @@
 		clusterResults: ClusterResult[];
 		globalScores: GlobalMemberScore[];
 		onReset: () => void;
+		// Save functionality
+		onSave?: (name: string, description: string) => Promise<void>;
+		isSaving?: boolean;
+		savedSessionId?: number | null;
+		isResumeMode?: boolean;
+		// Continue answering functionality
+		onContinue?: () => void;
+		totalUnansweredBills?: number;
+		isContinuing?: boolean;
 	}
 
-	let { clusterResults, globalScores, onReset }: Props = $props();
+	let {
+		clusterResults,
+		globalScores,
+		onReset,
+		onSave,
+		isSaving = false,
+		savedSessionId = null,
+		isResumeMode = false,
+		onContinue,
+		totalUnansweredBills = 0,
+		isContinuing = false
+	}: Props = $props();
 
 	let activeTab = $state('overview'); // 'overview' | 'analysis' | 'all-candidates'
 	let searchQuery = $state('');
 	let sortField = $state('score'); // 'score' | 'name' | 'group'
 	let sortDirection = $state('desc'); // 'asc' | 'desc'
+
+	// Save modal state
+	let showSaveModal = $state(false);
+	let saveName = $state('');
+	let saveDescription = $state('');
+	let saveError = $state<string | null>(null);
 
 	// Derived state
 	let topMembers = $derived(globalScores.slice(0, 3));
@@ -97,12 +123,64 @@
 		if (score === -1) return 'answer-disagree';
 		return 'answer-neutral';
 	}
+
+	async function handleSave() {
+		if (!onSave) return;
+		if (!saveName.trim()) {
+			saveError = '名前を入力してください';
+			return;
+		}
+
+		saveError = null;
+		try {
+			await onSave(saveName.trim(), saveDescription.trim());
+			showSaveModal = false;
+			saveName = '';
+			saveDescription = '';
+		} catch (e) {
+			saveError = e instanceof Error ? e.message : '保存に失敗しました';
+		}
+	}
+
+	function openSaveModal() {
+		// Set default name with date
+		const now = new Date();
+		saveName = `マッチング結果 ${now.toLocaleDateString('ja-JP')}`;
+		saveDescription = '';
+		saveError = null;
+		showSaveModal = true;
+	}
 </script>
 
 <div class="results-container">
 	<!-- Simple Header -->
 	<div class="results-header fade-in-up">
-		<h2 class="results-title">マッチング結果</h2>
+		<div class="header-top">
+			<h2 class="results-title">マッチング結果</h2>
+			<div class="header-actions">
+				{#if totalUnansweredBills > 0 && onContinue}
+					<button class="btn-continue" onclick={onContinue} disabled={isContinuing}>
+						<span>{isContinuing ? '⏳' : '➕'}</span>
+						{isContinuing ? '読み込み中...' : `追加回答 (${totalUnansweredBills}件)`}
+					</button>
+				{/if}
+				{#if savedSessionId}
+					<a href="/match/saved/{savedSessionId}" class="btn-view-saved">
+						<span>📋</span>
+						保存済み結果を見る
+					</a>
+				{:else if onSave}
+					<button class="btn-save" onclick={openSaveModal} disabled={isSaving}>
+						<span>💾</span>
+						{isSaving ? '保存中...' : '結果を保存'}
+					</button>
+				{/if}
+				<button class="btn-reset" onclick={onReset}>
+					<span>🔄</span>
+					最初から
+				</button>
+			</div>
+		</div>
 
 		<div class="tabs-container">
 			<div class="tabs-nav">
@@ -311,8 +389,69 @@
 
 	<!-- Actions -->
 	<div class="final-actions">
+		{#if savedSessionId}
+			<a href="/match/saved/{savedSessionId}" class="view-saved-button"> 📋 保存済み結果を見る </a>
+		{:else if onSave}
+			<button onclick={openSaveModal} class="save-button" disabled={isSaving}>
+				💾 {isSaving ? '保存中...' : '結果を保存する'}
+			</button>
+		{/if}
 		<button onclick={onReset} class="restart-button"> 🔄 最初からやり直す </button>
 	</div>
+
+	<!-- Save Modal -->
+	{#if showSaveModal}
+		<!-- svelte-ignore a11y_click_events_have_key_events -->
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div class="modal-overlay" onclick={() => (showSaveModal = false)}>
+			<!-- svelte-ignore a11y_click_events_have_key_events -->
+			<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+			<!-- svelte-ignore a11y_interactive_supports_focus -->
+			<div class="modal-container" onclick={(e) => e.stopPropagation()} role="dialog">
+				<button class="modal-close-btn" onclick={() => (showSaveModal = false)}>×</button>
+
+				<h2 class="modal-title">💾 結果を保存</h2>
+				<p class="modal-desc">
+					マッチング結果を保存して、後で確認したり追加の回答をしたりできます。
+				</p>
+
+				{#if saveError}
+					<div class="modal-error">{saveError}</div>
+				{/if}
+
+				<div class="form-group">
+					<label for="save-name">名前 *</label>
+					<input
+						type="text"
+						id="save-name"
+						bind:value={saveName}
+						placeholder="例: 2024年マッチング結果"
+					/>
+				</div>
+
+				<div class="form-group">
+					<label for="save-description">説明（任意）</label>
+					<textarea
+						id="save-description"
+						bind:value={saveDescription}
+						placeholder="メモや覚え書きなど..."
+						rows="3"
+					></textarea>
+				</div>
+
+				<div class="modal-actions">
+					<button class="btn-cancel" onclick={() => (showSaveModal = false)}> キャンセル </button>
+					<button
+						class="btn-save-confirm"
+						onclick={handleSave}
+						disabled={isSaving || !saveName.trim()}
+					>
+						{isSaving ? '保存中...' : '保存する'}
+					</button>
+				</div>
+			</div>
+		</div>
+	{/if}
 </div>
 
 <style>
@@ -328,11 +467,109 @@
 		margin-bottom: 2rem;
 	}
 
+	.header-top {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 1.5rem;
+		flex-wrap: wrap;
+		gap: 1rem;
+	}
+
+	.header-actions {
+		display: flex;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+	}
+
+	.btn-save {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.625rem 1rem;
+		background: linear-gradient(135deg, #10b981, #059669);
+		color: white;
+		border: none;
+		border-radius: 8px;
+		font-weight: 600;
+		font-size: 0.875rem;
+		cursor: pointer;
+		transition: all 0.2s ease;
+	}
+
+	.btn-save:hover:not(:disabled) {
+		transform: translateY(-1px);
+		box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+	}
+
+	.btn-save:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.btn-continue {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.625rem 1rem;
+		background: linear-gradient(135deg, #f59e0b, #d97706);
+		color: white;
+		border: none;
+		border-radius: 8px;
+		font-weight: 600;
+		font-size: 0.875rem;
+		cursor: pointer;
+		transition: all 0.2s ease;
+	}
+
+	.btn-continue:hover {
+		transform: translateY(-1px);
+		box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+	}
+
+	.btn-view-saved {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.625rem 1rem;
+		background: linear-gradient(135deg, #6366f1, #8b5cf6);
+		color: white;
+		border-radius: 8px;
+		font-weight: 600;
+		font-size: 0.875rem;
+		text-decoration: none;
+		transition: all 0.2s ease;
+	}
+
+	.btn-view-saved:hover {
+		transform: translateY(-1px);
+		box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+	}
+
+	.btn-reset {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.625rem 1rem;
+		background: #f3f4f6;
+		color: #4b5563;
+		border: none;
+		border-radius: 8px;
+		font-weight: 600;
+		font-size: 0.875rem;
+		cursor: pointer;
+		transition: all 0.2s ease;
+	}
+
+	.btn-reset:hover {
+		background: #e5e7eb;
+	}
+
 	.results-title {
 		font-size: 1.75rem;
 		font-weight: 800;
 		color: #1f2937;
-		margin-bottom: 1.5rem;
+		margin: 0;
 	}
 
 	.tabs-container {
@@ -701,7 +938,52 @@
 	.final-actions {
 		display: flex;
 		justify-content: center;
+		gap: 1rem;
 		margin-top: 3rem;
+		flex-wrap: wrap;
+	}
+
+	.save-button {
+		background: linear-gradient(135deg, #10b981, #059669);
+		color: white;
+		border: none;
+		padding: 0.875rem 2rem;
+		border-radius: 8px;
+		font-size: 0.9375rem;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 0.2s ease;
+		box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
+	}
+
+	.save-button:hover:not(:disabled) {
+		transform: translateY(-2px);
+		box-shadow: 0 6px 16px rgba(16, 185, 129, 0.3);
+	}
+
+	.save-button:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.view-saved-button {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		background: linear-gradient(135deg, #6366f1, #8b5cf6);
+		color: white;
+		padding: 0.875rem 2rem;
+		border-radius: 8px;
+		font-size: 0.9375rem;
+		font-weight: 600;
+		text-decoration: none;
+		transition: all 0.2s ease;
+		box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
+	}
+
+	.view-saved-button:hover {
+		transform: translateY(-2px);
+		box-shadow: 0 6px 16px rgba(99, 102, 241, 0.3);
 	}
 
 	.restart-button {
@@ -721,6 +1003,149 @@
 		background: #f9fafb;
 		border-color: #9ca3af;
 		color: #1f2937;
+	}
+
+	/* MODAL */
+	.modal-overlay {
+		position: fixed;
+		top: 0;
+		left: 0;
+		width: 100%;
+		height: 100%;
+		background: rgba(0, 0, 0, 0.5);
+		backdrop-filter: blur(4px);
+		z-index: 1000;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 1rem;
+	}
+
+	.modal-container {
+		background: white;
+		width: 100%;
+		max-width: 450px;
+		border-radius: 16px;
+		padding: 2rem;
+		position: relative;
+		box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+	}
+
+	.modal-close-btn {
+		position: absolute;
+		top: 1rem;
+		right: 1rem;
+		width: 32px;
+		height: 32px;
+		border-radius: 50%;
+		background: #f3f4f6;
+		border: none;
+		font-size: 1.25rem;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.modal-close-btn:hover {
+		background: #e5e7eb;
+	}
+
+	.modal-title {
+		font-size: 1.25rem;
+		font-weight: 700;
+		color: #1f2937;
+		margin-bottom: 0.5rem;
+	}
+
+	.modal-desc {
+		color: #6b7280;
+		margin-bottom: 1.5rem;
+		font-size: 0.95rem;
+	}
+
+	.modal-error {
+		background: #fee2e2;
+		border: 1px solid #fca5a5;
+		color: #991b1b;
+		padding: 0.75rem 1rem;
+		border-radius: 8px;
+		margin-bottom: 1rem;
+		font-size: 0.9rem;
+	}
+
+	.form-group {
+		margin-bottom: 1.25rem;
+	}
+
+	.form-group label {
+		display: block;
+		font-weight: 600;
+		color: #1f2937;
+		margin-bottom: 0.5rem;
+		font-size: 0.9rem;
+	}
+
+	.form-group input,
+	.form-group textarea {
+		width: 100%;
+		padding: 0.75rem;
+		border: 1px solid #e5e7eb;
+		border-radius: 8px;
+		font-size: 1rem;
+		font-family: inherit;
+	}
+
+	.form-group input:focus,
+	.form-group textarea:focus {
+		outline: none;
+		border-color: #6366f1;
+		box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+	}
+
+	.form-group textarea {
+		resize: vertical;
+		min-height: 80px;
+	}
+
+	.modal-actions {
+		display: flex;
+		gap: 0.75rem;
+		justify-content: flex-end;
+		margin-top: 1.5rem;
+	}
+
+	.btn-cancel {
+		padding: 0.75rem 1.25rem;
+		background: #f3f4f6;
+		color: #4b5563;
+		border: none;
+		border-radius: 8px;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.btn-cancel:hover {
+		background: #e5e7eb;
+	}
+
+	.btn-save-confirm {
+		padding: 0.75rem 1.5rem;
+		background: linear-gradient(135deg, #10b981, #059669);
+		color: white;
+		border: none;
+		border-radius: 8px;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.btn-save-confirm:hover:not(:disabled) {
+		box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+	}
+
+	.btn-save-confirm:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
 	}
 
 	/* UTILS */
