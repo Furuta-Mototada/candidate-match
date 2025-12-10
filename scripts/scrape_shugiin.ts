@@ -1,38 +1,77 @@
-import { fetch } from 'undici';
 import dotenv from 'dotenv';
 dotenv.config();
-import { load } from 'cheerio';
-import postgres from 'postgres';
-import { drizzle } from 'drizzle-orm/postgres-js';
-import * as schema from '../src/lib/server/db/schema';
-import { eq, and } from 'drizzle-orm';
-import { parseJapaneseDate } from './date-utils';
 
-function resolveUrl(base: string, href: string) {
-	try {
-		return new URL(href, base).toString();
-	} catch {
-		return href;
+import { fetch } from 'undici';
+import { load } from 'cheerio';
+import { eq, and, inArray } from 'drizzle-orm';
+import { parseJapaneseDate } from './date-utils';
+import {
+	createDbConnection,
+	getOrCreateMember,
+	batchGetOrCreateMembers,
+	batchGetOrCreateGroups,
+	parseArgs,
+	hasFlag,
+	getPositionalInt,
+	resolveUrl,
+	DrizzleDB,
+	type BillType,
+	schema
+} from './lib';
+
+const BASE_URL = 'https://www.shugiin.go.jp';
+const DEFAULT_START_SESSION = 213;
+const DEFAULT_END_SESSION = 219;
+const DELAY = 500; // Rate limit delay between requests
+
+/**
+ * Fetch with retry logic for Shift-JIS encoded pages
+ */
+async function fetchShiftJIS(
+	url: string,
+	maxRetries = 3,
+	initialDelay = 1000
+): Promise<string | null> {
+	let lastError: Error | null = null;
+
+	for (let attempt = 0; attempt < maxRetries; attempt++) {
+		try {
+			await new Promise((resolve) => setTimeout(resolve, DELAY));
+
+			const res = await fetch(url);
+			if (res.status !== 200) {
+				console.warn(`Failed to fetch ${url}: ${res.status}`);
+				return null;
+			}
+
+			const buffer = await res.arrayBuffer();
+			const decoder = new TextDecoder('shift-jis');
+			return decoder.decode(buffer);
+		} catch (err) {
+			lastError = err as Error;
+			const delay = initialDelay * Math.pow(2, attempt);
+			console.warn(`Attempt ${attempt + 1} failed for ${url}, retrying in ${delay}ms...`);
+			await new Promise((resolve) => setTimeout(resolve, delay));
+		}
 	}
+
+	console.error(`All ${maxRetries} attempts failed for ${url}:`, lastError);
+	return null;
 }
 
 /**
- * Normalize a member name by:
- * - Removing honorifics (君)
- * - Removing all spaces (both half-width and full-width)
+ * Normalize a member name by removing honorifics and spaces
  */
 function normalizeMemberName(name: string): string {
 	return name
-		.replace(/君$/, '') // Remove trailing 君
-		.replace(/\u3000/g, '') // Remove full-width space (U+3000)
-		.replace(/ /g, '') // Remove half-width space
+		.replace(/君$/, '')
+		.replace(/\u3000/g, '')
+		.replace(/ /g, '')
 		.trim();
 }
 
 /**
- * Parse member names from a semicolon-separated string.
- * Names may have honorifics like "君" which should be removed.
- * Full-width spaces should be converted to half-width spaces.
+ * Parse member names from a semicolon-separated string
  */
 function parseMemberNames(text: string): string[] {
 	if (!text || text.trim() === '') return [];
@@ -43,32 +82,25 @@ function parseMemberNames(text: string): string[] {
 }
 
 /**
- * Parse sponsor name from 議案提出者 field.
- * This is used as a fallback when 議案提出者一覧 is not available.
- * Handles formats like:
- * - "神谷 宗幣君外四名" -> extracts "神谷宗幣"
- * - "文部科学委員長" -> returns as is (for committee chair lookup)
+ * Parse sponsor name from 議案提出者 field (fallback)
  */
 function parseSponsorFromSingle(text: string): string | null {
 	if (!text || text.trim() === '') return null;
 
-	// If it's a committee chair (contains 委員長), return as is
 	if (text.includes('委員長')) {
 		return text.trim();
 	}
 
-	// If it contains "外X名", extract just the first name
 	const match = text.match(/^(.+?)外[〇一二三四五六七八九十百千]+名/);
 	if (match) {
 		return normalizeMemberName(match[1]);
 	}
 
-	// Otherwise return the normalized text
 	return normalizeMemberName(text);
 }
 
 /**
- * Parse group names from a semicolon-separated string.
+ * Parse group names from a semicolon-separated string
  */
 function parseGroupNames(text: string): string[] {
 	if (!text || text.trim() === '') return [];
@@ -79,66 +111,7 @@ function parseGroupNames(text: string): string[] {
 }
 
 /**
- * Insert or get member from the database.
- */
-async function getOrCreateMember(
-	db: ReturnType<typeof drizzle>,
-	memberName: string
-): Promise<number> {
-	const existingMember = await db
-		.select()
-		.from(schema.member)
-		.where(eq(schema.member.name, memberName));
-
-	if (existingMember.length > 0) {
-		return existingMember[0].id as number;
-	}
-
-	const [newMember] = await db
-		.insert(schema.member)
-		.values({ name: memberName } as any)
-		.returning();
-
-	console.log(`  Inserted member: ${memberName} (ID: ${newMember.id})`);
-	return newMember.id as number;
-}
-
-/**
- * Insert or get group from the database.
- */
-async function getOrCreateGroup(
-	db: ReturnType<typeof drizzle>,
-	groupName: string
-): Promise<number> {
-	const existingGroup = await db
-		.select()
-		.from(schema.group)
-		.where(eq(schema.group.name, groupName));
-
-	if (existingGroup.length > 0) {
-		return existingGroup[0].id as number;
-	}
-
-	const [newGroup] = await db
-		.insert(schema.group)
-		.values({ name: groupName } as any)
-		.returning();
-
-	console.log(`  Inserted group: ${groupName} (ID: ${newGroup.id})`);
-	return newGroup.id as number;
-}
-
-/**
- * Search for committee chair information using the Kokkai API.
- * This is used when the bill sponsor is a committee chair (委員長).
- *
- * Uses the National Diet Library's Proceedings API to find committee meetings
- * and extract the chair's name from the meeting metadata.
- *
- * @param committeeName - The committee name (e.g., "厚生労働委員会")
- * @param submissionSession - The Diet session number
- * @param chamber - The chamber ("衆議院" or "参議院")
- * @returns The committee chair's name, or null if not found
+ * Search for committee chair using Kokkai API
  */
 async function searchCommitteeChair(
 	committeeName: string,
@@ -150,19 +123,19 @@ async function searchCommitteeChair(
 			`    Searching for committee chair: ${committeeName} (Session ${submissionSession}, ${chamber})`
 		);
 
-		// Use Kokkai API to search for committee meetings
-		// API documentation: https://kokkai.ndl.go.jp/api.html
 		const params = new URLSearchParams({
 			nameOfMeeting: committeeName,
 			nameOfHouse: chamber,
 			sessionFrom: submissionSession.toString(),
 			sessionTo: submissionSession.toString(),
 			recordPacking: 'json',
-			maximumRecords: '1' // Just need one meeting to get the chair
+			maximumRecords: '1'
 		});
 
 		const apiUrl = `https://kokkai.ndl.go.jp/api/meeting?${params.toString()}`;
 		console.log(`    Kokkai API URL: ${apiUrl}`);
+
+		await new Promise((resolve) => setTimeout(resolve, DELAY));
 
 		const res = await fetch(apiUrl);
 		if (res.status !== 200) {
@@ -192,11 +165,9 @@ async function searchCommitteeChair(
 			return null;
 		}
 
-		// Get the first meeting
 		const meeting = data.meetingRecord[0];
 		console.log(`    Meeting: ${meeting.nameOfMeeting} ${meeting.issue} (${meeting.date})`);
 
-		// Look for the first speech record which contains meeting info
 		const meetingInfo = meeting.speechRecord.find(
 			(s) => s.speechOrder === 0 && s.speaker === '会議録情報'
 		);
@@ -206,17 +177,14 @@ async function searchCommitteeChair(
 			return null;
 		}
 
-		// Extract chair name from meeting info text
-		// The text contains a line like: 委員長 (followed by spaces) 石田 昌宏君
 		const pattern = /委員長[\s\u3000]+([^\r\n]+君)/;
 		const match = meetingInfo.speech.match(pattern);
 
 		if (match) {
-			// Remove 君 suffix and normalize spaces
 			const chairName = match[1]
 				.replace(/君$/, '')
 				.replace(/\s+/g, '')
-				.replace(/\u3000/g, '') // Remove full-width space
+				.replace(/\u3000/g, '')
 				.trim();
 
 			console.log(`    ✓ Found committee chair: ${chairName}`);
@@ -231,174 +199,52 @@ async function searchCommitteeChair(
 	}
 }
 
-async function main() {
-	const DATABASE_URL = process.env.DATABASE_URL;
-	const DRY_RUN = process.argv.includes('--dry-run');
-
-	if (!DATABASE_URL && !DRY_RUN) {
-		console.error(
-			'DATABASE_URL is not set. Provide DATABASE_URL or run with --dry-run to skip DB writes.'
-		);
-		process.exit(1);
-	}
-
-	let client: ReturnType<typeof postgres> | null = null;
-	let db: ReturnType<typeof drizzle> | null = null;
-	if (!DRY_RUN && DATABASE_URL) {
-		client = postgres(DATABASE_URL);
-		db = drizzle(client, { schema });
-	}
-
-	const baseUrl = 'https://www.shugiin.go.jp';
-
-	// Allow command-line arguments for session range
-	const args = process.argv.slice(2).filter((arg) => !arg.startsWith('--'));
-	const startSession = args[0] ? parseInt(args[0]) : 213;
-	const endSession = args[1] ? parseInt(args[1]) : 219;
-
-	console.log(`Processing sessions ${startSession} to ${endSession}`);
-
-	for (let session = startSession; session <= endSession; session++) {
-		console.log(`\n=== Processing Session ${session} ===`);
-		const sessionUrl = `${baseUrl}/internet/itdb_gian.nsf/html/gian/kaiji${session}.htm`;
-
-		try {
-			const res = await fetch(sessionUrl);
-			if (res.status !== 200) {
-				console.warn(`Failed to fetch session ${session} page:`, res.status);
-				continue;
-			}
-
-			// Decode Shift-JIS encoded page
-			const buffer = await res.arrayBuffer();
-			const decoder = new TextDecoder('shift-jis');
-			const body = decoder.decode(buffer);
-			const $ = load(body);
-
-			// Collect bills to process
-			const billsToProcess: Array<{
-				session: number;
-				number: number;
-				title: string;
-				detailUrl: string;
-			}> = [];
-
-			// Find all bill rows in tables
-			// The structure has tables with bills listed as rows
-			$('table tr').each((i, row) => {
-				const cells = $(row).find('td');
-				if (cells.length < 3) return;
-
-				// Extract bill info from table cells
-				// Format: | 提出回次 | 議案番号 | 議案件名 | 審議状況 | 経過 | 本文 |
-				const billSession = parseInt(cells.eq(0).text().trim());
-				const billNumber = parseInt(cells.eq(1).text().trim());
-				const billTitle = cells.eq(2).text().trim();
-
-				// Skip if invalid
-				if (isNaN(billSession) || isNaN(billNumber) || !billTitle) return;
-
-				// Get bill detail link (経過 link)
-				const detailLink = cells.eq(4).find('a').attr('href');
-				if (!detailLink) return;
-
-				const billDetailUrl = resolveUrl(sessionUrl, detailLink);
-
-				billsToProcess.push({
-					session: billSession,
-					number: billNumber,
-					title: billTitle,
-					detailUrl: billDetailUrl
-				});
-			});
-
-			// Process bills sequentially
-			for (const bill of billsToProcess) {
-				await processBillDetail(db, bill.session, bill.number, bill.title, bill.detailUrl, DRY_RUN);
-			}
-		} catch (err) {
-			console.error(`Error processing session ${session}:`, err);
-		}
-	}
-
-	console.log('\nDone');
-	if (client) await client.end();
-}
-
+/**
+ * Process a single bill detail page
+ */
 async function processBillDetail(
-	db: ReturnType<typeof drizzle> | null,
+	db: DrizzleDB | null,
 	billSession: number,
 	billNumber: number,
 	billTitle: string,
 	billDetailUrl: string,
-	DRY_RUN: boolean
+	dryRun: boolean
 ) {
 	try {
 		console.log(`\nFetching bill detail: Session ${billSession}, Number ${billNumber}`);
 		console.log(`  Title: ${billTitle}`);
 		console.log(`  URL: ${billDetailUrl}`);
 
-		const detailRes = await fetch(billDetailUrl);
-		if (detailRes.status !== 200) {
-			console.warn(`  Failed to fetch bill detail: ${detailRes.status}`);
-			return;
-		}
+		const detailBody = await fetchShiftJIS(billDetailUrl);
+		if (!detailBody) return;
 
-		// Decode Shift-JIS encoded page
-		const detailBuffer = await detailRes.arrayBuffer();
-		const decoder = new TextDecoder('shift-jis');
-		const detailBody = decoder.decode(detailBuffer);
 		const $detail = load(detailBody);
 
-		// Extract bill type from the detail page
 		let billType: string | null = null;
 		let sponsors: string[] = [];
-		let sponsorFromSingle: string | null = null; // For 議案提出者 field
+		let sponsorFromSingle: string | null = null;
 		let sponsorGroups: string[] = [];
 		let supporters: string[] = [];
 		let approvalGroups: string[] = [];
 		let rejectionGroups: string[] = [];
 		let shugiinVotingDate: string | null = null;
 
-		// Parse the table rows for bill information
-		// The table structure uses <TD headers="KOMOKU"> for labels and <TD headers="NAIYO"> for values
-		$detail('table tr').each((i, row) => {
+		$detail('table tr').each((_, row) => {
 			const cells = $detail(row).find('td');
 			if (cells.length < 2) return;
 
 			const th = cells.eq(0).find('span').text().trim();
 			const td = cells.eq(1).find('span').text().trim();
 
-			if (th === '議案種類' && td) {
-				billType = td;
-			}
-
-			if (th === '議案提出者一覧' && td) {
-				sponsors = parseMemberNames(td);
-			}
-
-			if (th === '議案提出者' && td) {
-				sponsorFromSingle = parseSponsorFromSingle(td);
-			}
-
-			if (th === '議案提出会派' && td) {
-				sponsorGroups = parseGroupNames(td);
-			}
-
-			if (th === '議案提出の賛成者' && td) {
-				supporters = parseMemberNames(td);
-			}
-
-			if (th === '衆議院審議時賛成会派' && td) {
-				approvalGroups = parseGroupNames(td);
-			}
-
-			if (th === '衆議院審議時反対会派' && td) {
-				rejectionGroups = parseGroupNames(td);
-			}
+			if (th === '議案種類' && td) billType = td;
+			if (th === '議案提出者一覧' && td) sponsors = parseMemberNames(td);
+			if (th === '議案提出者' && td) sponsorFromSingle = parseSponsorFromSingle(td);
+			if (th === '議案提出会派' && td) sponsorGroups = parseGroupNames(td);
+			if (th === '議案提出の賛成者' && td) supporters = parseMemberNames(td);
+			if (th === '衆議院審議時賛成会派' && td) approvalGroups = parseGroupNames(td);
+			if (th === '衆議院審議時反対会派' && td) rejectionGroups = parseGroupNames(td);
 
 			if (th === '衆議院審議終了年月日／衆議院審議結果' && td) {
-				// Parse date from format like "令和7年11月1日／可決"
 				const dateMatch = td.match(/^([^／]+)／/);
 				if (dateMatch) {
 					shugiinVotingDate = parseJapaneseDate(dateMatch[1]);
@@ -420,24 +266,27 @@ async function processBillDetail(
 			return;
 		}
 
-		// If no sponsors from 議案提出者一覧, use 議案提出者 as fallback
+		// TypeScript narrowing - billType is now BillType
+		const validBillType: BillType = billType;
+
+		// Fallback for sponsors
 		if (sponsors.length === 0 && sponsorFromSingle) {
 			console.log(`  Using 議案提出者 as fallback: ${sponsorFromSingle}`);
 			sponsors = [sponsorFromSingle];
 		}
 
-		if (DRY_RUN) {
-			console.log(`[DRY-RUN] Would process bill: ${billType}-${billSession}-${billNumber}`);
+		if (dryRun || !db) {
+			console.log(`[DRY-RUN] Would process bill: ${validBillType}-${billSession}-${billNumber}`);
 			return;
 		}
 
-		// 1. Check if bill exists in database
-		const existingBills = await db!
+		// Check if bill exists
+		const existingBills = await db
 			.select()
 			.from(schema.bill)
 			.where(
 				and(
-					eq(schema.bill.type, billType as any),
+					eq(schema.bill.type, validBillType),
 					eq(schema.bill.submissionSession, billSession),
 					eq(schema.bill.number, billNumber)
 				)
@@ -454,127 +303,29 @@ async function processBillDetail(
 		const billId = existingBills[0].id as number;
 		console.log(`  Found bill in database with ID: ${billId}`);
 
-		// Process based on bill type (only for member-sponsored bills)
+		// Process 衆法 bills
 		if (billType === '衆法') {
-			// 衆法 processing
 			console.log(`\n  Processing 衆法 bill...`);
-
-			// b.i.1. Process sponsors (議案提出者一覧)
-			for (const sponsorName of sponsors) {
-				const memberId = await getOrCreateMember(db!, sponsorName);
-
-				// Check if sponsor relationship already exists
-				const existingSponsors = await db!
-					.select()
-					.from(schema.billSponsors)
-					.where(
-						and(eq(schema.billSponsors.billId, billId), eq(schema.billSponsors.memberId, memberId))
-					);
-
-				if (existingSponsors.length === 0) {
-					await db!.insert(schema.billSponsors).values({
-						billId: billId,
-						memberId: memberId
-					} as any);
-
-					console.log(`  Added sponsor: ${sponsorName} (Member ID: ${memberId})`);
-				}
-			}
-
-			// b.i.2. Process sponsor groups (議案提出会派)
-			for (const groupName of sponsorGroups) {
-				const groupId = await getOrCreateGroup(db!, groupName);
-
-				// Check if sponsor group relationship already exists
-				const existingSponsorGroups = await db!
-					.select()
-					.from(schema.billSponsorGroups)
-					.where(
-						and(
-							eq(schema.billSponsorGroups.billId, billId),
-							eq(schema.billSponsorGroups.groupId, groupId)
-						)
-					);
-
-				if (existingSponsorGroups.length === 0) {
-					await db!.insert(schema.billSponsorGroups).values({
-						billId: billId,
-						groupId: groupId
-					} as any);
-
-					console.log(`  Added sponsor group: ${groupName} (Group ID: ${groupId})`);
-				}
-			}
-
-			// b.i.3. Process supporters (議案提出の賛成者)
-			for (const supporterName of supporters) {
-				const memberId = await getOrCreateMember(db!, supporterName);
-
-				// Check if supporter relationship already exists
-				const existingSupporters = await db!
-					.select()
-					.from(schema.billSupporters)
-					.where(
-						and(
-							eq(schema.billSupporters.billId, billId),
-							eq(schema.billSupporters.memberId, memberId)
-						)
-					);
-
-				if (existingSupporters.length === 0) {
-					await db!.insert(schema.billSupporters).values({
-						billId: billId,
-						memberId: memberId
-					} as any);
-
-					console.log(`  Added supporter: ${supporterName} (Member ID: ${memberId})`);
-				}
-			}
-		} else if (billType === '参法') {
-			// 参法 processing
+			await processSponsorsAndSupporters(db, billId, sponsors, sponsorGroups, supporters);
+		}
+		// Process 参法 bills
+		else if (billType === '参法') {
 			console.log(`\n  Processing 参法 bill...`);
+			await processSponsorsAndSupporters(db, billId, sponsors, [], []);
 
-			// ii.1. Process sponsors
-			for (const sponsorName of sponsors) {
-				const memberId = await getOrCreateMember(db!, sponsorName);
-
-				// Check if sponsor relationship already exists
-				const existingSponsors = await db!
-					.select()
-					.from(schema.billSponsors)
-					.where(
-						and(eq(schema.billSponsors.billId, billId), eq(schema.billSponsors.memberId, memberId))
-					);
-
-				if (existingSponsors.length === 0) {
-					await db!.insert(schema.billSponsors).values({
-						billId: billId,
-						memberId: memberId
-					} as any);
-
-					console.log(`  Added sponsor: ${sponsorName} (Member ID: ${memberId})`);
-				}
-			}
-
-			// ii.c. Check if sponsor is a committee chair (委員長)
-			// If the sponsor list contains "委員長", we need to search for the actual name
+			// Handle committee chair sponsor lookup
 			if (sponsors.some((name) => name.includes('委員長'))) {
 				console.log(`  Bill sponsor is a committee chair, searching for actual name...`);
 
-				// Extract committee name from the sponsor field
-				// e.g., "厚生労働委員長" -> "厚生労働委員会"
 				const committeeChairName = sponsors.find((name) => name.includes('委員長'));
 				if (committeeChairName) {
 					const committeeName = committeeChairName.replace('委員長', '委員会');
-					const chamber = '参議院'; // 参法 bills are from 参議院
-
-					const chairName = await searchCommitteeChair(committeeName, billSession, chamber);
+					const chairName = await searchCommitteeChair(committeeName, billSession, '参議院');
 
 					if (chairName) {
-						const chairMemberId = await getOrCreateMember(db!, chairName);
+						const chairMemberId = await getOrCreateMember(db, chairName);
 
-						// Check if already added
-						const existingSponsors = await db!
+						const existingSponsors = await db
 							.select()
 							.from(schema.billSponsors)
 							.where(
@@ -585,11 +336,10 @@ async function processBillDetail(
 							);
 
 						if (existingSponsors.length === 0) {
-							await db!.insert(schema.billSponsors).values({
+							await db.insert(schema.billSponsors).values({
 								billId: billId,
 								memberId: chairMemberId
-							} as any);
-
+							});
 							console.log(
 								`  Added committee chair as sponsor: ${chairName} (Member ID: ${chairMemberId})`
 							);
@@ -597,109 +347,11 @@ async function processBillDetail(
 					}
 				}
 			}
-		} // d. Process voting groups (衆議院審議時賛成会派・衆議院審議時反対会派)
-		// This applies to ALL bill types (閣法, 衆法, 参法)
+		}
+
+		// Process voting groups for ALL bill types
 		if (approvalGroups.length > 0 || rejectionGroups.length > 0) {
-			console.log(`\n  Processing voting groups...`);
-			console.log(`  Voting date: ${shugiinVotingDate}`);
-			console.log(`  Approval groups: ${approvalGroups.join(', ')}`);
-			console.log(`  Rejection groups: ${rejectionGroups.join(', ')}`);
-
-			if (!shugiinVotingDate) {
-				console.warn(`  WARNING: No voting date found, cannot link to bill_votes`);
-			} else {
-				// Find matching bill_votes entry
-				const existingVotes = await db!
-					.select()
-					.from(schema.billVotes)
-					.where(
-						and(
-							eq(schema.billVotes.billId, billId),
-							eq(schema.billVotes.chamber, '衆議院'),
-							eq(schema.billVotes.votingDate, shugiinVotingDate)
-						)
-					);
-
-				console.log(`  Found ${existingVotes.length} matching bill_votes entries`);
-
-				if (existingVotes.length === 0) {
-					// Try to find any vote for this bill in 衆議院
-					const anyVotes = await db!
-						.select()
-						.from(schema.billVotes)
-						.where(
-							and(eq(schema.billVotes.billId, billId), eq(schema.billVotes.chamber, '衆議院'))
-						);
-
-					console.error(
-						`  ERROR: No bill_votes entry found for bill ${billId} with voting date ${shugiinVotingDate}`
-					);
-					if (anyVotes.length > 0) {
-						console.error(`  However, found ${anyVotes.length} vote(s) for this bill in 衆議院:`);
-						anyVotes.forEach((vote) => {
-							console.error(
-								`    - Vote ID ${vote.id}: date=${vote.votingDate}, method=${vote.votingMethod}`
-							);
-						});
-					}
-					console.error(`  Please ensure the voting record exists in the database first.`);
-				} else {
-					const voteId = existingVotes[0].id as number;
-					console.log(`  Found bill_votes entry with ID: ${voteId}`);
-
-					// Process approval groups
-					for (const groupName of approvalGroups) {
-						const groupId = await getOrCreateGroup(db!, groupName);
-
-						// Check if group vote result already exists
-						const existingResults = await db!
-							.select()
-							.from(schema.billVotesResultGroup)
-							.where(
-								and(
-									eq(schema.billVotesResultGroup.billVotesId, voteId),
-									eq(schema.billVotesResultGroup.groupId, groupId)
-								)
-							);
-
-						if (existingResults.length === 0) {
-							await db!.insert(schema.billVotesResultGroup).values({
-								billVotesId: voteId,
-								groupId: groupId,
-								approved: true
-							} as any);
-
-							console.log(`  Added approval group: ${groupName} (Group ID: ${groupId})`);
-						}
-					}
-
-					// Process rejection groups
-					for (const groupName of rejectionGroups) {
-						const groupId = await getOrCreateGroup(db!, groupName);
-
-						// Check if group vote result already exists
-						const existingResults = await db!
-							.select()
-							.from(schema.billVotesResultGroup)
-							.where(
-								and(
-									eq(schema.billVotesResultGroup.billVotesId, voteId),
-									eq(schema.billVotesResultGroup.groupId, groupId)
-								)
-							);
-
-						if (existingResults.length === 0) {
-							await db!.insert(schema.billVotesResultGroup).values({
-								billVotesId: voteId,
-								groupId: groupId,
-								approved: false
-							} as any);
-
-							console.log(`  Added rejection group: ${groupName} (Group ID: ${groupId})`);
-						}
-					}
-				}
-			}
+			await processVotingGroups(db, billId, shugiinVotingDate, approvalGroups, rejectionGroups);
 		}
 
 		console.log(`  Successfully processed bill: ${billType}-${billSession}-${billNumber}`);
@@ -708,6 +360,283 @@ async function processBillDetail(
 			`Error processing bill detail (Session ${billSession}, Number ${billNumber}):`,
 			err
 		);
+	}
+}
+
+/**
+ * Process sponsors and supporters for a bill (BATCHED)
+ */
+async function processSponsorsAndSupporters(
+	db: DrizzleDB,
+	billId: number,
+	sponsors: string[],
+	sponsorGroups: string[],
+	supporters: string[]
+) {
+	// Collect all unique member names and group names
+	const allMemberNames = [...new Set([...sponsors, ...supporters])];
+	const allGroupNames = [...new Set(sponsorGroups)];
+
+	// BATCH: Get or create all members and groups at once
+	const memberMap = await batchGetOrCreateMembers(db, allMemberNames);
+	const groupMap = await batchGetOrCreateGroups(db, allGroupNames);
+
+	// BATCH: Check existing sponsors
+	const sponsorMemberIds = sponsors.map((name) => memberMap.get(name)!).filter(Boolean);
+	const existingSponsors =
+		sponsorMemberIds.length > 0
+			? await db
+					.select()
+					.from(schema.billSponsors)
+					.where(
+						and(
+							eq(schema.billSponsors.billId, billId),
+							inArray(schema.billSponsors.memberId, sponsorMemberIds)
+						)
+					)
+			: [];
+	const existingSponsorIds = new Set(existingSponsors.map((s) => s.memberId));
+
+	// BATCH: Insert new sponsors
+	const newSponsors = sponsors
+		.map((name) => memberMap.get(name)!)
+		.filter((id) => id && !existingSponsorIds.has(id))
+		.map((memberId) => ({ billId, memberId }));
+
+	if (newSponsors.length > 0) {
+		await db.insert(schema.billSponsors).values(newSponsors);
+		console.log(`  Added ${newSponsors.length} sponsors`);
+	}
+
+	// BATCH: Check existing sponsor groups
+	const sponsorGroupIds = sponsorGroups.map((name) => groupMap.get(name)!).filter(Boolean);
+	const existingSponsorGroups =
+		sponsorGroupIds.length > 0
+			? await db
+					.select()
+					.from(schema.billSponsorGroups)
+					.where(
+						and(
+							eq(schema.billSponsorGroups.billId, billId),
+							inArray(schema.billSponsorGroups.groupId, sponsorGroupIds)
+						)
+					)
+			: [];
+	const existingSponsorGroupIds = new Set(existingSponsorGroups.map((g) => g.groupId));
+
+	// BATCH: Insert new sponsor groups
+	const newSponsorGroups = sponsorGroups
+		.map((name) => groupMap.get(name)!)
+		.filter((id) => id && !existingSponsorGroupIds.has(id))
+		.map((groupId) => ({ billId, groupId }));
+
+	if (newSponsorGroups.length > 0) {
+		await db.insert(schema.billSponsorGroups).values(newSponsorGroups);
+		console.log(`  Added ${newSponsorGroups.length} sponsor groups`);
+	}
+
+	// BATCH: Check existing supporters
+	const supporterMemberIds = supporters.map((name) => memberMap.get(name)!).filter(Boolean);
+	const existingSupporters =
+		supporterMemberIds.length > 0
+			? await db
+					.select()
+					.from(schema.billSupporters)
+					.where(
+						and(
+							eq(schema.billSupporters.billId, billId),
+							inArray(schema.billSupporters.memberId, supporterMemberIds)
+						)
+					)
+			: [];
+	const existingSupporterIds = new Set(existingSupporters.map((s) => s.memberId));
+
+	// BATCH: Insert new supporters
+	const newSupporters = supporters
+		.map((name) => memberMap.get(name)!)
+		.filter((id) => id && !existingSupporterIds.has(id))
+		.map((memberId) => ({ billId, memberId }));
+
+	if (newSupporters.length > 0) {
+		await db.insert(schema.billSupporters).values(newSupporters);
+		console.log(`  Added ${newSupporters.length} supporters`);
+	}
+}
+
+/**
+ * Process voting groups for a bill
+ */
+async function processVotingGroups(
+	db: DrizzleDB,
+	billId: number,
+	votingDate: string | null,
+	approvalGroups: string[],
+	rejectionGroups: string[]
+) {
+	console.log(`\n  Processing voting groups...`);
+	console.log(`  Voting date: ${votingDate}`);
+	console.log(`  Approval groups: ${approvalGroups.join(', ')}`);
+	console.log(`  Rejection groups: ${rejectionGroups.join(', ')}`);
+
+	if (!votingDate) {
+		console.warn(`  WARNING: No voting date found, cannot link to bill_votes`);
+		return;
+	}
+
+	// Find matching bill_votes entry
+	const existingVotes = await db
+		.select()
+		.from(schema.billVotes)
+		.where(
+			and(
+				eq(schema.billVotes.billId, billId),
+				eq(schema.billVotes.chamber, '衆議院'),
+				eq(schema.billVotes.votingDate, votingDate)
+			)
+		);
+
+	console.log(`  Found ${existingVotes.length} matching bill_votes entries`);
+
+	if (existingVotes.length === 0) {
+		const anyVotes = await db
+			.select()
+			.from(schema.billVotes)
+			.where(and(eq(schema.billVotes.billId, billId), eq(schema.billVotes.chamber, '衆議院')));
+
+		console.error(
+			`  ERROR: No bill_votes entry found for bill ${billId} with voting date ${votingDate}`
+		);
+		if (anyVotes.length > 0) {
+			console.error(`  However, found ${anyVotes.length} vote(s) for this bill in 衆議院:`);
+			anyVotes.forEach((vote) => {
+				console.error(
+					`    - Vote ID ${vote.id}: date=${vote.votingDate}, method=${vote.votingMethod}`
+				);
+			});
+		}
+		return;
+	}
+
+	const voteId = existingVotes[0].id as number;
+	console.log(`  Found bill_votes entry with ID: ${voteId}`);
+
+	// BATCH: Get or create all groups at once
+	const allGroupNames = [...new Set([...approvalGroups, ...rejectionGroups])];
+	const groupMap = await batchGetOrCreateGroups(db, allGroupNames);
+
+	// BATCH: Check existing vote results for all groups
+	const allGroupIds = [...groupMap.values()];
+	const existingResults =
+		allGroupIds.length > 0
+			? await db
+					.select()
+					.from(schema.billVotesResultGroup)
+					.where(
+						and(
+							eq(schema.billVotesResultGroup.billVotesId, voteId),
+							inArray(schema.billVotesResultGroup.groupId, allGroupIds)
+						)
+					)
+			: [];
+	const existingGroupIds = new Set(existingResults.map((r) => r.groupId));
+
+	// BATCH: Insert approval group results
+	const newApprovalResults = approvalGroups
+		.map((name) => groupMap.get(name)!)
+		.filter((id) => id && !existingGroupIds.has(id))
+		.map((groupId) => ({ billVotesId: voteId, groupId, approved: true }));
+
+	// BATCH: Insert rejection group results
+	const newRejectionResults = rejectionGroups
+		.map((name) => groupMap.get(name)!)
+		.filter((id) => id && !existingGroupIds.has(id))
+		.map((groupId) => ({ billVotesId: voteId, groupId, approved: false }));
+
+	const allNewResults = [...newApprovalResults, ...newRejectionResults];
+	if (allNewResults.length > 0) {
+		await db.insert(schema.billVotesResultGroup).values(allNewResults);
+		console.log(
+			`  Added ${newApprovalResults.length} approval groups, ${newRejectionResults.length} rejection groups`
+		);
+	}
+}
+
+async function main() {
+	const args = parseArgs();
+	const DRY_RUN = hasFlag(args, 'dry-run');
+	const DATABASE_URL = process.env.DATABASE_URL;
+
+	const startSession = getPositionalInt(args, 0, DEFAULT_START_SESSION)!;
+	const endSession = getPositionalInt(args, 1, DEFAULT_END_SESSION)!;
+
+	if (!DATABASE_URL && !DRY_RUN) {
+		console.error('DATABASE_URL is not set. Provide DATABASE_URL or run with --dry-run.');
+		process.exit(1);
+	}
+
+	let client: { end: () => Promise<void> } | null = null;
+	let db: DrizzleDB | null = null;
+
+	if (!DRY_RUN && DATABASE_URL) {
+		const conn = createDbConnection(DATABASE_URL);
+		client = conn.client;
+		db = conn.db;
+	}
+
+	console.log(`Processing sessions ${startSession} to ${endSession}`);
+
+	try {
+		for (let session = startSession; session <= endSession; session++) {
+			console.log(`\n=== Processing Session ${session} ===`);
+			const sessionUrl = `${BASE_URL}/internet/itdb_gian.nsf/html/gian/kaiji${session}.htm`;
+
+			const body = await fetchShiftJIS(sessionUrl);
+			if (!body) continue;
+
+			const $ = load(body);
+
+			// Collect bills to process
+			const billsToProcess: Array<{
+				session: number;
+				number: number;
+				title: string;
+				detailUrl: string;
+			}> = [];
+
+			$('table tr').each((_, row) => {
+				const cells = $(row).find('td');
+				if (cells.length < 3) return;
+
+				const billSession = parseInt(cells.eq(0).text().trim());
+				const billNumber = parseInt(cells.eq(1).text().trim());
+				const billTitle = cells.eq(2).text().trim();
+
+				if (isNaN(billSession) || isNaN(billNumber) || !billTitle) return;
+
+				const detailLink = cells.eq(4).find('a').attr('href');
+				if (!detailLink) return;
+
+				const billDetailUrl = resolveUrl(sessionUrl, detailLink);
+
+				billsToProcess.push({
+					session: billSession,
+					number: billNumber,
+					title: billTitle,
+					detailUrl: billDetailUrl
+				});
+			});
+
+			console.log(`Found ${billsToProcess.length} bills to process`);
+
+			// Process bills sequentially
+			for (const bill of billsToProcess) {
+				await processBillDetail(db, bill.session, bill.number, bill.title, bill.detailUrl, DRY_RUN);
+			}
+		}
+
+		console.log('\nDone');
+	} finally {
+		if (client) await client.end();
 	}
 }
 

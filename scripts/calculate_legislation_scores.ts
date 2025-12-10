@@ -156,12 +156,8 @@ async function calculateLegislationScores(): Promise<LegislationScore[]> {
 	for (const bill of bills) {
 		console.log(`Processing Bill ID: ${bill.id}`);
 
-		// Get bill details
-		const billDetails = await db
-			.select()
-			.from(schema.billDetail)
-			.where(eq(schema.billDetail.billId, bill.id));
-		const billTitle = billDetails.length > 0 ? billDetails[0].title || '無題' : '無題';
+		// Get bill title
+		const billTitle = bill.title || '無題';
 
 		// Initialize member scores map for this legislation
 		const memberScoresMap = new Map<number, MemberLegislationScore>();

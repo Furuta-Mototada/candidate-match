@@ -55,24 +55,24 @@ def load_bill_cluster_assignments(conn, cluster_id: int) -> Dict[int, int]:
 
 
 def load_bill_info(conn) -> Dict[int, Dict]:
-    """Load bill information including passed status."""
+    """Load bill information including result status."""
     cursor = conn.cursor()
     cursor.execute(
         """
-        SELECT b.id, b.passed, b.deliberation_completed, bd.title, bd.description
+        SELECT b.id, b.result, b.title
         FROM bill b
-        LEFT JOIN bill_detail bd ON b.id = bd.bill_id
     """
     )
 
     bills = {}
     for row in cursor.fetchall():
+        result = row[1]
         bills[row[0]] = {
             "id": row[0],
-            "passed": row[1] or False,
-            "deliberation_completed": row[2] or False,
-            "title": row[3] or "",
-            "description": row[4] or "",
+            "result": result,
+            "passed": result == "可決",
+            "deliberation_completed": result is not None,
+            "title": row[2] or "",
         }
     cursor.close()
     return bills

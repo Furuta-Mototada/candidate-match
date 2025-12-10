@@ -15,12 +15,26 @@ import {
 // Enums
 export const chamberEnum = pgEnum('chamber', ['参議院', '衆議院']);
 export const billTypeEnum = pgEnum('bill_type', ['衆法', '参法', '閣法']);
+export const billResultEnum = pgEnum('bill_result', ['可決', '否決', '撤回', '未了']);
 export const votingMethodEnum = pgEnum('voting_method', [
 	'異議なし採決',
 	'起立投票',
 	'記名投票',
 	'押しボタン'
 ]);
+export const sessionTypeEnum = pgEnum('session_type', ['常会', '臨時会', '特別会']);
+
+// Congress session table - stores Diet session information
+export const congressSession = pgTable('congress_session', {
+	id: serial('id').primaryKey(),
+	sessionNumber: integer('session_number').notNull().unique(), // 回次 (e.g., 219)
+	sessionType: sessionTypeEnum('session_type').notNull(), // 常会/臨時会/特別会
+	startDate: date('start_date').notNull(), // 開会日
+	endDate: date('end_date') // 閉会日 (null if dissolved)
+});
+
+export type CongressSession = typeof congressSession.$inferSelect;
+export type NewCongressSession = typeof congressSession.$inferInsert;
 
 // Bill table
 export const bill = pgTable(
@@ -28,11 +42,15 @@ export const bill = pgTable(
 	{
 		id: serial('id').primaryKey(),
 		type: billTypeEnum('type').notNull(), // 種類 (衆法/参法/閣法)
-		submissionSession: integer('submission_session').notNull(), // 提出回次
+		submissionSession: integer('submission_session')
+			.notNull()
+			.references(() => congressSession.sessionNumber), // 提出回次
 		number: integer('number').notNull(), // 番号
+		title: text('title'), // 件名
 		submissionDate: date('submission_date'), // 提出日
-		deliberationCompleted: boolean('deliberation_completed').default(false), // 審議終了
-		passed: boolean('passed').default(false) // 可決
+		result: billResultEnum('result'), // 結果 (可決/否決/撤回/未了)
+		resultDate: date('result_date'), // 審議完了日（可決日/否決日/撤回日/会期終了日）
+		committeeName: text('committee_name') // 委員会発議の場合の委員会名
 	},
 	(table) => [unique().on(table.type, table.submissionSession, table.number)]
 );
@@ -40,17 +58,23 @@ export const bill = pgTable(
 export type Bill = typeof bill.$inferSelect;
 export type NewBill = typeof bill.$inferInsert;
 
-// Bill detail table
-export const billDetail = pgTable('bill_detail', {
-	billId: integer('bill_id')
-		.primaryKey()
-		.references(() => bill.id),
-	title: text('title'), // 件名
-	description: text('description') // 解説
-});
+// Bill-Session relation table - tracks which sessions a bill was debated in
+export const billSession = pgTable(
+	'bill_session',
+	{
+		billId: integer('bill_id')
+			.notNull()
+			.references(() => bill.id),
+		sessionNumber: integer('session_number')
+			.notNull()
+			.references(() => congressSession.sessionNumber),
+		isSubmissionSession: boolean('is_submission_session').notNull().default(false) // true if this is the original submission session
+	},
+	(table) => [primaryKey({ columns: [table.billId, table.sessionNumber] })]
+);
 
-export type BillDetail = typeof billDetail.$inferSelect;
-export type NewBillDetail = typeof billDetail.$inferInsert;
+export type BillSession = typeof billSession.$inferSelect;
+export type NewBillSession = typeof billSession.$inferInsert;
 
 // Committee table
 export const committee = pgTable('committee', {
@@ -71,7 +95,9 @@ export const committeeBill = pgTable('committee_bill', {
 	billId: integer('bill_id')
 		.notNull()
 		.references(() => bill.id),
-	session: integer('session').notNull() // 回次
+	session: integer('session')
+		.notNull()
+		.references(() => congressSession.sessionNumber) // 回次
 });
 
 export type CommitteeBill = typeof committeeBill.$inferSelect;
@@ -114,7 +140,8 @@ export type NewMemberParty = typeof memberParty.$inferInsert;
 // Group table
 export const group = pgTable('group', {
 	id: serial('id').primaryKey(),
-	name: text('name').notNull() // 会派名
+	name: text('name').notNull(), // 会派名
+	chamber: chamberEnum('chamber') // 議会 (参議院/衆議院)
 });
 
 export type Group = typeof group.$inferSelect;
@@ -206,6 +233,9 @@ export const billVotes = pgTable('bill_votes', {
 	billId: integer('bill_id')
 		.notNull()
 		.references(() => bill.id),
+	session: integer('session')
+		.notNull()
+		.references(() => congressSession.sessionNumber), // 回次
 	chamber: chamberEnum('chamber').notNull(), // 議会 (衆議院/参議院)
 	votingMethod: votingMethodEnum('voting_method').notNull(), // 表決形式 (異議なし採決/起立投票/記名投票/押しボタン)
 	votingDate: date('voting_date') // 議決日
@@ -491,7 +521,9 @@ export const billDebates = pgTable('bill_debates', {
 	// Meeting info from Kokkai API
 	meetingId: text('meeting_id').notNull(), // issueID from API
 	speechId: text('speech_id').notNull().unique(), // speechID from API
-	session: integer('session').notNull(), // 国会回次
+	session: integer('session')
+		.notNull()
+		.references(() => congressSession.sessionNumber), // 国会回次
 	house: text('house').notNull(), // 院名 (衆議院/参議院)
 	meetingName: text('meeting_name').notNull(), // 会議名
 	issueNumber: text('issue_number'), // 号数

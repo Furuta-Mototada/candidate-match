@@ -40,7 +40,6 @@ def hash_text(text: str) -> str:
 def generate_enrichment(
     client: openai.OpenAI,
     bill_title: str,
-    bill_description: Optional[str],
     pdf_text: Optional[str],
     debate_summary: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
@@ -48,9 +47,6 @@ def generate_enrichment(
 
     # Build context from available sources
     context = f"法案名: {bill_title}\n\n"
-
-    if bill_description:
-        context += f"概要: {bill_description}\n\n"
 
     if pdf_text:
         # Truncate PDF text to avoid token limits
@@ -145,13 +141,11 @@ def get_bills_to_enrich(
         query = """
         SELECT
             b.id,
-            bd.title,
-            bd.description,
+            b.title,
             bem.text_content as pdf_text,
             be.status,
             (SELECT COUNT(*) FROM bill_debates db WHERE db.bill_id = b.id) as debate_count
         FROM bill b
-        INNER JOIN bill_detail bd ON b.id = bd.bill_id
         LEFT JOIN bill_embeddings bem ON b.id = bem.bill_id
         LEFT JOIN bill_enrichment be ON b.id = be.bill_id
         WHERE b.id = %s
@@ -174,13 +168,11 @@ def get_bills_to_enrich(
     query = f"""
     SELECT
         b.id,
-        bd.title,
-        bd.description,
+        b.title,
         bem.text_content as pdf_text,
         be.status,
         (SELECT COUNT(*) FROM bill_debates db WHERE db.bill_id = b.id) as debate_count
     FROM bill b
-    INNER JOIN bill_detail bd ON b.id = bd.bill_id
     LEFT JOIN bill_embeddings bem ON b.id = bem.bill_id
     LEFT JOIN bill_enrichment be ON b.id = be.bill_id
     WHERE {where_clause}
@@ -372,13 +364,12 @@ def main():
             result = generate_enrichment(
                 client,
                 bill["title"],
-                bill.get("description"),
                 bill.get("pdf_text"),
                 debate_summary,
             )
 
             # Build source text hash for change detection
-            source_text = f"{bill['title']}|{bill.get('description', '')}|{(bill.get('pdf_text') or '')[:1000]}"
+            source_text = f"{bill['title']}|{(bill.get('pdf_text') or '')[:1000]}"
             result["sourceHash"] = hash_text(source_text)
 
             # Save to database

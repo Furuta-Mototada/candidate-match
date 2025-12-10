@@ -29,9 +29,9 @@ def get_cluster_bills(conn, cluster_id: int) -> Dict[int, List[str]]:
         """
         SELECT 
             bca.cluster_label,
-            bd.title
+            b.title
         FROM bill_cluster_assignments bca
-        JOIN bill_detail bd ON bca.bill_id = bd.bill_id
+        JOIN bill b ON bca.bill_id = b.id
         WHERE bca.cluster_id = %s
         ORDER BY bca.cluster_label, bca.distance
     """,

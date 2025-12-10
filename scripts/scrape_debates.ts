@@ -10,19 +10,26 @@
  *
  * Usage:
  *   pnpm scrape:debates --limit 10 --skip-existing --verbose
+ *   pnpm scrape:debates --dry-run
+ *   pnpm scrape:debates --bill-id 123
  */
 
 import dotenv from 'dotenv';
 dotenv.config();
 
 import { chromium, type Page } from 'playwright';
-import { drizzle } from 'drizzle-orm/postgres-js';
-import { eq, sql } from 'drizzle-orm';
-import postgres from 'postgres';
+import { eq, sql, inArray } from 'drizzle-orm';
 import * as schema from '../src/lib/server/db/schema';
+import {
+	createDbConnection,
+	parseArgs,
+	hasFlag,
+	getValue,
+	ProgressTracker,
+	DrizzleDB
+} from './lib';
 
 // Configuration
-const DATABASE_URL = process.env.DATABASE_URL || '';
 const KOKKAI_API_BASE = 'https://kokkai.ndl.go.jp/api';
 const HOUREI_BASE = 'https://hourei.ndl.go.jp';
 const REQUEST_DELAY = 500;
@@ -67,31 +74,20 @@ interface KokkaiSpeech {
 	speechURL: string;
 }
 
-// Database
-const client = postgres(DATABASE_URL);
-const db = drizzle(client, { schema });
-
-// CLI Options
-const args = process.argv.slice(2);
-
-function getArgValue(name: string): string | undefined {
-	// Handle both --name=value and --name value formats
-	const eqIndex = args.findIndex((a) => a.startsWith(`--${name}=`));
-	if (eqIndex !== -1) {
-		return args[eqIndex].split('=')[1];
-	}
-	const spaceIndex = args.findIndex((a) => a === `--${name}`);
-	if (spaceIndex !== -1 && args[spaceIndex + 1] && !args[spaceIndex + 1].startsWith('-')) {
-		return args[spaceIndex + 1];
-	}
-	return undefined;
+interface DebateProgress {
+	processedBillIds: number[];
+	lastBillId: number;
 }
 
+// Parse CLI arguments
+const args = parseArgs();
 const options = {
-	limit: parseInt(getArgValue('limit') || '0') || Infinity,
-	skipExisting: args.includes('--skip-existing'),
-	verbose: args.includes('--verbose'),
-	billId: parseInt(getArgValue('bill-id') || '0') || null
+	limit: parseInt(getValue(args, 'limit') || '0') || Infinity,
+	skipExisting: hasFlag(args, 'skip-existing'),
+	verbose: hasFlag(args, 'verbose'),
+	billId: parseInt(getValue(args, 'bill-id') || '0') || null,
+	dryRun: hasFlag(args, 'dry-run'),
+	resume: hasFlag(args, 'resume')
 };
 
 function log(...messages: unknown[]) {
@@ -109,18 +105,16 @@ async function searchHoureiBills(
 	try {
 		await page.goto(`${HOUREI_BASE}/simple/`, { waitUntil: 'networkidle' });
 
-		// Include session number in search to narrow down results
 		const searchQuery = sessionNumber ? `${keyword} 第${sessionNumber}回` : keyword;
 		await page.fill('input#fw', searchQuery);
 		await page.click('button[name="searchFreeword"]');
 		await page.waitForLoadState('networkidle');
 
-		// Collect results from all pages
 		const allResults: Array<{ lawId?: string; billId?: string; name: string; session?: string }> =
 			[];
 		let hasNextPage = true;
 		let pageNum = 1;
-		const maxPages = 10; // Safety limit
+		const maxPages = 10;
 
 		while (hasNextPage && pageNum <= maxPages) {
 			const pageResults = await page.evaluate(() => {
@@ -149,7 +143,6 @@ async function searchHoureiBills(
 
 			allResults.push(...pageResults);
 
-			// Check for next page button and click it
 			const nextButton = page
 				.locator('a.page-link:has-text("次へ"), button:has-text("次へ")')
 				.first();
@@ -187,7 +180,6 @@ async function fetchHoureiBillDetails(
 		log(`  Fetching: ${url}`);
 		await page.goto(url, { waitUntil: 'networkidle' });
 
-		// Extract basic info
 		const getText = async (label: string): Promise<string> => {
 			const spans = await page.locator('span').all();
 			for (const span of spans) {
@@ -205,7 +197,6 @@ async function fetchHoureiBillDetails(
 		const submissionSession = await getText('提出回次');
 		const remarks = await getText('備考');
 
-		// Extract deliberation records
 		const deliberations: DeliberationRecord[] = [];
 		const deliberationSection = page
 			.locator('section')
@@ -234,7 +225,6 @@ async function fetchHoureiBillDetails(
 					pageRange = (await activitySpans[1].textContent())?.trim() || '';
 				}
 
-				// Parse title like "第193回国会 衆議院 本会議 第20号 平成29年4月18日"
 				const match = titleText.match(/第(\d+)回国会\s+(.+?)\s+(.+?)\s+第(\d+)号\s+(.+)/);
 
 				deliberations.push({
@@ -275,12 +265,10 @@ async function findHoureiBill(
 	const sessionStr = `第${session}回国会`;
 	log(`  Searching hourei for: "${billTitle}" in ${sessionStr}`);
 
-	// Search with session number to narrow down results
 	const searchResults = await searchHoureiBills(page, billTitle, session);
 	log(`  Found ${searchResults.length} search results`);
 
 	for (const result of searchResults) {
-		// Quick check from search results
 		if (result.session === sessionStr) {
 			log(`  Match found from search: ${result.name}`);
 			if (result.lawId) {
@@ -290,7 +278,6 @@ async function findHoureiBill(
 			}
 		}
 
-		// Check detail page for submission session
 		const url = result.lawId
 			? `${HOUREI_BASE}/simple/detail?lawId=${result.lawId}`
 			: `${HOUREI_BASE}/simple/detail?billId=${result.billId}&searchDiv=2`;
@@ -320,11 +307,7 @@ async function findHoureiBill(
 }
 
 // Extract meeting parameters from kokkai URL
-// Handles both formats:
-// 1. /txt/119304889X02020170418/1 (old format)
-// 2. /simple/detail?minId=119804601X00120190205&spkNum=1 (from hourei.ndl.go.jp)
 function parseKokkaiUrl(url: string): { issueId: string; speechIndex?: number } | null {
-	// Try the /txt/ format first
 	const txtMatch = url.match(/\/txt\/(\d+X\d+)/);
 	if (txtMatch) {
 		const parts = url.split('/');
@@ -335,7 +318,6 @@ function parseKokkaiUrl(url: string): { issueId: string; speechIndex?: number } 
 		};
 	}
 
-	// Try the minId format (from hourei.ndl.go.jp)
 	const minIdMatch = url.match(/minId=(\d+X\d+)/);
 	if (minIdMatch) {
 		const spkNumMatch = url.match(/spkNum=(\d+)/);
@@ -348,118 +330,147 @@ function parseKokkaiUrl(url: string): { issueId: string; speechIndex?: number } 
 	return null;
 }
 
-// Fetch speeches for a specific meeting from Kokkai API
-async function fetchMeetingSpeeches(issueId: string): Promise<KokkaiSpeech[]> {
+// Fetch speeches for a specific meeting from Kokkai API (with retry)
+async function fetchMeetingSpeeches(issueId: string, maxRetries = 3): Promise<KokkaiSpeech[]> {
 	const url = `${KOKKAI_API_BASE}/speech?issueID=${issueId}&recordPacking=json`;
 	log(`    Fetching speeches for issue: ${issueId}`);
 
-	try {
-		const response = await fetch(url);
-		if (!response.ok) {
-			console.error(`API error: ${response.status}`);
-			return [];
+	for (let attempt = 0; attempt < maxRetries; attempt++) {
+		try {
+			await new Promise((resolve) => setTimeout(resolve, REQUEST_DELAY));
+
+			const response = await fetch(url);
+			if (!response.ok) {
+				console.error(`API error: ${response.status}`);
+				if (attempt < maxRetries - 1) {
+					await new Promise((resolve) => setTimeout(resolve, 1000 * Math.pow(2, attempt)));
+					continue;
+				}
+				return [];
+			}
+
+			const data = await response.json();
+
+			if (!data.speechRecord) {
+				return [];
+			}
+
+			return data.speechRecord.map((record: Record<string, unknown>) => ({
+				speechID: record.speechID,
+				issueID: record.issueID,
+				session: parseInt(String(record.session)),
+				nameOfHouse: record.nameOfHouse,
+				nameOfMeeting: record.nameOfMeeting,
+				issue: record.issue,
+				date: record.date,
+				speaker: record.speaker,
+				speakerGroup: record.speakerGroup || '',
+				speakerPosition: record.speakerPosition || '',
+				speakerRole: record.speakerRole || '',
+				speechOrder: parseInt(String(record.speechOrder)),
+				speech: record.speech,
+				speechURL: record.speechURL
+			}));
+		} catch (error) {
+			console.error(`Error fetching speeches for ${issueId}:`, error);
+			if (attempt < maxRetries - 1) {
+				await new Promise((resolve) => setTimeout(resolve, 1000 * Math.pow(2, attempt)));
+			}
 		}
-
-		const data = await response.json();
-
-		if (!data.speechRecord) {
-			return [];
-		}
-
-		return data.speechRecord.map((record: Record<string, unknown>) => ({
-			speechID: record.speechID,
-			issueID: record.issueID,
-			session: parseInt(String(record.session)),
-			nameOfHouse: record.nameOfHouse,
-			nameOfMeeting: record.nameOfMeeting,
-			issue: record.issue,
-			date: record.date,
-			speaker: record.speaker,
-			speakerGroup: record.speakerGroup || '',
-			speakerPosition: record.speakerPosition || '',
-			speakerRole: record.speakerRole || '',
-			speechOrder: parseInt(String(record.speechOrder)),
-			speech: record.speech,
-			speechURL: record.speechURL
-		}));
-	} catch (error) {
-		console.error(`Error fetching speeches for ${issueId}:`, error);
-		return [];
 	}
+
+	return [];
 }
 
 // Get bills that need debate scraping
-async function getBillsToProcess() {
+async function getBillsToProcess(db: DrizzleDB, skipExisting: boolean, billId: number | null) {
 	const query = db
 		.select({
 			id: schema.bill.id,
 			type: schema.bill.type,
 			session: schema.bill.submissionSession,
 			number: schema.bill.number,
-			title: schema.billDetail.title
+			title: schema.bill.title
 		})
-		.from(schema.bill)
-		.innerJoin(schema.billDetail, eq(schema.bill.id, schema.billDetail.billId));
+		.from(schema.bill);
 
-	if (options.billId) {
-		return query.where(eq(schema.bill.id, options.billId));
+	if (billId) {
+		return query.where(eq(schema.bill.id, billId));
 	}
 
-	if (options.skipExisting) {
+	if (skipExisting) {
 		return query.where(sql`${schema.bill.id} NOT IN (SELECT bill_id FROM bill_debates)`);
 	}
 
 	return query;
 }
 
-// Check if a speech already exists in the database
-async function speechExists(speechId: string): Promise<boolean> {
+// BATCH: Save multiple speeches to the database
+async function saveSpeeches(
+	db: DrizzleDB,
+	billId: number,
+	speeches: KokkaiSpeech[],
+	dryRun: boolean
+): Promise<number> {
+	if (speeches.length === 0) return 0;
+
+	// BATCH: Get all existing speech IDs in one query
+	const speechIds = speeches.map((s) => s.speechID);
 	const existing = await db
-		.select({ id: schema.billDebates.id })
+		.select({ speechId: schema.billDebates.speechId })
 		.from(schema.billDebates)
-		.where(eq(schema.billDebates.speechId, speechId))
-		.limit(1);
+		.where(inArray(schema.billDebates.speechId, speechIds));
 
-	return existing.length > 0;
-}
+	const existingSet = new Set(existing.map((e) => e.speechId));
 
-// Save a speech to the database
-async function saveSpeech(billId: number, speech: KokkaiSpeech): Promise<boolean> {
+	// Filter to only new speeches
+	const newSpeeches = speeches.filter((s) => !existingSet.has(s.speechID));
+
+	if (newSpeeches.length === 0) {
+		log(`    All ${speeches.length} speeches already exist`);
+		return 0;
+	}
+
+	if (dryRun) {
+		log(`    [DRY-RUN] Would save ${newSpeeches.length} speeches`);
+		return newSpeeches.length;
+	}
+
+	// BATCH: Insert all new speeches at once
 	try {
-		if (await speechExists(speech.speechID)) {
-			log(`    Skipping existing speech: ${speech.speechID}`);
-			return false;
-		}
-
-		await db.insert(schema.billDebates).values({
-			billId,
-			meetingId: speech.issueID,
-			speechId: speech.speechID,
-			session: speech.session,
-			house: speech.nameOfHouse,
-			meetingName: speech.nameOfMeeting,
-			issueNumber: speech.issue,
-			meetingDate: speech.date,
-			speakerName: speech.speaker,
-			speakerGroup: speech.speakerGroup || null,
-			speakerPosition: speech.speakerPosition || null,
-			speakerRole: speech.speakerRole || null,
-			speechOrder: speech.speechOrder,
-			speechContent: speech.speech,
-			speechUrl: speech.speechURL || null
-		});
-
-		return true;
+		await db.insert(schema.billDebates).values(
+			newSpeeches.map((speech) => ({
+				billId,
+				meetingId: speech.issueID,
+				speechId: speech.speechID,
+				session: speech.session,
+				house: speech.nameOfHouse,
+				meetingName: speech.nameOfMeeting,
+				issueNumber: speech.issue,
+				meetingDate: speech.date,
+				speakerName: speech.speaker,
+				speakerGroup: speech.speakerGroup || null,
+				speakerPosition: speech.speakerPosition || null,
+				speakerRole: speech.speakerRole || null,
+				speechOrder: speech.speechOrder,
+				speechContent: speech.speech,
+				speechUrl: speech.speechURL || null
+			}))
+		);
+		log(`    Saved ${newSpeeches.length} new speeches (${existingSet.size} already existed)`);
+		return newSpeeches.length;
 	} catch (error) {
-		console.error(`Error saving speech ${speech.speechID}:`, error);
-		return false;
+		console.error(`Error saving speeches for bill ${billId}:`, error);
+		return 0;
 	}
 }
 
 // Process a single bill
 async function processBill(
 	page: Page,
-	bill: { id: number; type: string; session: number; number: number; title: string | null }
+	db: DrizzleDB | null,
+	bill: { id: number; type: string; session: number; number: number; title: string | null },
+	dryRun: boolean
 ): Promise<{ meetingsFound: number; speechesSaved: number }> {
 	const result = { meetingsFound: 0, speechesSaved: 0 };
 
@@ -471,7 +482,6 @@ async function processBill(
 	console.log(`\nProcessing bill ${bill.id}: ${bill.title}`);
 	console.log(`  Session: 第${bill.session}回国会, Type: ${bill.type}, Number: ${bill.number}`);
 
-	// Find bill on hourei.ndl.go.jp
 	const houreiBill = await findHoureiBill(page, bill.title, bill.session);
 
 	if (!houreiBill) {
@@ -484,7 +494,11 @@ async function processBill(
 
 	result.meetingsFound = houreiBill.deliberations.length;
 
-	// Process each deliberation record
+	if (dryRun || !db) {
+		console.log(`  [DRY-RUN] Would process ${result.meetingsFound} deliberations`);
+		return result;
+	}
+
 	const processedIssues = new Set<string>();
 
 	for (const deliberation of houreiBill.deliberations) {
@@ -499,7 +513,6 @@ async function processBill(
 			continue;
 		}
 
-		// Avoid fetching the same meeting multiple times
 		if (processedIssues.has(parsed.issueId)) {
 			log(`    Already processed issue: ${parsed.issueId}`);
 			continue;
@@ -510,19 +523,13 @@ async function processBill(
 			`  Fetching: ${deliberation.chamber} ${deliberation.committee} ${deliberation.date}`
 		);
 
-		// Fetch all speeches from this meeting
 		const speeches = await fetchMeetingSpeeches(parsed.issueId);
 		log(`    Found ${speeches.length} speeches`);
 
-		// Save speeches to database
-		for (const speech of speeches) {
-			const saved = await saveSpeech(bill.id, speech);
-			if (saved) {
-				result.speechesSaved++;
-			}
-		}
+		// BATCH: Save all speeches at once
+		const savedCount = await saveSpeeches(db, bill.id, speeches, dryRun);
+		result.speechesSaved += savedCount;
 
-		// Rate limiting
 		await new Promise((resolve) => setTimeout(resolve, REQUEST_DELAY));
 	}
 
@@ -534,8 +541,55 @@ async function main() {
 	console.log('=== Scrape Debates using hourei.ndl.go.jp ===');
 	console.log('Options:', options);
 
+	const DATABASE_URL = process.env.DATABASE_URL;
+
+	if (!DATABASE_URL && !options.dryRun) {
+		console.error('DATABASE_URL is not set. Provide DATABASE_URL or run with --dry-run.');
+		process.exit(1);
+	}
+
+	let client: { end: () => Promise<void> } | null = null;
+	let db: DrizzleDB | null = null;
+
+	if (!options.dryRun && DATABASE_URL) {
+		const conn = createDbConnection(DATABASE_URL);
+		client = conn.client;
+		db = conn.db;
+	}
+
+	// Progress tracking for resumable runs
+	const progress = new ProgressTracker<DebateProgress>('.scrape-debates-progress.json', {
+		processedBillIds: [],
+		lastBillId: 0
+	});
+
+	if (options.resume) {
+		console.log(
+			`Resuming from checkpoint: ${progress.getProcessedCount()} bills already processed`
+		);
+	}
+
 	// Get bills to process
-	const bills = await getBillsToProcess();
+	let bills: Array<{
+		id: number;
+		type: string;
+		session: number;
+		number: number;
+		title: string | null;
+	}> = [];
+
+	if (db) {
+		bills = await getBillsToProcess(db, options.skipExisting, options.billId);
+	} else {
+		console.log('[DRY-RUN] Skipping database query');
+		bills = [];
+	}
+
+	// Filter out already processed bills if resuming
+	if (options.resume) {
+		bills = bills.filter((b) => !progress.isProcessed(b.id));
+	}
+
 	const billsToProcess = bills.slice(0, options.limit);
 
 	console.log(`\nFound ${bills.length} bills to process`);
@@ -553,16 +607,23 @@ async function main() {
 
 	try {
 		for (const bill of billsToProcess) {
-			const result = await processBill(page, bill);
+			const result = await processBill(page, db, bill, options.dryRun);
 			totalMeetings += result.meetingsFound;
 			totalSpeeches += result.speechesSaved;
 
-			// Rate limiting between bills
+			// Save progress after each bill
+			progress.markProcessed(bill.id);
+			progress.updateMetadata({ lastBillId: bill.id });
+			progress.save();
+
 			await new Promise((resolve) => setTimeout(resolve, REQUEST_DELAY * 2));
 		}
+
+		// Clear progress on successful completion
+		progress.clear();
 	} finally {
 		await browser.close();
-		await client.end();
+		if (client) await client.end();
 	}
 
 	console.log('\n=== Summary ===');

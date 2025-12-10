@@ -66,13 +66,11 @@ class BillEmbeddingGenerator:
             b.type,
             b.submission_session,
             b.number,
-            bd.title,
-            bd.description
+            b.title
         FROM bill b
-        LEFT JOIN bill_detail bd ON b.id = bd.bill_id
         LEFT JOIN bill_embeddings be ON b.id = be.bill_id
         WHERE be.bill_id IS NULL
-            AND bd.title IS NOT NULL
+            AND b.title IS NOT NULL
         ORDER BY b.submission_session DESC, b.number
         """
 
@@ -194,7 +192,7 @@ class BillEmbeddingGenerator:
     def create_bill_document(self, bill: Dict, pdf_text: Optional[str]) -> str:
         """
         Create a document string for embedding from bill information.
-        Combines: title, description, and PDF text content.
+        Combines: title and PDF text content.
         """
         parts = []
 
@@ -205,10 +203,6 @@ class BillEmbeddingGenerator:
         # Add title
         if bill.get("title"):
             parts.append(f"件名: {bill['title']}")
-
-        # Add description
-        if bill.get("description"):
-            parts.append(f"説明: {bill['description']}")
 
         # Add PDF text content
         if pdf_text:
@@ -235,7 +229,7 @@ class BillEmbeddingGenerator:
         if pdf_url:
             print(f"  PDF URL: {pdf_url}")
         else:
-            print(f"  Warning: Could not find PDF URL for this bill")
+            print("  Warning: Could not find PDF URL for this bill")
 
         # Extract PDF text if URL was found
         pdf_text = None
@@ -244,17 +238,17 @@ class BillEmbeddingGenerator:
             if pdf_text:
                 print(f"  Extracted {len(pdf_text)} characters from PDF")
             else:
-                print(f"  Warning: Could not extract text from PDF")
+                print("  Warning: Could not extract text from PDF")
 
         if not pdf_text:
-            print(f"  Using title and description only")
+            print("  Using title only")
 
         # Create document for embedding
         document = self.create_bill_document(bill, pdf_text)
         print(f"  Document length: {len(document)} characters")
 
         # Generate embedding
-        print(f"  Generating embedding...")
+        print("  Generating embedding...")
         embedding = self.model.encode(document)
         embedding_json = json.dumps(embedding.tolist())
 

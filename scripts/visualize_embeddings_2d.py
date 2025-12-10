@@ -35,10 +35,9 @@ def reduce_embeddings_to_2d(database_url: str, cluster_id: int = None):
             b.type,
             b.submission_session,
             b.number,
-            bd.title
+            b.title
         FROM bill_embeddings be
         JOIN bill b ON be.bill_id = b.id
-        LEFT JOIN bill_detail bd ON b.id = bd.bill_id
         ORDER BY be.bill_id
     """
     )

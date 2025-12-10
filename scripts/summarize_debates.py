@@ -44,12 +44,11 @@ def get_bills_with_debates(
 
     if bill_id:
         query = """
-        SELECT b.id, bd.title, COUNT(db.id) as debate_count
+        SELECT b.id, b.title, COUNT(db.id) as debate_count
         FROM bill b
-        INNER JOIN bill_detail bd ON b.id = bd.bill_id
         INNER JOIN bill_debates db ON b.id = db.bill_id
         WHERE b.id = %s
-        GROUP BY b.id, bd.title
+        GROUP BY b.id, b.title
         """
         cursor.execute(query, (bill_id,))
     else:
@@ -64,12 +63,11 @@ def get_bills_with_debates(
         """
         )
         query = f"""
-        SELECT b.id, bd.title, COUNT(db.id) as debate_count
+        SELECT b.id, b.title, COUNT(db.id) as debate_count
         FROM bill b
-        INNER JOIN bill_detail bd ON b.id = bd.bill_id
         INNER JOIN bill_debates db ON b.id = db.bill_id
         WHERE {where_clause}
-        GROUP BY b.id, bd.title
+        GROUP BY b.id, b.title
         HAVING COUNT(db.id) > 0
         ORDER BY COUNT(db.id) DESC
         LIMIT %s
