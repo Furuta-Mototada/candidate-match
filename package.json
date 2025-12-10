@@ -18,6 +18,7 @@
 		"db:generate": "drizzle-kit generate",
 		"db:migrate": "drizzle-kit migrate",
 		"db:studio": "drizzle-kit studio",
+		"db:reset": "tsx ./scripts/reset_db.ts && drizzle-kit migrate",
 		"scrape:kantei": "tsx ./scripts/scrape_kantei.ts",
 		"scrape:sangiin": "tsx ./scripts/scrape_sangiin.ts",
 		"scrape:shugiin": "tsx ./scripts/scrape_shugiin.ts",
