@@ -26,7 +26,10 @@
 		"calculate:vectors": "tsx ./scripts/calculate_member_vectors.ts",
 		"embeddings:generate": "python3 ./scripts/generate_bill_embeddings.py",
 		"cluster:bills": "python3 ./scripts/cluster_bills.py",
-		"cluster:name": "python3 ./scripts/name_clusters.py"
+		"cluster:name": "python3 ./scripts/name_clusters.py",
+		"scrape:debates": "tsx ./scripts/scrape_debates.ts",
+		"summarize:debates": "python3 ./scripts/summarize_debates.py",
+		"enrich:bills": "python3 ./scripts/enrich_bills.py"
 	},
 	"files": [
 		"dist",

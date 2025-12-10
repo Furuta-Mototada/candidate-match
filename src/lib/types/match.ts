@@ -185,3 +185,62 @@ export interface ResumableClusterInfo {
 	totalBills: number;
 	remainingBills: number;
 }
+
+// ============================================================================
+// Bill Enrichment Types
+// ============================================================================
+
+export interface KeyPoint {
+	who: string;
+	what: string;
+	when: string;
+}
+
+export interface ProsAndCons {
+	pros: string[];
+	cons: string[];
+}
+
+export interface DebateRecord {
+	id: number;
+	speakerName: string;
+	speakerGroup: string | null;
+	speakerPosition: string | null;
+	speechType: string | null;
+	speechContent: string;
+	speechUrl: string | null;
+	meetingName: string;
+	meetingDate: string | null;
+	house: string;
+}
+
+export interface VoteResult {
+	groupName: string;
+	approved: boolean;
+}
+
+export interface EnrichedBillData {
+	billId: number;
+	title: string;
+	description: string | null;
+	passed: boolean;
+
+	// LLM-generated content
+	summaryShort: string | null;
+	summaryDetailed: string | null;
+	keyPoints: KeyPoint[];
+	impactTags: string[];
+	prosAndCons: ProsAndCons | null;
+	exampleScenario: string | null;
+
+	// Metadata
+	enrichmentStatus: string;
+	pdfUrl: string | null;
+
+	// Debates (limited for display)
+	debates: DebateRecord[];
+	debateCount: number;
+
+	// Vote results
+	voteResults: VoteResult[];
+}

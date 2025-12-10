@@ -1,7 +1,13 @@
 <script lang="ts">
 	import LatentSpaceVisualization from '$lib/components/match/LatentSpaceVisualization.svelte';
 	import MemberRankingList from '$lib/components/match/MemberRankingList.svelte';
-	import type { Bill, MemberMatch, MemberVectorForViz } from '$lib/types/index.js';
+	import EnrichedBillCard from '$lib/components/match/EnrichedBillCard.svelte';
+	import type {
+		Bill,
+		MemberMatch,
+		MemberVectorForViz,
+		EnrichedBillData
+	} from '$lib/types/index.js';
 
 	interface AnsweredBill {
 		billId: number;
@@ -55,10 +61,47 @@
 		onCancelEditing
 	}: Props = $props();
 
+	// Enrichment data cache
+	let enrichmentCache = $state<Record<number, EnrichedBillData>>({});
+	let enrichmentLoading = $state<Record<number, boolean>>({});
+
 	// Track if user has manually toggled the answered bills section
 	let userToggledAnsweredBills = $state(false);
 	// Show answered bills expanded by default when no current question (all answered)
 	let showAnsweredBills = $derived(userToggledAnsweredBills ? true : currentQuestion === null);
+
+	// Get current bill's enrichment data
+	let currentEnrichmentData = $derived(
+		currentQuestion ? enrichmentCache[currentQuestion.billId] || null : null
+	);
+	let currentEnrichmentLoading = $derived(
+		currentQuestion ? enrichmentLoading[currentQuestion.billId] || false : false
+	);
+
+	async function loadEnrichment(billId: number) {
+		if (enrichmentCache[billId] || enrichmentLoading[billId]) return;
+
+		enrichmentLoading[billId] = true;
+
+		try {
+			const response = await fetch(`/api/bill-enrichment?billId=${billId}`);
+			if (response.ok) {
+				const data = await response.json();
+				enrichmentCache[billId] = data;
+			}
+		} catch (error) {
+			console.error('Failed to load enrichment:', error);
+		} finally {
+			enrichmentLoading[billId] = false;
+		}
+	}
+
+	// Auto-load enrichment when question changes
+	$effect(() => {
+		if (currentQuestion && !enrichmentCache[currentQuestion.billId]) {
+			loadEnrichment(currentQuestion.billId);
+		}
+	});
 
 	function toggleAnsweredBills() {
 		userToggledAnsweredBills = !userToggledAnsweredBills;
@@ -83,7 +126,7 @@
 
 <div class="questioning-container">
 	{#if currentQuestion}
-		<!-- Question Card -->
+		<!-- Question Card with Enriched Bill Information -->
 		<div class="question-card fade-in-up" class:editing-mode={isEditingAnswer}>
 			{#if isEditingAnswer}
 				<div class="editing-banner">
@@ -93,25 +136,17 @@
 					</button>
 				</div>
 			{/if}
-			<div class="question-header">
-				<span
-					class="bill-status"
-					class:passed={currentQuestion.passed}
-					class:not-passed={!currentQuestion.passed}
-				>
-					{currentQuestion.passed ? '✓ 成立' : '⏳ 審議中/廃案'}
-				</span>
-			</div>
 
-			<h2 class="question-title">
-				{currentQuestion.title}
-			</h2>
-
-			{#if currentQuestion.description}
-				<p class="question-description">
-					{currentQuestion.description}
-				</p>
-			{/if}
+			<!-- Enriched Bill Card with expandable details -->
+			<EnrichedBillCard
+				billId={currentQuestion.billId}
+				title={currentQuestion.title}
+				description={currentQuestion.description}
+				passed={currentQuestion.passed}
+				enrichmentData={currentEnrichmentData}
+				isLoading={currentEnrichmentLoading}
+				onLoadEnrichment={() => loadEnrichment(currentQuestion.billId)}
+			/>
 
 			<!-- Vote Buttons -->
 			<div class="vote-buttons">

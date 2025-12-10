@@ -431,3 +431,121 @@ export const resultSnapshot = pgTable(
 
 export type ResultSnapshot = typeof resultSnapshot.$inferSelect;
 export type NewResultSnapshot = typeof resultSnapshot.$inferInsert;
+
+// ============================================================================
+// Bill Enrichment Data (LLM-generated content for user education)
+// ============================================================================
+
+// Status enum for enrichment processing
+export const enrichmentStatusEnum = pgEnum('enrichment_status', [
+	'pending',
+	'processing',
+	'completed',
+	'failed'
+]);
+
+// Bill enrichment table - LLM-generated summaries and educational content
+export const billEnrichment = pgTable('bill_enrichment', {
+	billId: integer('bill_id')
+		.primaryKey()
+		.references(() => bill.id),
+
+	// One-line summary (50-80 chars)
+	summaryShort: text('summary_short'),
+
+	// Detailed plain-language summary
+	summaryDetailed: text('summary_detailed'),
+
+	// Key points as JSON array: [{ who: string, what: string, when: string }]
+	keyPoints: text('key_points'),
+
+	// Impact tags as JSON array: ["#子育て世帯", "#中小企業", ...]
+	impactTags: text('impact_tags'),
+
+	// Pros and cons as JSON: { pros: string[], cons: string[] }
+	prosAndCons: text('pros_and_cons'),
+
+	// Example scenario for understanding impact
+	exampleScenario: text('example_scenario'),
+
+	// Metadata
+	status: enrichmentStatusEnum('status').notNull().default('pending'),
+	llmModel: text('llm_model'), // Model used for generation (e.g., 'claude-3-5-sonnet')
+	sourceTextHash: text('source_text_hash'), // Hash of source text to detect changes
+	errorMessage: text('error_message'), // Error message if processing failed
+
+	createdAt: timestamp('created_at').notNull().defaultNow(),
+	updatedAt: timestamp('updated_at').notNull().defaultNow()
+});
+
+export type BillEnrichment = typeof billEnrichment.$inferSelect;
+export type NewBillEnrichment = typeof billEnrichment.$inferInsert;
+
+// Bill debates table - records from Kokkai API (National Diet proceedings)
+export const billDebates = pgTable('bill_debates', {
+	id: serial('id').primaryKey(),
+	billId: integer('bill_id')
+		.notNull()
+		.references(() => bill.id),
+
+	// Meeting info from Kokkai API
+	meetingId: text('meeting_id').notNull(), // issueID from API
+	speechId: text('speech_id').notNull().unique(), // speechID from API
+	session: integer('session').notNull(), // 国会回次
+	house: text('house').notNull(), // 院名 (衆議院/参議院)
+	meetingName: text('meeting_name').notNull(), // 会議名
+	issueNumber: text('issue_number'), // 号数
+	meetingDate: date('meeting_date'), // 開催日付
+
+	// Speaker info
+	speakerName: text('speaker_name').notNull(),
+	speakerGroup: text('speaker_group'), // 所属会派
+	speakerPosition: text('speaker_position'), // 肩書き
+	speakerRole: text('speaker_role'), // 役割 (証人/参考人/公述人)
+
+	// Speech content
+	speechOrder: integer('speech_order'), // 発言番号
+	speechContent: text('speech_content').notNull(), // Full speech text
+	speechUrl: text('speech_url'), // Link to speech on Kokkai site
+
+	// Classification (determined by analysis)
+	speechType: text('speech_type'), // 'pro', 'con', 'neutral', 'explanation', 'question'
+
+	createdAt: timestamp('created_at').notNull().defaultNow()
+});
+
+export type BillDebate = typeof billDebates.$inferSelect;
+export type NewBillDebate = typeof billDebates.$inferInsert;
+
+// Bill debate summary table - LLM-generated summaries of debates
+export const billDebateSummary = pgTable('bill_debate_summary', {
+	billId: integer('bill_id')
+		.primaryKey()
+		.references(() => bill.id),
+
+	// Summary of pro arguments (JSON array of strings)
+	proArgumentsSummary: text('pro_arguments_summary'),
+
+	// Summary of con arguments (JSON array of strings)
+	conArgumentsSummary: text('con_arguments_summary'),
+
+	// Key questions raised during debates
+	keyQuestions: text('key_questions'),
+
+	// Government explanations/responses
+	governmentExplanations: text('government_explanations'),
+
+	// Total number of debate records
+	debateCount: integer('debate_count').notNull().default(0),
+
+	// Processing metadata
+	status: enrichmentStatusEnum('status').notNull().default('pending'),
+	llmModel: text('llm_model'),
+	errorMessage: text('error_message'),
+
+	createdAt: timestamp('created_at').notNull().defaultNow(),
+	updatedAt: timestamp('updated_at').notNull().defaultNow()
+});
+
+export type BillDebateSummary = typeof billDebateSummary.$inferSelect;
+export type NewBillDebateSummary = typeof billDebateSummary.$inferInsert;
