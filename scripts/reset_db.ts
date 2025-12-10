@@ -22,6 +22,10 @@ async function resetDatabase() {
 		// Restore default permissions
 		await sql`GRANT ALL ON SCHEMA public TO public`;
 
+		// Drop the drizzle schema to reset migration history
+		console.log('Dropping drizzle migration tracking schema...');
+		await sql`DROP SCHEMA IF EXISTS drizzle CASCADE`;
+
 		console.log('\n✅ All tables dropped! Run migrations to recreate the schema.');
 	} catch (err) {
 		console.error('Error resetting database:', err);

@@ -3,7 +3,19 @@
  */
 
 // Known flags that should be treated as boolean flags (no value expected)
-const KNOWN_FLAGS = new Set(['dry-run', 'verbose', 'v', 'd', 'help', 'h', 'force', 'f', 'all']);
+const KNOWN_FLAGS = new Set([
+	'dry-run',
+	'verbose',
+	'v',
+	'd',
+	'help',
+	'h',
+	'force',
+	'f',
+	'all',
+	'shugiin',
+	'sangiin'
+]);
 
 export interface ParsedArgs {
 	flags: Set<string>;

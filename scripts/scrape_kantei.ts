@@ -11,7 +11,7 @@
  */
 
 import { load } from 'cheerio';
-import { eq } from 'drizzle-orm';
+import { inArray } from 'drizzle-orm';
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -28,7 +28,18 @@ import {
 
 // Configuration
 const ROOT_URL = 'https://www.kantei.go.jp/jp/rekidainaikaku/index.html';
-const MIN_CABINET_NUMBER = 90; // Only process cabinets from 第90代 onwards
+const MIN_CABINET_NUMBER = 43; // Only process cabinets from 第43代 onwards
+const CONCURRENCY_LIMIT = 5; // Max parallel requests for detail pages
+
+// Pre-compiled regexes for performance
+const PRESENT_RE = /現在|present/i;
+const PERIOD_SPLIT_RE = /～|〜|~/;
+const GENERATION_RE = /第\s*\d+\s*代/;
+const GENERATION_EXTRACT_RE = /第\s*(\d+)\s*代/;
+const DATE_COMBINED_RE =
+	/(?:(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日|(令和|平成|昭和)\s*(元|\d{1,4})年\s*(\d{1,2})月\s*(\d{1,2})日)/g;
+const WHITESPACE_RE = /\s+/g;
+const TRIM_PUNCTUATION_RE = /^[：:\-\s]+|[：:\-\s]+$/g;
 
 /**
  * Parse a period string like "2021年10月4日～2024年10月1日" into start and end dates
@@ -36,24 +47,18 @@ const MIN_CABINET_NUMBER = 90; // Only process cabinets from 第90代 onwards
 function parsePeriod(periodText: string): { start: string | null; end: string | null } {
 	if (!periodText) return { start: null, end: null };
 
-	// Check if this indicates "present" (現在) - if so, end date should be null
-	const hasPresent = /現在|present/i.test(periodText);
+	const hasPresent = PRESENT_RE.test(periodText);
 
 	const parts = periodText
-		.split(/～|〜|~/)
+		.split(PERIOD_SPLIT_RE)
 		.map((s) => s.trim())
 		.filter(Boolean);
 	const startRaw = parts[0] || '';
 	const endRaw = parts[1] || '';
 
 	const start = parseJapaneseDate(startRaw);
-	let end: string | null = null;
+	const end = hasPresent ? null : endRaw ? parseJapaneseDate(endRaw) : null;
 
-	if (hasPresent) {
-		end = null;
-	} else if (endRaw) {
-		end = parseJapaneseDate(endRaw);
-	}
 	return { start, end };
 }
 
@@ -65,21 +70,20 @@ function extractDatesFromContent(text: string): {
 	end: string | null;
 	hasPresent: boolean;
 } {
-	const hasPresent = /現在|present/i.test(text);
+	const hasPresent = PRESENT_RE.test(text);
 	const dates: string[] = [];
 
-	// Combined regex matching both Gregorian and era formats
-	const combinedRe =
-		/(?:(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日|(令和|平成|昭和)\s*(元|\d{1,4})年\s*(\d{1,2})月\s*(\d{1,2})日)/g;
+	// Reset regex lastIndex for reuse
+	DATE_COMBINED_RE.lastIndex = 0;
 
 	let match: RegExpExecArray | null;
-	while ((match = combinedRe.exec(text)) !== null && dates.length < 2) {
+	while ((match = DATE_COMBINED_RE.exec(text)) !== null && dates.length < 2) {
 		if (match[1]) {
 			// Gregorian format
-			dates.push(match[1] + '年' + match[2] + '月' + match[3] + '日');
+			dates.push(`${match[1]}年${match[2]}月${match[3]}日`);
 		} else if (match[4]) {
 			// Era format
-			dates.push(match[4] + match[5] + '年' + match[6] + '月' + match[7] + '日');
+			dates.push(`${match[4]}${match[5]}年${match[6]}月${match[7]}日`);
 		}
 	}
 
@@ -89,11 +93,41 @@ function extractDatesFromContent(text: string): {
 	return { start, end, hasPresent };
 }
 
+/**
+ * Run promises with concurrency limit
+ */
+async function runWithConcurrency<T, R>(
+	items: T[],
+	fn: (item: T, index: number) => Promise<R>,
+	limit: number
+): Promise<R[]> {
+	const results: R[] = new Array(items.length);
+	let currentIndex = 0;
+
+	async function worker(): Promise<void> {
+		while (currentIndex < items.length) {
+			const index = currentIndex++;
+			results[index] = await fn(items[index], index);
+		}
+	}
+
+	const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
+	await Promise.all(workers);
+
+	return results;
+}
+
 interface CabinetEntry {
 	text: string;
 	href: string;
 	period?: string;
 	num: number;
+}
+
+interface PMData {
+	name: string;
+	startDate: string | null;
+	endDate: string | null;
 }
 
 /**
@@ -104,77 +138,76 @@ async function scrapeCabinetList(): Promise<CabinetEntry[]> {
 	const res = await fetchWithRetry(ROOT_URL);
 
 	if (res.status !== 200) {
-		throw new Error('Failed to fetch main page: ' + res.status);
+		throw new Error(`Failed to fetch main page: ${res.status}`);
 	}
 
 	const body = await res.text();
 	const $ = load(body);
 
-	const anchors: Array<{ text: string; href: string; period?: string }> = [];
+	const anchors: CabinetEntry[] = [];
 	$('li.his-block').each((_, el) => {
-		const genText = $(el).find('.his-generation').first().text().trim();
+		const $el = $(el);
+		const genText = $el.find('.his-generation').first().text().trim();
 		const name =
-			$(el).find('.his-name a').first().text().trim() ||
-			$(el).find('.his-name').first().text().trim();
-		const href = $(el).find('.his-name a').attr('href') || '';
-		const period = $(el).find('.his-period').first().text().trim();
-		if (genText && /第\s*\d+\s*代/.test(genText)) {
-			anchors.push({ text: genText + ' ' + name, href: resolveUrl(ROOT_URL, href), period });
+			$el.find('.his-name a').first().text().trim() || $el.find('.his-name').first().text().trim();
+		const href = $el.find('.his-name a').attr('href') || '';
+		const period = $el.find('.his-period').first().text().trim();
+
+		const match = genText.match(GENERATION_EXTRACT_RE);
+		if (match) {
+			const num = Number(match[1]);
+			if (num >= MIN_CABINET_NUMBER) {
+				anchors.push({
+					text: `${genText} ${name}`,
+					href: resolveUrl(ROOT_URL, href),
+					period,
+					num
+				});
+			}
 		}
 	});
 
-	console.log('Found ' + anchors.length + ' cabinet entries on index page');
+	// Sort by cabinet number
+	anchors.sort((x, y) => x.num - y.num);
 
-	// Keep only cabinets >= MIN_CABINET_NUMBER
-	const filtered = anchors
-		.map((a) => {
-			const m = a.text.match(/第\s*(\d+)\s*代/);
-			const num = m ? Number(m[1]) : NaN;
-			return { ...a, num };
-		})
-		.filter((a) => !Number.isNaN(a.num) && a.num >= MIN_CABINET_NUMBER)
-		.sort((x, y) => x.num - y.num);
-
-	console.log('Processing ' + filtered.length + ' cabinets (>= 第' + MIN_CABINET_NUMBER + '代)');
-	return filtered;
+	console.log(`Found ${anchors.length} cabinet entries (>= 第${MIN_CABINET_NUMBER}代)`);
+	return anchors;
 }
 
 /**
- * Process a single cabinet entry and extract PM name and dates
+ * Process a single cabinet entry and extract PM name and dates.
+ * Skips fetching detail page if we already have complete data from index.
  */
-async function processCabinetEntry(
-	entry: CabinetEntry
-): Promise<{ name: string; startDate: string | null; endDate: string | null } | null> {
+async function processCabinetEntry(entry: CabinetEntry): Promise<PMData | null> {
 	let startDate: string | null = null;
 	let endDate: string | null = null;
-	let pmName: string | null = entry.text.replace(/第\s*\d+\s*代/i, '').trim();
+	let pmName: string | null = entry.text.replace(GENERATION_RE, '').trim();
 
 	// Try to extract dates from index period string first
-	if (entry.period && /年/.test(entry.period) && /[～〜~]/.test(entry.period)) {
+	if (entry.period && /年/.test(entry.period) && PERIOD_SPLIT_RE.test(entry.period)) {
 		const p = parsePeriod(entry.period);
 		startDate = p.start;
 		endDate = p.end;
 	}
 
-	// If href is empty or points to the index page, use what we have
-	if (!entry.href || entry.href === ROOT_URL) {
+	// Skip fetching detail page if we have complete data from index
+	const hasCompleteData = pmName && startDate && (endDate || PRESENT_RE.test(entry.period || ''));
+
+	if (hasCompleteData || !entry.href || entry.href === ROOT_URL) {
 		if (!pmName) {
 			console.warn('Could not determine PM name from index entry');
 			return null;
 		}
-		const name = pmName.replace(/\s+/g, '').trim();
-		return { name, startDate, endDate };
+		return { name: pmName.replace(WHITESPACE_RE, ''), startDate, endDate };
 	}
 
-	// Fetch detail page
+	// Fetch detail page only if needed
 	try {
 		const r = await fetchWithRetry(entry.href);
 		if (r.status !== 200) {
-			console.warn('Failed to fetch detail page: ' + r.status + ' ' + entry.href);
-			// Fall back to index data
+			console.warn(`Failed to fetch detail page: ${r.status} ${entry.href}`);
 			if (pmName) {
-				const name = pmName.replace(/\s+/g, '').trim();
-				return { name, startDate, endDate };
+				return { name: pmName.replace(WHITESPACE_RE, ''), startDate, endDate };
 			}
 			return null;
 		}
@@ -182,17 +215,14 @@ async function processCabinetEntry(
 		const dbody = await r.text();
 		const $$ = load(dbody);
 
-		// Extract PM name from various sources
-		const after = entry.text.replace(/第\s*\d+\s*代/i, '').trim();
-		if (after) pmName = after;
-
+		// Extract PM name from various sources if not already set
 		if (!pmName) {
-			const docTitle = ($$('title').text() || '').trim();
-			if (docTitle) pmName = docTitle.replace(/第\s*\d+\s*代/i, '').trim();
+			const docTitle = $$('title').text().trim();
+			if (docTitle) pmName = docTitle.replace(GENERATION_RE, '').trim();
 		}
 		if (!pmName) {
 			const h1 = $$('h1').first().text().trim();
-			if (h1) pmName = h1.replace(/第\s*\d+\s*代/i, '').trim();
+			if (h1) pmName = h1.replace(GENERATION_RE, '').trim();
 		}
 		if (!pmName) {
 			const possible = $$(':contains("内閣総理大臣")').first().text();
@@ -201,7 +231,7 @@ async function processCabinetEntry(
 			}
 		}
 
-		pmName = pmName ? pmName.replace(/^[：:\-\s]+|[：:\-\s]+$/g, '') : null;
+		pmName = pmName ? pmName.replace(TRIM_PUNCTUATION_RE, '') : null;
 
 		// If we didn't get dates from index, try to extract from detail page
 		if (!startDate || !endDate) {
@@ -212,8 +242,7 @@ async function processCabinetEntry(
 			if (!endDate && !extracted.hasPresent) endDate = extracted.end;
 		}
 	} catch (err) {
-		console.warn('Error fetching detail page ' + entry.href + ':', err);
-		// Fall back to index data
+		console.warn(`Error fetching detail page ${entry.href}:`, err);
 	}
 
 	if (!pmName) {
@@ -221,77 +250,106 @@ async function processCabinetEntry(
 		return null;
 	}
 
-	const name = pmName.replace(/\s+/g, '').trim();
-	return { name, startDate, endDate };
+	return { name: pmName.replace(WHITESPACE_RE, ''), startDate, endDate };
 }
 
 /**
- * Save cabinet entry to database
+ * Batch save cabinet entries to database with member caching
  */
-async function saveCabinetEntry(
+async function saveCabinetEntries(
 	db: DrizzleDB | null,
-	pmData: { name: string; startDate: string | null; endDate: string | null },
+	pmDataList: PMData[],
 	dryRun: boolean
 ): Promise<void> {
-	const { name, startDate, endDate } = pmData;
-
-	console.log('Found PM: ' + name + ' (' + startDate + ' - ' + (endDate ?? 'present') + ')');
-
 	if (dryRun || !db) {
-		console.log('[dry-run] Would upsert member name=' + name);
-		console.log('[dry-run] Would insert cabinet start=' + startDate + ' end=' + endDate);
+		for (const pmData of pmDataList) {
+			console.log(
+				`Found PM: ${pmData.name} (${pmData.startDate} - ${pmData.endDate ?? 'present'})`
+			);
+			console.log(`[dry-run] Would upsert member name=${pmData.name}`);
+			console.log(`[dry-run] Would insert cabinet start=${pmData.startDate} end=${pmData.endDate}`);
+		}
 		return;
 	}
 
-	// Get or create member
-	const existing = await db.select().from(schema.member).where(eq(schema.member.name, name));
-	let memberId: number;
+	// Get unique names and fetch all existing members in one query
+	const uniqueNames = [...new Set(pmDataList.map((p) => p.name))];
+	const existingMembers = await db
+		.select()
+		.from(schema.member)
+		.where(inArray(schema.member.name, uniqueNames));
 
-	if (existing.length === 0) {
-		const [ins] = await db.insert(schema.member).values({ name }).returning();
-		memberId = ins.id;
-		console.log('Inserted member id=' + memberId + ' name=' + name);
-	} else {
-		memberId = existing[0].id;
-		console.log('Member exists id=' + memberId + ' name=' + name);
+	const memberMap = new Map(existingMembers.map((m) => [m.name, m.id]));
+
+	// Insert missing members
+	const missingNames = uniqueNames.filter((name) => !memberMap.has(name));
+	if (missingNames.length > 0) {
+		const insertedMembers = await db
+			.insert(schema.member)
+			.values(missingNames.map((name) => ({ name })))
+			.returning();
+
+		for (const m of insertedMembers) {
+			memberMap.set(m.name, m.id);
+			console.log(`Inserted member id=${m.id} name=${m.name}`);
+		}
 	}
 
-	// Check for existing cabinet with same member and dates
+	// Get all member IDs for cabinet lookup
+	const memberIds = [...memberMap.values()];
+
+	// Fetch all existing cabinets for these members in one query
 	const existingCabinets = await db
 		.select()
 		.from(schema.cabinet)
-		.where(eq(schema.cabinet.memberId, memberId));
+		.where(inArray(schema.cabinet.memberId, memberIds));
 
-	// Check if dates match any existing cabinet
-	const exists = existingCabinets.some((c) => {
-		const cs = c.startDate ? new Date(c.startDate).toISOString().slice(0, 10) : null;
-		const ce = c.endDate ? new Date(c.endDate).toISOString().slice(0, 10) : null;
-		return cs === startDate && ce === endDate;
-	});
-
-	if (exists) {
-		console.log('Skipping: identical cabinet already exists for memberId=' + memberId);
-		return;
-	}
-
-	// startDate is required by the schema
-	if (!startDate) {
-		console.warn('Cannot insert cabinet without startDate for memberId=' + memberId);
-		return;
-	}
-
-	// Insert cabinet
-	const insertedCabinet = await db
-		.insert(schema.cabinet)
-		.values({
-			memberId,
-			startDate,
-			endDate: endDate || null
+	// Create a set of existing cabinet keys for fast lookup
+	const existingCabinetKeys = new Set(
+		existingCabinets.map((c) => {
+			const cs = c.startDate ? new Date(c.startDate).toISOString().slice(0, 10) : null;
+			const ce = c.endDate ? new Date(c.endDate).toISOString().slice(0, 10) : null;
+			return `${c.memberId}:${cs}:${ce}`;
 		})
-		.returning();
+	);
 
-	if (insertedCabinet && insertedCabinet.length > 0) {
-		console.log('Inserted cabinet id=' + insertedCabinet[0].id + ' for memberId=' + memberId);
+	// Prepare cabinets to insert
+	const cabinetsToInsert: Array<{ memberId: number; startDate: string; endDate: string | null }> =
+		[];
+
+	for (const pmData of pmDataList) {
+		const { name, startDate, endDate } = pmData;
+		const memberId = memberMap.get(name);
+
+		console.log(`Found PM: ${name} (${startDate} - ${endDate ?? 'present'})`);
+
+		if (!memberId) {
+			console.warn(`Member not found for ${name}`);
+			continue;
+		}
+
+		if (!startDate) {
+			console.warn(`Cannot insert cabinet without startDate for memberId=${memberId}`);
+			continue;
+		}
+
+		const key = `${memberId}:${startDate}:${endDate}`;
+		if (existingCabinetKeys.has(key)) {
+			console.log(`Skipping: identical cabinet already exists for memberId=${memberId}`);
+			continue;
+		}
+
+		cabinetsToInsert.push({ memberId, startDate, endDate: endDate || null });
+		existingCabinetKeys.add(key); // Prevent duplicates within batch
+	}
+
+	// Batch insert cabinets
+	if (cabinetsToInsert.length > 0) {
+		const insertedCabinets = await db.insert(schema.cabinet).values(cabinetsToInsert).returning();
+
+		for (const c of insertedCabinets) {
+			console.log(`Inserted cabinet id=${c.id} for memberId=${c.memberId}`);
+		}
 	}
 }
 
@@ -320,23 +378,32 @@ async function main() {
 		// Fetch cabinet list
 		const cabinets = await scrapeCabinetList();
 
-		// Process each cabinet entry
-		for (let i = 0; i < cabinets.length; i++) {
-			const entry = cabinets[i];
-			console.log(
-				'\n[' + (i + 1) + '/' + cabinets.length + '] Processing ' + entry.text + ' -> ' + entry.href
-			);
+		console.log(
+			`\nProcessing ${cabinets.length} cabinet entries with concurrency=${CONCURRENCY_LIMIT}...`
+		);
 
-			try {
-				const pmData = await processCabinetEntry(entry);
-
-				if (pmData) {
-					await saveCabinetEntry(db, pmData, DRY_RUN);
+		// Process cabinet entries in parallel with concurrency limit
+		const results = await runWithConcurrency(
+			cabinets,
+			async (entry, i) => {
+				console.log(`[${i + 1}/${cabinets.length}] Processing ${entry.text}`);
+				try {
+					return await processCabinetEntry(entry);
+				} catch (err) {
+					console.error(`Error processing entry ${entry.href}:`, err);
+					return null;
 				}
-			} catch (err) {
-				console.error('Error processing entry', entry.href, err);
-			}
-		}
+			},
+			CONCURRENCY_LIMIT
+		);
+
+		// Filter out null results
+		const pmDataList = results.filter((r): r is PMData => r !== null);
+
+		console.log(`\nSuccessfully extracted ${pmDataList.length} PM records`);
+
+		// Batch save all entries to database
+		await saveCabinetEntries(db, pmDataList, DRY_RUN);
 
 		console.log('\nDone');
 	} finally {
