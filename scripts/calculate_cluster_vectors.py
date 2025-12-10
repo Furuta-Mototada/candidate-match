@@ -10,13 +10,10 @@ This script implements the following algorithm:
 """
 
 import os
-import sys
 import json
 import argparse
 import numpy as np
 from typing import Dict, List, Any, Optional, Tuple
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
 import psycopg2
 from dotenv import load_dotenv
 

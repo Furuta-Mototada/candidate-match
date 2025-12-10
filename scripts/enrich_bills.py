@@ -15,15 +15,13 @@ import os
 import sys
 import json
 import hashlib
-from datetime import datetime
-from typing import Dict, List, Optional, Tuple, Any
-
-from dotenv import load_dotenv
-
-load_dotenv()
+from typing import Dict, List, Optional, Any
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from dotenv import load_dotenv
+
+load_dotenv()
 
 try:
     import openai
@@ -145,7 +143,7 @@ def get_bills_to_enrich(
     # If specific bill_id is provided, fetch only that bill
     if bill_id:
         query = """
-        SELECT 
+        SELECT
             b.id,
             bd.title,
             bd.description,
@@ -167,14 +165,14 @@ def get_bills_to_enrich(
         "1=1"
         if force_regenerate
         else """
-        (be.bill_id IS NULL 
-         OR be.status = 'pending' 
+        (be.bill_id IS NULL
+         OR be.status = 'pending'
          OR be.status = 'failed')
     """
     )
 
     query = f"""
-    SELECT 
+    SELECT
         b.id,
         bd.title,
         bd.description,
@@ -186,9 +184,9 @@ def get_bills_to_enrich(
     LEFT JOIN bill_embeddings bem ON b.id = bem.bill_id
     LEFT JOIN bill_enrichment be ON b.id = be.bill_id
     WHERE {where_clause}
-    ORDER BY 
+    ORDER BY
         (SELECT COUNT(*) FROM bill_debates db WHERE db.bill_id = b.id) DESC,
-        bem.text_content IS NOT NULL DESC, 
+        bem.text_content IS NOT NULL DESC,
         b.submission_session DESC
     LIMIT %s
     """
@@ -205,7 +203,7 @@ def get_debate_summary_for_bill(conn, bill_id: int) -> Optional[Dict[str, Any]]:
     cursor = conn.cursor(cursor_factory=RealDictCursor)
 
     query = """
-    SELECT 
+    SELECT
         pro_arguments_summary,
         con_arguments_summary,
         key_questions,
@@ -248,9 +246,9 @@ def upsert_enrichment(
     if result:
         query = """
         INSERT INTO bill_enrichment (
-            bill_id, summary_short, summary_detailed, key_points, 
-            impact_tags, pros_and_cons, example_scenario, 
-            status, llm_model, source_text_hash, error_message, 
+            bill_id, summary_short, summary_detailed, key_points,
+            impact_tags, pros_and_cons, example_scenario,
+            status, llm_model, source_text_hash, error_message,
             created_at, updated_at
         ) VALUES (
             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW()

@@ -7,7 +7,6 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import * as schema from '../src/lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { parseJapaneseDate } from './date-utils';
-/* eslint-disable @typescript-eslint/no-explicit-any */
 
 function resolveUrl(base: string, href: string) {
 	try {

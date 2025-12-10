@@ -21,12 +21,11 @@ import argparse
 import time
 from typing import Dict, List, Optional, Any
 
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
 
 load_dotenv()
-
-import psycopg2
-from psycopg2.extras import RealDictCursor
 
 try:
     import openai
@@ -59,7 +58,7 @@ def get_bills_with_debates(
             if force
             else """
             NOT EXISTS (
-                SELECT 1 FROM bill_debate_summary bds 
+                SELECT 1 FROM bill_debate_summary bds
                 WHERE bds.bill_id = b.id AND bds.status = 'completed'
             )
         """
@@ -87,7 +86,7 @@ def get_debates_for_bill(conn, bill_id: int) -> List[Dict[str, Any]]:
     cursor = conn.cursor(cursor_factory=RealDictCursor)
 
     query = """
-    SELECT 
+    SELECT
         speech_content,
         speaker_name,
         speaker_position,
@@ -169,7 +168,7 @@ def summarize_debates(
   ],
   "conArguments": [
     "反対派の論点1（どの立場からの懸念か明示）",
-    "反対派の論点2", 
+    "反対派の論点2",
     "反対派の論点3"
   ],
   "keyQuestions": [
@@ -215,8 +214,8 @@ def upsert_debate_summary(
     if result:
         query = """
         INSERT INTO bill_debate_summary (
-            bill_id, 
-            pro_arguments_summary, 
+            bill_id,
+            pro_arguments_summary,
             con_arguments_summary,
             key_questions,
             government_explanations,
@@ -329,7 +328,7 @@ def main():
                 conn, bill["id"], bill["debate_count"], "completed", result
             )
 
-            print(f"  ✓ Summary completed")
+            print("  ✓ Summary completed")
             print(f"    Pro: {len(result.get('proArguments', []))} points")
             print(f"    Con: {len(result.get('conArguments', []))} points")
             success_count += 1

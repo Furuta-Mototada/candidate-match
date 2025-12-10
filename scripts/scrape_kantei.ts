@@ -7,7 +7,6 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import * as schema from '../src/lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 import { parseJapaneseDate } from './date-utils';
-/* eslint-disable @typescript-eslint/no-explicit-any */
 
 function parsePeriod(periodText: string): { start: string | null; end: string | null } {
 	if (!periodText) return { start: null, end: null };

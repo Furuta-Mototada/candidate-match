@@ -5,7 +5,6 @@ import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import * as schema from '../src/lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
-/* eslint-disable @typescript-eslint/no-explicit-any */
 
 const KOKKAI_API_BASE = 'https://kokkai.ndl.go.jp/api/speech';
 const DELAY_BETWEEN_REQUESTS = 3000; // 3 seconds as recommended by API docs

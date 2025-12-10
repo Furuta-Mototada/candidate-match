@@ -83,9 +83,9 @@ export const GET: RequestHandler = async ({ url }) => {
 					totalAnswered,
 					totalBills,
 					clusterCount: clusterResults.length,
-					latestSnapshotDate: latestSnapshot?.createdAt || null,
-					createdAt: session.createdAt,
-					updatedAt: session.updatedAt
+					latestSnapshotDate: latestSnapshot?.createdAt?.toISOString() || null,
+					createdAt: session.createdAt.toISOString(),
+					updatedAt: session.updatedAt.toISOString()
 				};
 			})
 		);
@@ -156,8 +156,8 @@ async function getSessionDetails(sessionId: number) {
 				xDimension: cr.xDimension ?? 0,
 				yDimension: cr.yDimension ?? 1,
 				answeredBills: answers,
-				createdAt: cr.createdAt,
-				updatedAt: cr.updatedAt
+				createdAt: cr.createdAt.toISOString(),
+				updatedAt: cr.updatedAt.toISOString()
 			};
 		})
 	);
@@ -177,7 +177,7 @@ async function getSessionDetails(sessionId: number) {
 		globalScores: JSON.parse(s.globalScoresJson),
 		clusterResults: JSON.parse(s.clusterResultsJson),
 		totalAnswered: s.totalAnswered,
-		createdAt: s.createdAt
+		createdAt: s.createdAt.toISOString()
 	}));
 
 	// Calculate global scores if session is completed or has results
@@ -197,6 +197,8 @@ async function getSessionDetails(sessionId: number) {
 
 	const sessionWithDetails: SavedSessionWithDetails = {
 		...session,
+		createdAt: session.createdAt.toISOString(),
+		updatedAt: session.updatedAt.toISOString(),
 		status: session.status as 'in_progress' | 'completed',
 		clusterResults: clusterResultsWithAnswers,
 		snapshots: snapshotsData,
