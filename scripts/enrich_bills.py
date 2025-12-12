@@ -2,19 +2,31 @@
 """
 Enrich bills with LLM-generated educational content
 
-Uses OpenAI API to generate:
-- Short summary (one-liner)
-- Detailed plain-language summary
-- Key points (who, what, when)
-- Impact tags
-- Pros and cons (from debates if available)
-- Example scenario
+This script:
+1. Reads bill text from bill_embeddings table (PDF extracted text)
+2. Reads debate summaries from bill_debate_summary table
+3. Uses OpenAI to generate educational content for each bill
+4. Stores enrichments in bill_enrichment table
+
+Generated content includes:
+- Short summary (one-liner for quick scanning)
+- Detailed plain-language summary (for citizens)
+- Key points (who is affected, what changes, when it takes effect)
+- Impact tags (for filtering/categorization)
+- Pros and cons (from debate analysis)
+- Example scenario (concrete impact illustration)
+
+Usage:
+    pnpm enrich:bills --limit 10
+    pnpm enrich:bills --bill-id 1427 --force
 """
 
 import os
 import sys
 import json
 import hashlib
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional, Any
 
 import psycopg2
@@ -29,7 +41,9 @@ except ImportError:
     print("openai package not installed. Run: pip install openai")
     sys.exit(1)
 
-DELAY_BETWEEN_REQUESTS = 1  # 1 second between API calls
+DELAY_BETWEEN_REQUESTS = 0.5  # Reduced delay for efficiency
+LLM_MODEL = "gpt-5.2"  # 400K context, 128K output
+MAX_PDF_CHARS = 100000  # Use more of the bill text with large context window
 
 
 def hash_text(text: str) -> str:
@@ -49,9 +63,14 @@ def generate_enrichment(
     context = f"法案名: {bill_title}\n\n"
 
     if pdf_text:
-        # Truncate PDF text to avoid token limits
-        truncated_pdf = pdf_text[:8000]
-        context += f"法案本文 (抜粋):\n{truncated_pdf}\n\n"
+        # Use more of the PDF text with larger context window
+        truncated_pdf = pdf_text[:MAX_PDF_CHARS]
+        if len(pdf_text) > MAX_PDF_CHARS:
+            context += (
+                f"法案本文 (抜粋、全{len(pdf_text):,}文字中):\n{truncated_pdf}\n\n"
+            )
+        else:
+            context += f"法案本文:\n{truncated_pdf}\n\n"
 
     # Add debate summary if available (from bill_debate_summary table)
     if debate_summary:
@@ -115,7 +134,7 @@ def generate_enrichment(
 - keyPointsは1〜3項目、impactTagsは3〜5個、pros/consは各2〜3個を目安にする"""
 
     response = client.chat.completions.create(
-        model="gpt-4o",
+        model=LLM_MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
         response_format={"type": "json_object"},
@@ -131,7 +150,7 @@ def generate_enrichment(
 
 
 def get_bills_to_enrich(
-    conn, limit: int, force_regenerate: bool, bill_id: Optional[int] = None
+    conn, limit: Optional[int], force_regenerate: bool, bill_id: Optional[int] = None
 ) -> List[Dict[str, Any]]:
     """Get bills that need enrichment."""
     cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -165,6 +184,7 @@ def get_bills_to_enrich(
     """
     )
 
+    limit_clause = f"LIMIT {limit}" if limit else ""
     query = f"""
     SELECT
         b.id,
@@ -180,10 +200,10 @@ def get_bills_to_enrich(
         (SELECT COUNT(*) FROM bill_debates db WHERE db.bill_id = b.id) DESC,
         bem.text_content IS NOT NULL DESC,
         b.submission_session DESC
-    LIMIT %s
+    {limit_clause}
     """
 
-    cursor.execute(query, (limit,))
+    cursor.execute(query)
     bills = cursor.fetchall()
     cursor.close()
 
@@ -269,7 +289,7 @@ def upsert_enrichment(
                 json.dumps(result.get("prosAndCons", {}), ensure_ascii=False),
                 result.get("exampleScenario"),
                 status,
-                "gpt-4o",
+                LLM_MODEL,
                 result.get("sourceHash"),
                 error,
             ),
@@ -297,13 +317,22 @@ def main():
         description="Enrich bills with LLM-generated content"
     )
     parser.add_argument(
-        "--limit", type=int, default=10, help="Number of bills to process"
+        "--limit",
+        type=int,
+        default=None,
+        help="Number of bills to process (default: all)",
     )
     parser.add_argument("--bill-id", type=int, help="Process a specific bill by ID")
     parser.add_argument(
         "--force",
         action="store_true",
         help="Force regeneration of existing enrichments",
+    )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=3,
+        help="Number of parallel workers (default: 3)",
     )
     args = parser.parse_args()
 
@@ -320,7 +349,6 @@ def main():
 
     # Initialize connections
     conn = psycopg2.connect(database_url)
-    client = openai.OpenAI(api_key=openai_api_key)
 
     print("=" * 60)
     print("Enriching Bills with LLM-generated Content")
@@ -328,8 +356,9 @@ def main():
     if args.bill_id:
         print(f"Bill ID: {args.bill_id}")
     else:
-        print(f"Limit: {args.limit} bills")
+        print(f"Limit: {args.limit or 'all'}")
     print(f"Force regenerate: {args.force}")
+    print(f"Concurrency: {args.concurrency}")
     print("")
 
     # Get bills to process
@@ -337,58 +366,94 @@ def main():
     print(f"Found {len(bills)} bills to process")
     print("")
 
-    success_count = 0
-    error_count = 0
+    # Thread-safe counter
+    lock = threading.Lock()
+    results = {"success": 0, "error": 0}
 
-    for i, bill in enumerate(bills):
-        print(f"[{i + 1}/{len(bills)}] Processing: {bill['title']}")
+    def process_bill(bill_index: int, bill: Dict[str, Any]) -> bool:
+        """Process a single bill - runs in a thread."""
+        # Each thread needs its own DB connection and OpenAI client
+        thread_conn = psycopg2.connect(database_url)
+        thread_client = openai.OpenAI(api_key=openai_api_key)
+
+        bill_num = bill_index + 1
+        prefix = f"[Bill {bill_num}/{len(bills)}]"
 
         if not bill["title"]:
-            print("  Skipping: No title available")
-            continue
+            print(f"{prefix} Skipping: No title available")
+            thread_conn.close()
+            return False
 
         try:
-            # Mark as processing
-            upsert_enrichment(conn, bill["id"], "processing")
+            print(f"{prefix} {bill['title']}")
 
-            # Get debate summary for this bill (from bill_debate_summary table)
-            debate_summary = get_debate_summary_for_bill(conn, bill["id"])
+            # Mark as processing
+            upsert_enrichment(thread_conn, bill["id"], "processing")
+
+            # Get debate summary for this bill
+            debate_summary = get_debate_summary_for_bill(thread_conn, bill["id"])
             if debate_summary:
-                print(
-                    f"  Found debate summary with {len(debate_summary.get('pro_arguments', []))} pro, {len(debate_summary.get('con_arguments', []))} con arguments"
-                )
+                pro_count = len(debate_summary.get("pro_arguments", []))
+                con_count = len(debate_summary.get("con_arguments", []))
+                print(f"{prefix}   Debate summary: {pro_count} pro, {con_count} con")
             else:
-                print("  No debate summary available")
+                print(f"{prefix}   No debate summary available")
 
             # Generate enrichment content
             result = generate_enrichment(
-                client,
+                thread_client,
                 bill["title"],
                 bill.get("pdf_text"),
                 debate_summary,
             )
 
             # Build source text hash for change detection
-            source_text = f"{bill['title']}|{(bill.get('pdf_text') or '')[:1000]}"
+            pdf_excerpt = (bill.get("pdf_text") or "")[:1000]
+            source_text = f"{bill['title']}|{pdf_excerpt}"
             result["sourceHash"] = hash_text(source_text)
 
             # Save to database
-            upsert_enrichment(conn, bill["id"], "completed", result)
+            upsert_enrichment(thread_conn, bill["id"], "completed", result)
 
-            print("  ✓ Enrichment completed")
-            print(f"    Short: {result['summaryShort'][:50]}...")
-            success_count += 1
+            print(f"{prefix}   ✓ Enrichment completed")
+            short_summary = result["summaryShort"][:50]
+            print(f"{prefix}     Short: {short_summary}...")
 
-            time.sleep(DELAY_BETWEEN_REQUESTS)
+            with lock:
+                results["success"] += 1
+
+            return True
 
         except Exception as e:
-            print(f"  ✗ Error: {e}")
-            upsert_enrichment(conn, bill["id"], "failed", error=str(e))
-            error_count += 1
+            print(f"{prefix}   ✗ Error: {e}")
+            upsert_enrichment(thread_conn, bill["id"], "failed", error=str(e))
+            with lock:
+                results["error"] += 1
+            return False
+
+        finally:
+            thread_conn.close()
+
+    # Process bills with concurrency
+    if args.concurrency > 1:
+        print(f"Processing with {args.concurrency} parallel workers...\n")
+        with ThreadPoolExecutor(max_workers=args.concurrency) as executor:
+            futures = {
+                executor.submit(process_bill, i, bill): bill
+                for i, bill in enumerate(bills)
+            }
+            for future in as_completed(futures):
+                # Results are already tracked in the results dict
+                pass
+    else:
+        # Sequential processing
+        for i, bill in enumerate(bills):
+            process_bill(i, bill)
+            time.sleep(DELAY_BETWEEN_REQUESTS)
 
     print("")
     print("=" * 60)
-    print(f"Completed: {success_count} success, {error_count} errors")
+    print(f"Completed: {results['success']} success, {results['error']} errors")
     print("=" * 60)
 
     conn.close()
