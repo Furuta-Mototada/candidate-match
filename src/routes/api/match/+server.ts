@@ -238,7 +238,7 @@ async function handleStart(
 
 		clusterData.memberNames = {};
 		for (const m of members) {
-			clusterData.memberNames[String(m.id)] = m.name;
+			clusterData.memberNames[String(m.id)] = m.names[0]; // Use primary name
 		}
 	}
 

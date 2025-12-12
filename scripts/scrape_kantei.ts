@@ -7,7 +7,11 @@
  * 3. Stores cabinet records in the database
  *
  * Usage:
- *   pnpm tsx scripts/scrape_kantei.ts [--dry-run]
+ *   pnpm tsx scripts/scrape_kantei.ts [--dry-run] [--min-cabinet=43]
+ *
+ * Options:
+ *   --dry-run          Run without writing to database
+ *   --min-cabinet=N    Only process cabinets from 第N代 onwards (default: 43)
  */
 
 import { load } from 'cheerio';
@@ -20,6 +24,7 @@ import {
 	resolveUrl,
 	parseArgs,
 	hasFlag,
+	getIntValue,
 	createDbConnection,
 	schema,
 	parseJapaneseDate,
@@ -28,7 +33,7 @@ import {
 
 // Configuration
 const ROOT_URL = 'https://www.kantei.go.jp/jp/rekidainaikaku/index.html';
-const MIN_CABINET_NUMBER = 43; // Only process cabinets from 第43代 onwards
+const DEFAULT_MIN_CABINET_NUMBER = 43; // Default: only process cabinets from 第43代 onwards
 const CONCURRENCY_LIMIT = 5; // Max parallel requests for detail pages
 
 // Pre-compiled regexes for performance
@@ -133,7 +138,7 @@ interface PMData {
 /**
  * Scrape the cabinet list from the main index page
  */
-async function scrapeCabinetList(): Promise<CabinetEntry[]> {
+async function scrapeCabinetList(minCabinetNumber: number): Promise<CabinetEntry[]> {
 	console.log('Fetching main page:', ROOT_URL);
 	const res = await fetchWithRetry(ROOT_URL);
 
@@ -156,7 +161,7 @@ async function scrapeCabinetList(): Promise<CabinetEntry[]> {
 		const match = genText.match(GENERATION_EXTRACT_RE);
 		if (match) {
 			const num = Number(match[1]);
-			if (num >= MIN_CABINET_NUMBER) {
+			if (num >= minCabinetNumber) {
 				anchors.push({
 					text: `${genText} ${name}`,
 					href: resolveUrl(ROOT_URL, href),
@@ -170,7 +175,7 @@ async function scrapeCabinetList(): Promise<CabinetEntry[]> {
 	// Sort by cabinet number
 	anchors.sort((x, y) => x.num - y.num);
 
-	console.log(`Found ${anchors.length} cabinet entries (>= 第${MIN_CABINET_NUMBER}代)`);
+	console.log(`Found ${anchors.length} cabinet entries (>= 第${minCabinetNumber}代)`);
 	return anchors;
 }
 
@@ -274,24 +279,29 @@ async function saveCabinetEntries(
 
 	// Get unique names and fetch all existing members in one query
 	const uniqueNames = [...new Set(pmDataList.map((p) => p.name))];
-	const existingMembers = await db
-		.select()
-		.from(schema.member)
-		.where(inArray(schema.member.name, uniqueNames));
+	const existingMembers = await db.select().from(schema.member);
 
-	const memberMap = new Map(existingMembers.map((m) => [m.name, m.id]));
+	// Build a map from name to member ID (checking names array)
+	const memberMap = new Map<string, number>();
+	for (const m of existingMembers) {
+		for (const name of m.names) {
+			if (uniqueNames.includes(name)) {
+				memberMap.set(name, m.id);
+			}
+		}
+	}
 
 	// Insert missing members
 	const missingNames = uniqueNames.filter((name) => !memberMap.has(name));
 	if (missingNames.length > 0) {
 		const insertedMembers = await db
 			.insert(schema.member)
-			.values(missingNames.map((name) => ({ name })))
+			.values(missingNames.map((name) => ({ names: [name] })))
 			.returning();
 
 		for (const m of insertedMembers) {
-			memberMap.set(m.name, m.id);
-			console.log(`Inserted member id=${m.id} name=${m.name}`);
+			memberMap.set(m.names[0], m.id);
+			console.log(`Inserted member id=${m.id} name=${m.names[0]}`);
 		}
 	}
 
@@ -356,6 +366,7 @@ async function saveCabinetEntries(
 async function main() {
 	const args = parseArgs();
 	const DRY_RUN = hasFlag(args, 'dry-run');
+	const MIN_CABINET_NUMBER = getIntValue(args, 'min-cabinet', DEFAULT_MIN_CABINET_NUMBER)!;
 	const DATABASE_URL = process.env.DATABASE_URL;
 
 	if (!DATABASE_URL && !DRY_RUN) {
@@ -376,7 +387,7 @@ async function main() {
 
 	try {
 		// Fetch cabinet list
-		const cabinets = await scrapeCabinetList();
+		const cabinets = await scrapeCabinetList(MIN_CABINET_NUMBER);
 
 		console.log(
 			`\nProcessing ${cabinets.length} cabinet entries with concurrency=${CONCURRENCY_LIMIT}...`

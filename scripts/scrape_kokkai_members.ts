@@ -1,3 +1,29 @@
+/**
+ * Scrape Diet member information from 国会議員白書 (kokkai.sugawarataku.net)
+ *
+ * This script:
+ * 1. Fetches member listings for each term (期) from both houses
+ * 2. Extracts member names, party affiliations, and districts
+ * 3. Creates member and party records, linking them with member_party relations
+ *
+ * Usage:
+ *   pnpm tsx scripts/scrape_kokkai_members.ts [options] [start_term] [end_term]
+ *
+ * Options:
+ *   --dry-run     Parse pages but don't insert into database
+ *   --shugiin     Only scrape 衆議院 (House of Representatives)
+ *   --sangiin     Only scrape 参議院 (House of Councillors)
+ *
+ * Examples:
+ *   pnpm tsx scripts/scrape_kokkai_members.ts --dry-run
+ *   pnpm tsx scripts/scrape_kokkai_members.ts --shugiin 45 50
+ *   pnpm tsx scripts/scrape_kokkai_members.ts --sangiin 20 27
+ *
+ * Data sources:
+ *   - https://kokkai.sugawarataku.net/ (国会議員白書) for terms up to 参議院 26期
+ *   - https://www.sangiin.go.jp/ for 参議院 27期 onwards
+ */
+
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -5,6 +31,7 @@ import { fetch } from 'undici';
 import { load } from 'cheerio';
 import { eq, and, inArray, isNull } from 'drizzle-orm';
 import { createDbConnection, parseArgs, hasFlag, getPositionalInt, DrizzleDB, schema } from './lib';
+import { scrapeSangiinTerm27 } from './scrape_sangiin_27';
 
 const BASE_URL = 'https://kokkai.sugawarataku.net';
 const DELAY = 500; // Rate limit delay between requests
@@ -13,11 +40,15 @@ const DELAY = 500; // Rate limit delay between requests
 const SHUGIIN_TERM_START = 23; // 衆議院 starts at 23期
 const SHUGIIN_TERM_END = 50; // 衆議院 ends at 50期
 const SANGIIN_TERM_START = 1; // 参議院 starts at 1期
-const SANGIIN_TERM_END = 26; // 参議院 ends at 26期
+const SANGIIN_TERM_END_KOKKAI = 26; // 参議院 ends at 26期 on kokkai.sugawarataku.net
+const SANGIIN_TERM_END = 27; // 参議院 27期 is available from sangiin.go.jp
+
+// Term 27 started on 2025-07-20, so Term 26 should end on this date
+const SANGIIN_TERM_27_START_DATE = '2025-07-20';
 
 interface TermMember {
-	name: string;
-	nameReading: string;
+	names: string[]; // Multiple names (e.g., ["赤間二郎", "あかま二郎"])
+	nameReading: string; // Reading in hiragana (e.g., "あかまじろう")
 	partyName: string;
 	district: string;
 	electionCount: string;
@@ -98,6 +129,51 @@ function parseTermDateRange(html: string): { startDate: string | null; endDate: 
 }
 
 /**
+ * Clean a member name by removing parenthetical reading hints
+ * e.g., "金子恵美（めぐみ）" → "金子恵美"
+ */
+function cleanMemberName(name: string): string {
+	// Remove parenthetical content (both full-width and half-width parentheses)
+	return name.replace(/[（(][^）)]*[）)]/g, '').trim();
+}
+
+/**
+ * Fetch member profile page and extract all name variations from 基本情報 section
+ * e.g., "赤間二郎、あかま二郎" → ["赤間二郎", "あかま二郎"]
+ */
+async function fetchMemberNamesFromProfile(profileUrl: string): Promise<string[]> {
+	if (!profileUrl) {
+		return [];
+	}
+
+	const html = await fetchShiftJIS(profileUrl);
+	if (!html) {
+		return [];
+	}
+
+	const $ = load(html);
+	const names: string[] = [];
+
+	// Find the 基本情報 section - structure is:
+	// <div class="jt0"><div class="jt1">名前</div><div class="jt2">赤間二郎、あかま二郎</div></div>
+	$('div.jt0').each((_, el) => {
+		const label = $(el).find('div.jt1').text().trim();
+		if (label === '名前') {
+			const namesText = $(el).find('div.jt2').text().trim();
+			// Split by Japanese comma (、) or regular comma
+			const nameParts = namesText.split(/[、,]/).map((n) => cleanMemberName(n.trim()));
+			for (const name of nameParts) {
+				if (name && !names.includes(name)) {
+					names.push(name);
+				}
+			}
+		}
+	});
+
+	return names;
+}
+
+/**
  * Parse a term page and extract member information
  */
 async function parseTermPage(
@@ -121,14 +197,17 @@ async function parseTermPage(
 	$('div.zt11').each((_, el) => {
 		const $el = $(el);
 
-		// Name reading in span.zt4
+		// Name reading in span.zt4 (e.g., "あかまじろう")
 		const nameReading = $el.find('span.zt4').text().trim();
 
 		// Name in span.zt5 > a
 		const nameLink = $el.find('span.zt5 a');
-		const name = nameLink.text().trim();
+		const rawName = nameLink.text().trim();
 		const profileHref = nameLink.attr('href') || '';
 		const profileUrl = profileHref ? `${BASE_URL}/giin/${profileHref}` : '';
+
+		// Clean the name (remove parenthetical hints like "金子恵美（めぐみ）" → "金子恵美")
+		const name = cleanMemberName(rawName);
 
 		// Party name in div.cc2
 		const partyName = $el.find('div.cc2').text().trim();
@@ -144,7 +223,7 @@ async function parseTermPage(
 
 		if (name) {
 			members.push({
-				name,
+				names: [name], // Start with the name from this term; profile fetch will add more
 				nameReading,
 				partyName,
 				district,
@@ -216,24 +295,26 @@ async function processTerm(db: DrizzleDB, termInfo: TermInfo): Promise<void> {
 		`Processing ${termInfo.chamber} ${termInfo.termNumber}期 (${termInfo.members.length} members)`
 	);
 
-	// Collect all unique member names and party names
-	const memberNames = termInfo.members.map((m) => m.name);
+	// Collect party names
 	const partyNames = termInfo.members.map((m) => m.partyName);
 
 	// Batch create members and parties
-	const memberMap = await batchGetOrCreateMembersLocal(db, memberNames);
+	const memberMap = await batchGetOrCreateMembersLocal(db, termInfo.members);
 	const partyMap = await batchGetOrCreateParties(db, partyNames);
 
 	// Build list of member_party relations to potentially insert
 	const relationsToCheck: Array<{
 		memberId: number;
 		partyId: number;
+		chamber: '衆議院' | '参議院';
 		startDate: string | null;
 		endDate: string | null;
 	}> = [];
 
 	for (const m of termInfo.members) {
-		const memberId = memberMap.get(m.name);
+		// Create lookup key: primary name + reading
+		const lookupKey = `${m.names[0]}|${m.nameReading}`;
+		const memberId = memberMap.get(lookupKey);
 		const partyId = partyMap.get(m.partyName);
 
 		if (!memberId || !partyId) {
@@ -243,6 +324,7 @@ async function processTerm(db: DrizzleDB, termInfo: TermInfo): Promise<void> {
 		relationsToCheck.push({
 			memberId,
 			partyId,
+			chamber: termInfo.chamber,
 			startDate: termInfo.startDate,
 			endDate: termInfo.endDate
 		});
@@ -254,30 +336,34 @@ async function processTerm(db: DrizzleDB, termInfo: TermInfo): Promise<void> {
 	}
 
 	// Batch check for existing relations
-	// Get all member_party records for these members with matching start date
+	// Get all member_party records for these members with matching start date and chamber
 	const memberIds = [...new Set(relationsToCheck.map((r) => r.memberId))];
 	const existingRelations = await db
 		.select({
 			memberId: schema.memberParty.memberId,
 			partyId: schema.memberParty.partyId,
+			chamber: schema.memberParty.chamber,
 			startDate: schema.memberParty.startDate
 		})
 		.from(schema.memberParty)
 		.where(
 			and(
 				inArray(schema.memberParty.memberId, memberIds),
+				eq(schema.memberParty.chamber, termInfo.chamber),
 				termInfo.startDate
 					? eq(schema.memberParty.startDate, termInfo.startDate)
 					: isNull(schema.memberParty.startDate)
 			)
 		);
 
-	// Create a Set of existing relations for O(1) lookup
-	const existingSet = new Set(existingRelations.map((r) => `${r.memberId}-${r.partyId}`));
+	// Create a Set of existing relations for O(1) lookup (include chamber in key)
+	const existingSet = new Set(
+		existingRelations.map((r) => `${r.memberId}-${r.partyId}-${r.chamber}`)
+	);
 
 	// Filter out relations that already exist
 	const newRelations = relationsToCheck.filter(
-		(r) => !existingSet.has(`${r.memberId}-${r.partyId}`)
+		(r) => !existingSet.has(`${r.memberId}-${r.partyId}-${r.chamber}`)
 	);
 
 	const skippedCount = relationsToCheck.length - newRelations.length;
@@ -293,42 +379,143 @@ async function processTerm(db: DrizzleDB, termInfo: TermInfo): Promise<void> {
 }
 
 /**
+ * Fetch multiple member profiles in parallel with concurrency limit
+ */
+async function batchFetchMemberProfiles(
+	members: Array<{ names: string[]; nameReading: string; profileUrl: string }>,
+	concurrency = 5
+): Promise<Map<string, string[]>> {
+	const results = new Map<string, string[]>();
+
+	// Process in batches to limit concurrency
+	for (let i = 0; i < members.length; i += concurrency) {
+		const batch = members.slice(i, i + concurrency);
+		const promises = batch.map(async (m) => {
+			const key = `${m.names[0]}|${m.nameReading}`;
+			if (m.profileUrl) {
+				const profileNames = await fetchMemberNamesFromProfile(m.profileUrl);
+				if (profileNames.length > 0) {
+					return { key, names: profileNames };
+				}
+			}
+			return { key, names: m.names };
+		});
+
+		const batchResults = await Promise.all(promises);
+		for (const result of batchResults) {
+			results.set(result.key, result.names);
+		}
+	}
+
+	return results;
+}
+
+/**
  * Batch get or create members (local version)
+ * Matches by BOTH name AND nameReading together.
+ * - Same name + same reading = same person
+ * - Same name + different reading = different people
+ * - Same reading + different name = different people
+ * Only fetches profile page to get additional names when creating a NEW member.
+ * Returns a Map of "primaryName|reading" to member ID
  */
 async function batchGetOrCreateMembersLocal(
 	db: DrizzleDB,
-	memberNames: string[]
+	termMembers: TermMember[]
 ): Promise<Map<string, number>> {
-	if (memberNames.length === 0) {
+	if (termMembers.length === 0) {
 		return new Map();
 	}
 
-	// Remove duplicates
-	const uniqueNames = [...new Set(memberNames)];
+	// Create unique entries by primary name + reading combination
+	const uniqueMembers = new Map<string, TermMember>();
+	for (const m of termMembers) {
+		const key = `${m.names[0]}|${m.nameReading}`;
+		if (!uniqueMembers.has(key)) {
+			uniqueMembers.set(key, m);
+		}
+	}
 
-	// Get existing members
-	const existing = await db
-		.select()
-		.from(schema.member)
-		.where(inArray(schema.member.name, uniqueNames));
+	// Query all existing members
+	const existing = await db.select().from(schema.member);
 
+	// Build map of "name|reading" -> member for existing members
+	// A member can have multiple names, so we create entries for each name
+	const existingByNameAndReading = new Map<
+		string,
+		{ id: number; names: string[]; nameReading: string | null }
+	>();
+	existing.forEach((m) => {
+		for (const name of m.names) {
+			const key = `${name}|${m.nameReading || ''}`;
+			existingByNameAndReading.set(key, { id: m.id, names: m.names, nameReading: m.nameReading });
+		}
+	});
+
+	// Result map: "primaryName|reading" -> memberId
 	const memberMap = new Map<string, number>();
-	existing.forEach((m) => memberMap.set(m.name, m.id));
 
-	// Find names that don't exist yet
-	const newNames = uniqueNames.filter((name) => !memberMap.has(name));
+	// Members that need to be inserted
+	const newMembers: Array<{ names: string[]; nameReading: string; profileUrl: string }> = [];
 
-	// Batch insert new members
-	if (newNames.length > 0) {
-		const inserted = await db
-			.insert(schema.member)
-			.values(newNames.map((name) => ({ name })))
-			.returning();
+	for (const [key, m] of uniqueMembers) {
+		// Try to find existing member by name + reading
+		const lookupKey = `${m.names[0]}|${m.nameReading}`;
+		const existingMember = existingByNameAndReading.get(lookupKey);
 
-		inserted.forEach((m) => {
-			memberMap.set(m.name, m.id);
-			console.log(`  Inserted member: ${m.name} (ID: ${m.id})`);
-		});
+		if (existingMember) {
+			// Member exists - add to result map
+			memberMap.set(key, existingMember.id);
+		} else if (m.names[0]) {
+			// New member - will fetch profile page later
+			newMembers.push({
+				names: m.names,
+				nameReading: m.nameReading,
+				profileUrl: m.profileUrl
+			});
+		}
+	}
+
+	if (newMembers.length === 0) {
+		return memberMap;
+	}
+
+	// Batch fetch all profile pages in parallel
+	console.log(`  Fetching ${newMembers.length} member profiles in parallel...`);
+	const profileNamesMap = await batchFetchMemberProfiles(newMembers);
+
+	// Prepare batch insert values
+	const insertValues = newMembers.map((m) => {
+		const key = `${m.names[0]}|${m.nameReading}`;
+		const names = profileNamesMap.get(key) || m.names;
+		return {
+			names,
+			nameReading: m.nameReading || null
+		};
+	});
+
+	// Batch insert all new members in a single query
+	const inserted = await db.insert(schema.member).values(insertValues).returning();
+
+	console.log(`  Batch inserted ${inserted.length} new members`);
+
+	// Update maps with inserted members
+	for (let i = 0; i < inserted.length; i++) {
+		const member = inserted[i];
+		const originalMember = newMembers[i];
+		const key = `${originalMember.names[0]}|${originalMember.nameReading}`;
+
+		memberMap.set(key, member.id);
+
+		// Also add to existingByNameAndReading so subsequent lookups work
+		for (const name of member.names) {
+			const lookupKey = `${name}|${member.nameReading || ''}`;
+			existingByNameAndReading.set(lookupKey, {
+				id: member.id,
+				names: member.names,
+				nameReading: member.nameReading
+			});
+		}
 	}
 
 	return memberMap;
@@ -336,6 +523,8 @@ async function batchGetOrCreateMembersLocal(
 
 /**
  * Scrape all terms for a given chamber
+ * For 参議院, terms up to 26 use kokkai.sugawarataku.net
+ * Term 27 onwards use the dedicated sangiin.go.jp scraper
  */
 async function scrapeChamber(
 	db: DrizzleDB | null,
@@ -346,11 +535,21 @@ async function scrapeChamber(
 ): Promise<void> {
 	console.log(`\nScraping ${chamber} from ${startTerm}期 to ${endTerm}期...`);
 
-	for (let term = startTerm; term <= endTerm; term++) {
+	// Determine the actual end term for kokkai.sugawarataku.net
+	const kokkaiEndTerm = chamber === '参議院' ? Math.min(endTerm, SANGIIN_TERM_END_KOKKAI) : endTerm;
+
+	// Scrape from kokkai.sugawarataku.net for terms up to kokkaiEndTerm
+	for (let term = startTerm; term <= kokkaiEndTerm; term++) {
 		const termInfo = await parseTermPage(chamber, term);
 		if (!termInfo) {
 			console.warn(`  Failed to parse ${chamber} ${term}期`);
 			continue;
+		}
+
+		// Override endDate for 参議院 26期 since Term 27 has started
+		if (chamber === '参議院' && term === 26 && termInfo.endDate === null) {
+			termInfo.endDate = SANGIIN_TERM_27_START_DATE;
+			console.log(`  Overriding endDate for 参議院 26期 to ${SANGIIN_TERM_27_START_DATE}`);
 		}
 
 		if (dryRun) {
@@ -365,38 +564,15 @@ async function scrapeChamber(
 			await processTerm(db, termInfo);
 		}
 	}
-}
 
-function printUsage(): void {
-	console.log(`
-Usage: npx tsx scripts/scrape_kokkai_members.ts [options] [start_term] [end_term]
-
-Options:
-  --dry-run     Parse pages but don't insert into database
-  --shugiin     Only scrape 衆議院 (House of Representatives)
-  --sangiin     Only scrape 参議院 (House of Councillors)
-  --help        Show this help message
-
-Arguments:
-  start_term    Starting term number (default: 23 for 衆議院, 1 for 参議院)
-  end_term      Ending term number (default: 50 for 衆議院, 26 for 参議院)
-
-Examples:
-  npx tsx scripts/scrape_kokkai_members.ts --dry-run
-  npx tsx scripts/scrape_kokkai_members.ts --shugiin 45 50
-  npx tsx scripts/scrape_kokkai_members.ts --sangiin 20 26
-
-Data source: https://kokkai.sugawarataku.net/ (国会議員白書)
-  `);
+	// For 参議院 27期 onwards, use the dedicated scraper
+	if (chamber === '参議院' && endTerm >= 27 && startTerm <= 27) {
+		await scrapeSangiinTerm27(db, dryRun);
+	}
 }
 
 async function main(): Promise<void> {
 	const args = parseArgs();
-
-	if (hasFlag(args, 'help')) {
-		printUsage();
-		return;
-	}
 
 	const dryRun = hasFlag(args, 'dry-run');
 	const shugiinOnly = hasFlag(args, 'shugiin');

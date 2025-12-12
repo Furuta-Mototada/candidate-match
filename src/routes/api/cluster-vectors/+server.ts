@@ -120,7 +120,7 @@ export const POST: RequestHandler = async ({ request }): Promise<Response> => {
 				? await db.select().from(member).where(inArray(member.id, memberIdList))
 				: [];
 
-		const memberNameMap = new Map(members.map((m) => [m.id, m.name]));
+		const memberNameMap = new Map(members.map((m) => [m.id, m.names[0]])); // Use primary name
 
 		// Add member names to the result
 		const enrichedClusters: Record<

@@ -1,42 +1,93 @@
+/**
+ * Scrape bill sponsor and voting information from the House of Representatives (Shugiin) website
+ *
+ * This script:
+ * 1. Fetches bill listings from shugiin.go.jp for each Diet session
+ * 2. Extracts sponsor/supporter information for 衆法 and 参法 bills
+ * 3. Extracts voting group information for all bill types
+ * 4. Updates existing bills in the database (requires scrape_sangiin.ts to be run first)
+ *
+ * Usage:
+ *   pnpm tsx scripts/scrape_shugiin.ts [startSession] [endSession] [--dry-run]
+ */
+
 import dotenv from 'dotenv';
 dotenv.config();
 
 import { fetch } from 'undici';
 import { load } from 'cheerio';
 import { eq, and, inArray } from 'drizzle-orm';
-import { parseJapaneseDate } from './date-utils';
 import {
 	createDbConnection,
-	getOrCreateMember,
 	batchGetOrCreateMembers,
 	batchGetOrCreateGroups,
 	parseArgs,
 	hasFlag,
 	getPositionalInt,
 	resolveUrl,
+	sleep,
+	parseJapaneseDate,
+	getLatestSessionNumber,
 	DrizzleDB,
 	type BillType,
 	schema
 } from './lib';
 
+// Configuration
 const BASE_URL = 'https://www.shugiin.go.jp';
-const DEFAULT_START_SESSION = 213;
-const DEFAULT_END_SESSION = 219;
-const DELAY = 500; // Rate limit delay between requests
+const DEFAULT_START_SESSION = 198;
+const FALLBACK_END_SESSION = 219; // Used only if database is unavailable
+const RATE_LIMIT_MS = 500;
+const BILL_CONCURRENCY = 5; // Max parallel bill detail fetches
+
+// Pre-compiled regex for performance
+const WHITESPACE_RE = /[\s\u3000]+/g;
+
+// Types
+interface BillEntry {
+	session: number;
+	number: number;
+	title: string;
+	detailUrl: string;
+}
+
+interface BillDetails {
+	billType: BillType | null;
+	sponsors: string[];
+	sponsorGroups: string[];
+	supporters: string[];
+	approvalGroups: string[];
+	rejectionGroups: string[];
+	shugiinVotingDate: string | null;
+}
+
+interface BillData extends BillEntry, BillDetails {}
+
+// Rate limiter for Shugiin requests
+let lastRequestTime = 0;
+
+async function waitForRateLimit(): Promise<void> {
+	const now = Date.now();
+	const elapsed = now - lastRequestTime;
+	if (elapsed < RATE_LIMIT_MS) {
+		await sleep(RATE_LIMIT_MS - elapsed);
+	}
+	lastRequestTime = Date.now();
+}
 
 /**
- * Fetch with retry logic for Shift-JIS encoded pages
+ * Fetch Shift-JIS encoded page with retry logic
  */
 async function fetchShiftJIS(
 	url: string,
 	maxRetries = 3,
-	initialDelay = 1000
+	baseDelayMs = 1000
 ): Promise<string | null> {
 	let lastError: Error | null = null;
 
 	for (let attempt = 0; attempt < maxRetries; attempt++) {
 		try {
-			await new Promise((resolve) => setTimeout(resolve, DELAY));
+			await waitForRateLimit();
 
 			const res = await fetch(url);
 			if (res.status !== 200) {
@@ -49,32 +100,54 @@ async function fetchShiftJIS(
 			return decoder.decode(buffer);
 		} catch (err) {
 			lastError = err as Error;
-			const delay = initialDelay * Math.pow(2, attempt);
-			console.warn(`Attempt ${attempt + 1} failed for ${url}, retrying in ${delay}ms...`);
-			await new Promise((resolve) => setTimeout(resolve, delay));
+			const delay = baseDelayMs * Math.pow(2, attempt);
+			console.warn(
+				`Attempt ${attempt + 1}/${maxRetries} failed for ${url}, retrying in ${delay}ms...`
+			);
+			await sleep(delay);
 		}
 	}
 
-	console.error(`All ${maxRetries} attempts failed for ${url}:`, lastError);
+	console.error(`All ${maxRetries} attempts failed for ${url}:`, lastError?.message);
 	return null;
 }
 
 /**
- * Normalize a member name by removing honorifics and spaces
+ * Run promises with concurrency limit
+ */
+async function runWithConcurrency<T, R>(
+	items: T[],
+	fn: (item: T, index: number) => Promise<R>,
+	limit: number
+): Promise<R[]> {
+	const results: R[] = new Array(items.length);
+	let currentIndex = 0;
+
+	async function worker(): Promise<void> {
+		while (currentIndex < items.length) {
+			const index = currentIndex++;
+			results[index] = await fn(items[index], index);
+		}
+	}
+
+	const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
+	await Promise.all(workers);
+
+	return results;
+}
+
+/**
+ * Normalize a member name by removing honorifics and whitespace
  */
 function normalizeMemberName(name: string): string {
-	return name
-		.replace(/君$/, '')
-		.replace(/\u3000/g, '')
-		.replace(/ /g, '')
-		.trim();
+	return name.replace(/君$/, '').replace(WHITESPACE_RE, '').trim();
 }
 
 /**
  * Parse member names from a semicolon-separated string
  */
 function parseMemberNames(text: string): string[] {
-	if (!text || text.trim() === '') return [];
+	if (!text?.trim()) return [];
 	return text
 		.split(';')
 		.map((name) => normalizeMemberName(name.trim()))
@@ -82,15 +155,17 @@ function parseMemberNames(text: string): string[] {
 }
 
 /**
- * Parse sponsor name from 議案提出者 field (fallback)
+ * Parse sponsor name from 議案提出者 field (fallback for when 議案提出者一覧 is empty)
  */
 function parseSponsorFromSingle(text: string): string | null {
-	if (!text || text.trim() === '') return null;
+	if (!text?.trim()) return null;
 
+	// Committee chair submissions (e.g., "厚生労働委員長")
 	if (text.includes('委員長')) {
 		return text.trim();
 	}
 
+	// Pattern: "Name外N名" (Name plus N others)
 	const match = text.match(/^(.+?)外[〇一二三四五六七八九十百千]+名/);
 	if (match) {
 		return normalizeMemberName(match[1]);
@@ -103,7 +178,7 @@ function parseSponsorFromSingle(text: string): string | null {
  * Parse group names from a semicolon-separated string
  */
 function parseGroupNames(text: string): string[] {
-	if (!text || text.trim() === '') return [];
+	if (!text?.trim()) return [];
 	return text
 		.split(';')
 		.map((name) => name.trim())
@@ -135,7 +210,7 @@ async function searchCommitteeChair(
 		const apiUrl = `https://kokkai.ndl.go.jp/api/meeting?${params.toString()}`;
 		console.log(`    Kokkai API URL: ${apiUrl}`);
 
-		await new Promise((resolve) => setTimeout(resolve, DELAY));
+		await waitForRateLimit();
 
 		const res = await fetch(apiUrl);
 		if (res.status !== 200) {
@@ -200,23 +275,12 @@ async function searchCommitteeChair(
 }
 
 /**
- * Process a single bill detail page
+ * Extract bill details from a detail page (pure scraping, no DB operations)
  */
-async function processBillDetail(
-	db: DrizzleDB | null,
-	billSession: number,
-	billNumber: number,
-	billTitle: string,
-	billDetailUrl: string,
-	dryRun: boolean
-) {
+async function fetchBillDetails(billDetailUrl: string): Promise<BillDetails | null> {
 	try {
-		console.log(`\nFetching bill detail: Session ${billSession}, Number ${billNumber}`);
-		console.log(`  Title: ${billTitle}`);
-		console.log(`  URL: ${billDetailUrl}`);
-
 		const detailBody = await fetchShiftJIS(billDetailUrl);
-		if (!detailBody) return;
+		if (!detailBody) return null;
 
 		const $detail = load(detailBody);
 
@@ -252,115 +316,114 @@ async function processBillDetail(
 			}
 		});
 
-		console.log(`  Bill type: ${billType}`);
-		console.log(`  Sponsors: ${sponsors.length} members`);
-		console.log(`  Sponsor from single: ${sponsorFromSingle}`);
-		console.log(`  Sponsor groups: ${sponsorGroups.length} groups`);
-		console.log(`  Supporters: ${supporters.length} members`);
-		console.log(`  Approval groups: ${approvalGroups.length} groups`);
-		console.log(`  Rejection groups: ${rejectionGroups.length} groups`);
-
-		// Only process 衆法, 参法, and 閣法
-		if (billType !== '衆法' && billType !== '参法' && billType !== '閣法') {
-			console.log(`  Skipping bill type: ${billType}`);
-			return;
-		}
-
-		// TypeScript narrowing - billType is now BillType
-		const validBillType: BillType = billType;
-
-		// Fallback for sponsors
+		// Fallback for sponsors when 議案提出者一覧 is empty
 		if (sponsors.length === 0 && sponsorFromSingle) {
-			console.log(`  Using 議案提出者 as fallback: ${sponsorFromSingle}`);
 			sponsors = [sponsorFromSingle];
 		}
 
-		if (dryRun || !db) {
-			console.log(`[DRY-RUN] Would process bill: ${validBillType}-${billSession}-${billNumber}`);
-			return;
-		}
+		// Map billType to BillType or null if not valid
+		const validBillType: BillType | null =
+			billType === '衆法' || billType === '参法' || billType === '閣法' ? billType : null;
 
-		// Check if bill exists
-		const existingBills = await db
-			.select()
-			.from(schema.bill)
-			.where(
-				and(
-					eq(schema.bill.type, validBillType),
-					eq(schema.bill.submissionSession, billSession),
-					eq(schema.bill.number, billNumber)
-				)
-			);
+		return {
+			billType: validBillType,
+			sponsors,
+			sponsorGroups,
+			supporters,
+			approvalGroups,
+			rejectionGroups,
+			shugiinVotingDate
+		};
+	} catch (err) {
+		console.error(`Error fetching bill details from ${billDetailUrl}:`, err);
+		return null;
+	}
+}
 
-		if (existingBills.length === 0) {
-			console.error(
-				`  ERROR: Bill not found in database: ${billType}-${billSession}-${billNumber}`
-			);
-			console.error(`  Please run scrape_sangiin.ts first to populate the bill database.`);
-			return;
-		}
+/**
+ * Save bill sponsor and voting data to database
+ */
+async function saveBillToDatabase(db: DrizzleDB, billData: BillData): Promise<void> {
+	const {
+		session,
+		number,
+		billType,
+		sponsors,
+		sponsorGroups,
+		supporters,
+		approvalGroups,
+		rejectionGroups,
+		shugiinVotingDate
+	} = billData;
 
-		const billId = existingBills[0].id as number;
-		console.log(`  Found bill in database with ID: ${billId}`);
+	if (!billType) {
+		console.log(`  Skipping unsupported bill type`);
+		return;
+	}
 
-		// Process 衆法 bills
-		if (billType === '衆法') {
-			console.log(`\n  Processing 衆法 bill...`);
-			await processSponsorsAndSupporters(db, billId, sponsors, sponsorGroups, supporters);
-		}
-		// Process 参法 bills
-		else if (billType === '参法') {
-			console.log(`\n  Processing 参法 bill...`);
-			await processSponsorsAndSupporters(db, billId, sponsors, [], []);
+	// Check if bill exists
+	const existingBills = await db
+		.select()
+		.from(schema.bill)
+		.where(
+			and(
+				eq(schema.bill.type, billType),
+				eq(schema.bill.submissionSession, session),
+				eq(schema.bill.number, number)
+			)
+		);
 
-			// Handle committee chair sponsor lookup
-			if (sponsors.some((name) => name.includes('委員長'))) {
-				console.log(`  Bill sponsor is a committee chair, searching for actual name...`);
+	if (existingBills.length === 0) {
+		console.error(`  ERROR: Bill not found in database: ${billType}-${session}-${number}`);
+		console.error(`  Please run scrape_sangiin.ts first to populate the bill database.`);
+		return;
+	}
 
-				const committeeChairName = sponsors.find((name) => name.includes('委員長'));
-				if (committeeChairName) {
-					const committeeName = committeeChairName.replace('委員長', '委員会');
-					const chairName = await searchCommitteeChair(committeeName, billSession, '参議院');
+	const billId = existingBills[0].id as number;
+	console.log(`  Found bill in database with ID: ${billId}`);
 
-					if (chairName) {
-						const chairMemberId = await getOrCreateMember(db, chairName);
+	// All groups from Shugiin website are 衆議院 groups
+	const chamber: '衆議院' | '参議院' = '衆議院';
 
-						const existingSponsors = await db
-							.select()
-							.from(schema.billSponsors)
-							.where(
-								and(
-									eq(schema.billSponsors.billId, billId),
-									eq(schema.billSponsors.memberId, chairMemberId)
-								)
-							);
+	// Process 衆法 bills - add sponsors, sponsor groups, and supporters
+	if (billType === '衆法') {
+		console.log(`  Processing 衆法 bill...`);
+		await processSponsorsAndSupporters(db, billId, sponsors, sponsorGroups, supporters, chamber);
+	}
+	// Process 参法 bills - add sponsors only (no supporters from Shugiin)
+	else if (billType === '参法') {
+		console.log(`  Processing 参法 bill...`);
 
-						if (existingSponsors.length === 0) {
-							await db.insert(schema.billSponsors).values({
-								billId: billId,
-								memberId: chairMemberId
-							});
-							console.log(
-								`  Added committee chair as sponsor: ${chairName} (Member ID: ${chairMemberId})`
-							);
-						}
-					}
-				}
+		// Handle committee chair sponsor lookup - replace title with actual name
+		const committeeChairTitle = sponsors.find((name) => name.includes('委員長'));
+		let actualSponsors = sponsors;
+
+		if (committeeChairTitle) {
+			console.log(`  Bill sponsor is a committee chair: ${committeeChairTitle}`);
+			const committeeName = committeeChairTitle.replace('委員長', '委員会');
+			const chairName = await searchCommitteeChair(committeeName, session, '参議院');
+
+			if (chairName) {
+				// Replace the committee chair title with the actual person's name
+				actualSponsors = sponsors.map((name) => (name === committeeChairTitle ? chairName : name));
+				console.log(`  Resolved committee chair to: ${chairName}`);
+			} else {
+				// Could not find chair name, skip adding the title as a sponsor
+				actualSponsors = sponsors.filter((name) => name !== committeeChairTitle);
+				console.log(`  Could not resolve committee chair, skipping: ${committeeChairTitle}`);
 			}
 		}
 
-		// Process voting groups for ALL bill types
-		if (approvalGroups.length > 0 || rejectionGroups.length > 0) {
-			await processVotingGroups(db, billId, shugiinVotingDate, approvalGroups, rejectionGroups);
-		}
-
-		console.log(`  Successfully processed bill: ${billType}-${billSession}-${billNumber}`);
-	} catch (err) {
-		console.error(
-			`Error processing bill detail (Session ${billSession}, Number ${billNumber}):`,
-			err
-		);
+		// Note: 参法 bills don't have sponsor groups from Shugiin, passing empty array
+		await processSponsorsAndSupporters(db, billId, actualSponsors, [], [], chamber);
 	}
+
+	// Process voting groups for ALL bill types
+	if (approvalGroups.length > 0 || rejectionGroups.length > 0) {
+		await processVotingGroups(db, billId, shugiinVotingDate, approvalGroups, rejectionGroups);
+	}
+
+	console.log(`  Successfully processed bill: ${billType}-${session}-${number}`);
 }
 
 /**
@@ -371,7 +434,8 @@ async function processSponsorsAndSupporters(
 	billId: number,
 	sponsors: string[],
 	sponsorGroups: string[],
-	supporters: string[]
+	supporters: string[],
+	chamber: '衆議院' | '参議院'
 ) {
 	// Collect all unique member names and group names
 	const allMemberNames = [...new Set([...sponsors, ...supporters])];
@@ -379,7 +443,7 @@ async function processSponsorsAndSupporters(
 
 	// BATCH: Get or create all members and groups at once
 	const memberMap = await batchGetOrCreateMembers(db, allMemberNames);
-	const groupMap = await batchGetOrCreateGroups(db, allGroupNames);
+	const groupMap = await batchGetOrCreateGroups(db, allGroupNames, chamber);
 
 	// BATCH: Check existing sponsors
 	const sponsorMemberIds = sponsors.map((name) => memberMap.get(name)!).filter(Boolean);
@@ -520,9 +584,9 @@ async function processVotingGroups(
 	const voteId = existingVotes[0].id as number;
 	console.log(`  Found bill_votes entry with ID: ${voteId}`);
 
-	// BATCH: Get or create all groups at once
+	// BATCH: Get or create all groups at once (voting in 衆議院, so groups are 衆議院)
 	const allGroupNames = [...new Set([...approvalGroups, ...rejectionGroups])];
-	const groupMap = await batchGetOrCreateGroups(db, allGroupNames);
+	const groupMap = await batchGetOrCreateGroups(db, allGroupNames, '衆議院');
 
 	// BATCH: Check existing vote results for all groups
 	const allGroupIds = [...groupMap.values()];
@@ -561,13 +625,43 @@ async function processVotingGroups(
 	}
 }
 
+/**
+ * Extract bill entries from a session page
+ */
+function extractBillEntries($: ReturnType<typeof load>, sessionUrl: string): BillEntry[] {
+	const entries: BillEntry[] = [];
+
+	$('table tr').each((_, row) => {
+		const cells = $(row).find('td');
+		if (cells.length < 3) return;
+
+		const billSession = parseInt(cells.eq(0).text().trim());
+		const billNumber = parseInt(cells.eq(1).text().trim());
+		const billTitle = cells.eq(2).text().trim();
+
+		if (isNaN(billSession) || isNaN(billNumber) || !billTitle) return;
+
+		const detailLink = cells.eq(4).find('a').attr('href');
+		if (!detailLink) return;
+
+		entries.push({
+			session: billSession,
+			number: billNumber,
+			title: billTitle,
+			detailUrl: resolveUrl(sessionUrl, detailLink)
+		});
+	});
+
+	return entries;
+}
+
 async function main() {
 	const args = parseArgs();
 	const DRY_RUN = hasFlag(args, 'dry-run');
 	const DATABASE_URL = process.env.DATABASE_URL;
 
 	const startSession = getPositionalInt(args, 0, DEFAULT_START_SESSION)!;
-	const endSession = getPositionalInt(args, 1, DEFAULT_END_SESSION)!;
+	const endSessionArg = getPositionalInt(args, 1);
 
 	if (!DATABASE_URL && !DRY_RUN) {
 		console.error('DATABASE_URL is not set. Provide DATABASE_URL or run with --dry-run.');
@@ -583,6 +677,24 @@ async function main() {
 		db = conn.db;
 	}
 
+	// Determine end session: use argument if provided, otherwise query database, fallback to constant
+	let endSession: number;
+	if (endSessionArg !== undefined) {
+		endSession = endSessionArg;
+	} else if (db) {
+		const latestSession = await getLatestSessionNumber(db);
+		if (latestSession !== null) {
+			endSession = latestSession;
+			console.log(`Using latest session from database: ${endSession}`);
+		} else {
+			endSession = FALLBACK_END_SESSION;
+			console.log(`No sessions found in database, using fallback: ${endSession}`);
+		}
+	} else {
+		endSession = FALLBACK_END_SESSION;
+		console.log(`Database not available, using fallback end session: ${endSession}`);
+	}
+
 	console.log(`Processing sessions ${startSession} to ${endSession}`);
 
 	try {
@@ -595,42 +707,56 @@ async function main() {
 
 			const $ = load(body);
 
-			// Collect bills to process
-			const billsToProcess: Array<{
-				session: number;
-				number: number;
-				title: string;
-				detailUrl: string;
-			}> = [];
+			// Extract all bill entries from session page
+			const billEntries = extractBillEntries($, sessionUrl);
+			console.log(`Found ${billEntries.length} bills to process`);
 
-			$('table tr').each((_, row) => {
-				const cells = $(row).find('td');
-				if (cells.length < 3) return;
+			if (billEntries.length === 0) continue;
 
-				const billSession = parseInt(cells.eq(0).text().trim());
-				const billNumber = parseInt(cells.eq(1).text().trim());
-				const billTitle = cells.eq(2).text().trim();
+			// Fetch bill details in parallel with concurrency limit
+			console.log(`Fetching bill details (concurrency=${BILL_CONCURRENCY})...`);
+			const billDetails = await runWithConcurrency(
+				billEntries,
+				async (entry, i) => {
+					console.log(
+						`[${i + 1}/${billEntries.length}] Fetching: Session ${entry.session}, Number ${entry.number}`
+					);
+					const details = await fetchBillDetails(entry.detailUrl);
+					if (!details) return null;
+					return { ...entry, ...details };
+				},
+				BILL_CONCURRENCY
+			);
 
-				if (isNaN(billSession) || isNaN(billNumber) || !billTitle) return;
+			// Process each bill (database operations)
+			for (const billData of billDetails) {
+				if (!billData) continue;
 
-				const detailLink = cells.eq(4).find('a').attr('href');
-				if (!detailLink) return;
+				console.log(
+					`\nProcessing: ${billData.billType || 'unknown'}-${billData.session}-${billData.number}: ${billData.title}`
+				);
+				console.log(`  Bill type: ${billData.billType}`);
+				console.log(`  Sponsors: ${billData.sponsors.length} members`);
+				console.log(`  Sponsor groups: ${billData.sponsorGroups.length} groups`);
+				console.log(`  Supporters: ${billData.supporters.length} members`);
+				console.log(`  Approval groups: ${billData.approvalGroups.length} groups`);
+				console.log(`  Rejection groups: ${billData.rejectionGroups.length} groups`);
 
-				const billDetailUrl = resolveUrl(sessionUrl, detailLink);
+				if (DRY_RUN || !db) {
+					console.log(
+						`[DRY-RUN] Would process bill: ${billData.billType}-${billData.session}-${billData.number}`
+					);
+					continue;
+				}
 
-				billsToProcess.push({
-					session: billSession,
-					number: billNumber,
-					title: billTitle,
-					detailUrl: billDetailUrl
-				});
-			});
-
-			console.log(`Found ${billsToProcess.length} bills to process`);
-
-			// Process bills sequentially
-			for (const bill of billsToProcess) {
-				await processBillDetail(db, bill.session, bill.number, bill.title, bill.detailUrl, DRY_RUN);
+				try {
+					await saveBillToDatabase(db, billData);
+				} catch (err) {
+					console.error(
+						`Error saving bill ${billData.billType}-${billData.session}-${billData.number}:`,
+						err
+					);
+				}
 			}
 		}
 

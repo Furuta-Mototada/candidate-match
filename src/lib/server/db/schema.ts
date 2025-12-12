@@ -106,7 +106,8 @@ export type NewCommitteeBill = typeof committeeBill.$inferInsert;
 // Member table
 export const member = pgTable('member', {
 	id: serial('id').primaryKey(),
-	name: text('name').notNull() // 議員名
+	names: text('names').array().notNull(), // 議員名（複数の表記を含む場合あり、例：["赤間二郎", "あかま二郎"]）
+	nameReading: text('name_reading') // 読み（例：あかまじろう）
 });
 
 export type Member = typeof member.$inferSelect;
@@ -130,6 +131,7 @@ export const memberParty = pgTable('member_party', {
 	partyId: integer('party_id')
 		.notNull()
 		.references(() => party.id),
+	chamber: chamberEnum('chamber'), // 議会 (参議院/衆議院)
 	startDate: date('start_date'), // 所属開始日
 	endDate: date('end_date') // 所属終了日
 });

@@ -26,6 +26,7 @@ import {
 	parseJapaneseDate,
 	batchGetOrCreateMembers,
 	getOrCreateCommittee,
+	getLatestSessionNumber,
 	type DrizzleDB,
 	type BillType,
 	type VotingMethod
@@ -34,7 +35,7 @@ import {
 // Configuration
 const BASE_URL = 'https://www.sangiin.go.jp';
 const DEFAULT_START_SESSION = 198;
-const DEFAULT_END_SESSION = 219;
+const FALLBACK_END_SESSION = 219; // Used only if database is unavailable
 const BILL_CONCURRENCY = 5; // Max parallel bill detail fetches
 
 // Pre-compiled regex for performance
@@ -174,7 +175,9 @@ async function getCachedCommittee(
  */
 async function fetchBillDetails(
 	billDetailUrl: string,
-	billSession: number
+	billSession: number,
+	currentSession: number,
+	latestSession: number
 ): Promise<{
 	submissionDate: string | null;
 	billResult: '可決' | '否決' | '撤回' | '未了' | null;
@@ -406,9 +409,10 @@ async function fetchBillDetails(
 			}
 		}
 
-		// Check for 未了 case (only for completed sessions)
+		// Check for 未了 case (only for completed/past sessions, not the current latest session)
+		// A bill is 未了 if: the session being scraped is a past session AND no plenary activity
 		// Note: resultDate for 未了 will be set in saveBillToDatabase using session end date
-		if (billSession < DEFAULT_END_SESSION && !shuginPlenary && !sanginPlenary && !billResult) {
+		if (currentSession < latestSession && !shuginPlenary && !sanginPlenary && !billResult) {
 			billResult = '未了';
 		}
 	} catch (err) {
@@ -836,7 +840,7 @@ async function main() {
 	const DATABASE_URL = process.env.DATABASE_URL;
 
 	const startSession = getPositionalInt(args, 0, DEFAULT_START_SESSION)!;
-	const endSession = getPositionalInt(args, 1, DEFAULT_END_SESSION)!;
+	const endSessionArg = getPositionalInt(args, 1);
 
 	if (!DATABASE_URL && !DRY_RUN) {
 		console.error('DATABASE_URL is not set. Provide DATABASE_URL or run with --dry-run.');
@@ -850,6 +854,24 @@ async function main() {
 		const conn = createDbConnection(DATABASE_URL);
 		client = conn.client;
 		db = conn.db;
+	}
+
+	// Determine end session: use argument if provided, otherwise query database, fallback to constant
+	let endSession: number;
+	if (endSessionArg !== undefined) {
+		endSession = endSessionArg;
+	} else if (db) {
+		const latestSession = await getLatestSessionNumber(db);
+		if (latestSession !== null) {
+			endSession = latestSession;
+			console.log(`Using latest session from database: ${endSession}`);
+		} else {
+			endSession = FALLBACK_END_SESSION;
+			console.log(`No sessions found in database, using fallback: ${endSession}`);
+		}
+	} else {
+		endSession = FALLBACK_END_SESSION;
+		console.log(`Database not available, using fallback end session: ${endSession}`);
 	}
 
 	console.log(`Processing sessions ${startSession} to ${endSession}`);
@@ -890,7 +912,12 @@ async function main() {
 						console.log(
 							`[${i + 1}/${billEntries.length}] Fetching: ${entry.billType}-${entry.billSession}-${entry.billNumber}`
 						);
-						const details = await fetchBillDetails(entry.billDetailUrl, entry.billSession);
+						const details = await fetchBillDetails(
+							entry.billDetailUrl,
+							entry.billSession,
+							session,
+							endSession
+						);
 						return { ...entry, ...details };
 					},
 					BILL_CONCURRENCY
