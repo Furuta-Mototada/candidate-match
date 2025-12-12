@@ -8,13 +8,13 @@ The enrichment pipeline has three main components:
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│ scrape_debates  │───▶│  enrich_bills    │───▶│ Bill Enrichment │
-│ (hourei.ndl.go) │    │   (OpenAI LLM)   │    │   API Endpoint  │
+│ scrape_debates  │───▶│ summarize_debates│───▶│  enrich_bills   │
+│ (hourei.ndl.go) │    │   (OpenAI LLM)   │    │   (OpenAI LLM)  │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
          │                      │                       │
          ▼                      ▼                       ▼
-   bill_debates          bill_enrichment         EnrichedBillCard
-      table                  table                 Component
+   bill_debates          bill_debate_summary      bill_enrichment
+      table                   table                  table
 ```
 
 ## 1. Debate Scraping (`scrape_debates.ts`)
@@ -43,8 +43,8 @@ The hourei.ndl.go.jp approach is more accurate because it provides the **exact l
 └──────────┬──────────┘
            ▼
 ┌─────────────────────┐
-│ Search hourei.ndl   │  ← Playwright scrapes hourei.ndl.go.jp
-│ by bill title       │     to find the bill's page
+│ Search hourei.ndl   │  ← Uses session/type/number for precise matching
+│ by bill identifiers │     (e.g., 第215回 閣法 第1号)
 └──────────┬──────────┘
            ▼
 ┌─────────────────────┐
@@ -55,7 +55,7 @@ The hourei.ndl.go.jp approach is more accurate because it provides the **exact l
 ┌─────────────────────┐
 │ For each meeting:   │  ← Use Kokkai API to fetch full speeches
 │ Fetch speeches via  │     /api/speech?issueID=...
-│ Kokkai API          │
+│ Kokkai API          │     with full pagination
 └──────────┬──────────┘
            ▼
 ┌─────────────────────┐
@@ -81,6 +81,9 @@ pnpm scrape:debates --bill-id=123
 
 # Verbose output
 pnpm scrape:debates --limit 5 --verbose
+
+# Dry run (no database writes)
+pnpm scrape:debates --dry-run
 ```
 
 ### Output
@@ -92,61 +95,100 @@ Data is stored in the `bill_debates` table with:
 
 ---
 
-## 2. Bill Enrichment (`enrich_bills.py`)
+## 2. Debate Summarization (`summarize_debates.py`)
+
+### Purpose
+Processes raw debate speeches into structured summaries using LLM, extracting key arguments and positions.
+
+### Data Source
+- **Input**: `bill_debates` table (raw speeches)
+- **API**: OpenAI GPT-5.2 (400K context window)
+- **Output**: `bill_debate_summary` table
+
+### What It Generates
+
+| Field | Description |
+|-------|-------------|
+| `pro_arguments_summary` | JSON array of pro arguments from supporters |
+| `con_arguments_summary` | JSON array of con arguments from opponents |
+| `key_questions` | Important questions raised by members |
+| `government_explanations` | Key explanations from ministers/government |
+| `debate_count` | Number of speeches processed |
+
+### Algorithm
+
+For bills with many speeches (100+), uses **hierarchical summarization**:
+1. Split speeches into chunks of ~100 speeches
+2. Summarize each chunk separately
+3. Merge chunk summaries into final summary
+
+### Usage
+
+```bash
+# Process 10 bills with most debates
+pnpm summarize:debates --limit 10
+
+# Process a specific bill
+pnpm summarize:debates --bill-id 1427
+
+# Force regenerate even if summary exists
+pnpm summarize:debates --bill-id 1427 --force
+
+# Process in parallel (3 workers)
+pnpm summarize:debates --limit 50 --concurrency 3
+```
+
+---
+
+## 3. Bill Enrichment (`enrich_bills.py`)
+
+## 3. Bill Enrichment (`enrich_bills.py`)
 
 ### Purpose
 Generates LLM-powered summaries and analysis for each bill to help users understand complex legislation.
 
-### Data Source
-- **API**: OpenAI GPT-4o
-- **Input**: Bill title, description, and scraped debate records
+### Data Sources
+- **Bill text**: From `bill_embeddings.text_content` (PDF extracted text)
+- **Debate summary**: From `bill_debate_summary` table
+- **API**: OpenAI GPT-5.2 (400K context, 128K output)
 
 ### What It Generates
 
 | Field | Description | Example |
 |-------|-------------|---------|
-| `summary_short` | One-line summary | 「フロンガスの回収義務を強化し、違反時の罰則を引き上げる」 |
-| `summary_detailed` | Plain-language explanation | 2-3 paragraphs explaining the bill's purpose and mechanisms |
-| `key_points` | Who/What/When | JSON with `who`, `what`, `when` fields |
+| `summary_short` | One-line summary (50-80 chars) | 「フロンガスの回収義務を強化し、違反時の罰則を引き上げる」 |
+| `summary_detailed` | Plain-language explanation (200-300 chars) | High school level explanation of bill's purpose |
+| `key_points` | Who/What/When | JSON array with impact details |
 | `impact_tags` | Affected groups | `["#中小企業", "#環境保護", "#設備業者"]` |
-| `pros_and_cons` | Both sides | Arguments for and against the bill |
+| `pros_and_cons` | Both sides | Arguments for and against (from debate analysis) |
 | `example_scenario` | Real-world example | How this affects a typical citizen/business |
 
 ### Usage
 
 ```bash
-# Process 10 bills
+# Process 10 bills (prioritizes bills with debates)
 pnpm enrich:bills --limit 10
 
-# Skip already enriched bills
-pnpm enrich:bills --limit 50 --skip-existing
+# Process a specific bill
+pnpm enrich:bills --bill-id 1427
+
+# Force regenerate even if enrichment exists
+pnpm enrich:bills --bill-id 1427 --force
+
+# Process in parallel (3 workers)
+pnpm enrich:bills --limit 50 --concurrency 3
 ```
+
+### How It Works
+
+1. Prioritizes bills with more debate data and PDF text
+2. Loads debate summary (pro/con arguments, key questions)
+3. Constructs prompt with bill title, PDF text (up to 100K chars), and debate summary
+4. Generates neutral, factual enrichment content
+5. Stores with source hash for change detection
 
 ### Requirements
 - `OPENAI_API_KEY` environment variable
-
----
-
-## 3. e-Gov Law Lookup (`lookup_egov_laws.ts`)
-
-### Purpose
-Links enacted bills to their official law IDs in the e-Gov database.
-
-### Data Source
-- **API**: [e-Gov Law API v2](https://laws.e-gov.go.jp/api/2/swagger-ui/)
-
-### What It Provides
-For enacted bills (passed=true):
-- Official law ID (法令ID)
-- Law number (法令番号)
-- Promulgation date
-- Link to full law text
-
-### Usage
-
-```bash
-pnpm lookup:egov --limit 10 --verbose
-```
 
 ---
 
@@ -176,20 +218,39 @@ CREATE TABLE bill_debates (
 );
 ```
 
+### `bill_debate_summary` Table
+```sql
+CREATE TABLE bill_debate_summary (
+  id SERIAL PRIMARY KEY,
+  bill_id INTEGER UNIQUE REFERENCES bill(id),
+  status TEXT DEFAULT 'pending',      -- pending/processing/completed/failed
+  pro_arguments_summary TEXT,         -- JSON array of pro arguments
+  con_arguments_summary TEXT,         -- JSON array of con arguments
+  key_questions TEXT,                 -- JSON array of key questions
+  government_explanations TEXT,       -- JSON array of gov explanations
+  debate_count INTEGER,               -- Number of speeches processed
+  llm_model TEXT,
+  error_message TEXT,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+```
+
 ### `bill_enrichment` Table
 ```sql
 CREATE TABLE bill_enrichment (
   id SERIAL PRIMARY KEY,
   bill_id INTEGER UNIQUE REFERENCES bill(id),
-  status enrichment_status DEFAULT 'pending',
+  status TEXT DEFAULT 'pending',      -- pending/processing/completed/failed
   summary_short TEXT,
   summary_detailed TEXT,
-  key_points JSONB,                   -- {who, what, when}
+  key_points JSONB,                   -- [{who, what, when}, ...]
   impact_tags JSONB,                  -- ["#tag1", "#tag2"]
-  pros_and_cons JSONB,                -- {pro: [...], con: [...]}
+  pros_and_cons JSONB,                -- {pros: [...], cons: [...]}
   example_scenario TEXT,
-  source_context TEXT,                -- Input used for generation
-  model_used TEXT,
+  source_text_hash TEXT,              -- MD5 hash for change detection
+  llm_model TEXT,
+  error_message TEXT,
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW()
 );
@@ -243,11 +304,11 @@ To fully enrich bills for the matching feature:
 # 1. Scrape debate records (can take a while due to rate limits)
 pnpm scrape:debates --limit 100 --skip-existing
 
-# 2. Generate LLM enrichments
-pnpm enrich:bills --limit 100 --skip-existing
+# 2. Summarize debates (requires OPENAI_API_KEY)
+pnpm summarize:debates --limit 100 --concurrency 3
 
-# 3. (Optional) Look up e-Gov law references
-pnpm lookup:egov --limit 100
+# 3. Generate LLM enrichments (uses debate summaries + PDF text)
+pnpm enrich:bills --limit 100 --concurrency 3
 ```
 
 ---
@@ -256,9 +317,9 @@ pnpm lookup:egov --limit 100
 
 | API | Rate Limit | Notes |
 |-----|------------|-------|
-| Kokkai NDL | 3s between requests | Be respectful, they ask for this |
-| OpenAI | Token-based | ~$0.01-0.05 per bill |
-| e-Gov | No specific limit | But be reasonable |
+| Kokkai NDL | 2s between requests | Conservative rate limiting |
+| hourei.ndl.go.jp | Playwright browser | Sequential page loads |
+| OpenAI | Token-based | ~$0.01-0.05 per bill for enrichment |
 
 ---
 
@@ -266,14 +327,14 @@ pnpm lookup:egov --limit 100
 
 ### No debates found for a bill
 - The bill may not have been discussed yet
-- The title extraction may not be finding good search terms
-- Try checking the Kokkai website manually
+- Try checking hourei.ndl.go.jp manually with session/type/number
+- Some bills are passed without committee discussion
 
-### e-Gov not finding enacted laws
-- Amendment bills (改正法) may not be cataloged separately
-- The script finds the base law being amended, not the amendment itself
+### Debate summarization producing poor results
+- Check that bill has sufficient debates (`debate_count > 0`)
+- Very short debates may produce minimal summaries
 
 ### LLM enrichment failing
 - Check `OPENAI_API_KEY` is set
 - Check rate limits
-- Bills without description may produce lower quality results
+- Bills without PDF text or description may produce lower quality results

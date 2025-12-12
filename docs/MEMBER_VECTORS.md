@@ -11,6 +11,7 @@ The Member Vectors system generates vector representations of each parliamentary
 - **Representative Bills Display**: Show bills that represent each latent dimension
 - **Similar Member Search**: Find similar members using cosine similarity
 - **Member Comparison**: Compare latent vectors of two members side-by-side
+- **Saved Vector Results**: Pre-calculate and store vectors for faster matching
 
 ## Access
 
@@ -22,12 +23,13 @@ Page URL: `/member-vectors` (http://localhost:5173/member-vectors)
 
 ### Algorithm Overview
 
-Uses bill clustering results to calculate member latent vectors for each cluster.
+Uses bill clustering results to calculate member latent vectors for each cluster. The algorithm is implemented in `scripts/calculate_cluster_vectors.py`.
 
 #### 1. Data Preparation
 
-- Retrieve target bills from bill clustering results
-- Get member voting scores for each bill (from legislation_scores.json)
+- Retrieve target bills from bill clustering results (`bill_cluster_assignments`)
+- Get member voting scores for each bill (from `legislation_scores.json`)
+- Filter to only bills in the selected cluster
 
 #### 2. Voting Matrix Construction
 
@@ -39,17 +41,21 @@ $$
 
 - $M$: Number of members
 - $n_k$: Number of bills in cluster $k$
-- Scores are normalized to $[-1, 1]$
+- Scores are normalized from original range to $[-1, 1]$
+
+Missing values (members who didn't vote on a bill) are imputed with column mean (average vote for that bill).
 
 #### 3. Bill Importance Weighting
 
-Apply importance weights based on bill status:
+Apply importance weights based on bill result status:
 
-| Bill Status | Weight |
-|-------------|--------|
-| Passed (可決) | 1.0 |
-| In Progress (審議中) | 0.8 |
-| Failed/Discarded (否決・廃案) | 0.6 |
+| Bill Result | Weight | Rationale |
+|-------------|--------|-----------|
+| 可決 (Passed) | 1.0 | Most reliable voting data |
+| null (In Progress) | 0.8 | Ongoing deliberation |
+| 未了 (Expired) | 0.2 | Low significance |
+| 否決 (Rejected) | 0.6 | Still meaningful opposition |
+| 撤回 (Withdrawn) | 0.3 | Low significance |
 
 Weighted matrix:
 $$
@@ -58,15 +64,16 @@ $$
 
 #### 4. Singular Value Decomposition (SVD)
 
-Apply SVD to the centered matrix:
+Apply SVD to the centered, weighted matrix:
 
 $$
 \tilde{V}_k - \bar{V}_k = U \Sigma V^T
 $$
 
-Extract top $d_k$ components:
+Extract top $d_k$ components (typically 3):
 - **Member Latent Vectors**: $U_k \cdot \Sigma_k$ ($M \times d_k$)
 - **Bill Loading Matrix**: $V_k$ ($n_k \times d_k$)
+- **Explained Variance**: Proportion of variance captured by each dimension
 
 #### 5. Identify Representative Bills
 
@@ -76,18 +83,67 @@ $$
 \text{representative}_d = \underset{j}{\arg\max} |V_k[j, d]|
 $$
 
+These bills define the "meaning" of each dimension.
+
 ### Usage
 
 1. **Select Clustering Result**: Choose a clustering result from the bill clustering page
 2. **Select Cluster Label**: Choose a specific cluster or "All" clusters
 3. **Set Number of Dimensions**: Select 1-5 latent dimensions
 4. **Calculate**: Click "潜在ベクトルを計算" (Calculate Latent Vectors)
+5. **Save**: Optionally save results to database for faster matching
+
+### Saved Vector Results
+
+Pre-calculated vectors can be saved to the `cluster_vector_results` table for:
+- Faster matching session startup (no need to recalculate)
+- Consistent results across sessions
+- Named vector sets for organization
 
 ### Interpreting Results
 
 - **Explained Variance**: How much of the voting pattern variance each dimension explains
 - **Representative Bills**: Bills that define the "meaning" of each dimension
 - **Positive/Negative Values**: Indicates support/opposition tendency for representative bills
+- **Cluster Names**: LLM-generated names help interpret cluster themes
+
+---
+
+## Saving Vector Results
+
+### Database Storage
+
+```sql
+CREATE TABLE cluster_vector_results (
+  id SERIAL PRIMARY KEY,
+  cluster_id INTEGER REFERENCES bill_clusters(id),
+  cluster_label INTEGER NOT NULL,
+  n_components INTEGER NOT NULL,       -- Number of PCA dimensions
+  name TEXT NOT NULL,                  -- User-provided name
+  member_vectors TEXT NOT NULL,        -- JSON: {memberId: [v1, v2, v3]}
+  member_names TEXT NOT NULL,          -- JSON: {memberId: name}
+  bill_loadings TEXT NOT NULL,         -- JSON: [[b1d1, b1d2], [b2d1, b2d2]]
+  bill_ids TEXT NOT NULL,              -- JSON: [id1, id2, ...]
+  explained_variance TEXT NOT NULL,    -- JSON: [0.35, 0.22, 0.15]
+  dimensions INTEGER NOT NULL,
+  member_count INTEGER NOT NULL,
+  bill_count INTEGER NOT NULL,
+  representative_bills TEXT,           -- JSON: RepresentativeBill[][] (optional)
+  created_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+### Loading Saved Vectors
+
+Saved vectors are used by the matching API:
+```json
+{
+  "action": "start",
+  "savedVectorId": 1
+}
+```
+
+This skips the 10-30 second calculation time.
 
 ---
 
@@ -107,8 +163,8 @@ Retrieve cluster labels list.
   "clusterName": "2024 Regular Session Bills",
   "algorithm": "kmeans",
   "clusterLabels": [
-    { "label": 0, "billCount": 45 },
-    { "label": 1, "billCount": 32 }
+    { "label": 0, "billCount": 45, "name": "環境・エネルギー" },
+    { "label": 1, "billCount": 32, "name": "地方財政・交付税" }
   ]
 }
 ```
@@ -122,7 +178,9 @@ Calculate cluster-specific latent vectors.
 {
   "clusterId": 1,
   "clusterLabel": 0,
-  "nComponents": 3
+  "nComponents": 3,
+  "save": true,
+  "name": "2024 Environment Bills - 3D"
 }
 ```
 
@@ -133,6 +191,7 @@ Calculate cluster-specific latent vectors.
   "clusterId": 1,
   "clusterName": "2024 Regular Session Bills",
   "nComponents": 3,
+  "savedId": 5,
   "clusters": {
     "0": {
       "memberVectors": {
@@ -140,12 +199,12 @@ Calculate cluster-specific latent vectors.
         "456": [-0.31, 0.67, 0.05]
       },
       "memberNames": {
-        "123": "Yamada Taro",
-        "456": "Suzuki Hanako"
+        "123": "山田太郎",
+        "456": "鈴木花子"
       },
       "representativeBills": [
         [
-          { "billId": 101, "title": "Example Bill", "loading": 0.89, "passed": true }
+          { "billId": 101, "title": "Example Bill", "loading": 0.89, "result": "可決" }
         ]
       ],
       "explainedVariance": [0.35, 0.22, 0.15],
@@ -155,6 +214,21 @@ Calculate cluster-specific latent vectors.
     }
   }
 }
+```
+
+---
+
+## Command Line Usage
+
+```bash
+# Calculate vectors for a cluster
+python scripts/calculate_cluster_vectors.py --cluster-id 1 --n-components 3
+
+# Calculate for a specific cluster label
+python scripts/calculate_cluster_vectors.py --cluster-id 1 --cluster-label 0 --n-components 3
+
+# Output to file
+python scripts/calculate_cluster_vectors.py --cluster-id 1 --output result.json
 ```
 
 ---
@@ -173,23 +247,13 @@ Calculate cluster-specific latent vectors.
 
 ## Technical Specifications
 
-### Calculation Script
+### Dependencies (Python)
 
-`/scripts/calculate_cluster_vectors.py`
-
-**Dependencies**:
-- `numpy`
-- `scikit-learn`
-- `psycopg2`
-- `python-dotenv`
-
-**Command Line Arguments**:
-```bash
-python scripts/calculate_cluster_vectors.py \
-  --cluster-id 1 \
-  --cluster-label 0 \
-  --n-components 3 \
-  --output result.json
+```txt
+numpy
+scikit-learn
+psycopg2
+python-dotenv
 ```
 
 ### Similarity Calculation

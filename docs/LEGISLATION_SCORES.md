@@ -4,7 +4,7 @@ This module provides a comprehensive analysis of parliamentary members' scores f
 
 ## Overview
 
-Instead of calculating a total score per member, this system calculates scores for **each legislation**, showing how all members voted or participated in that specific bill.
+Instead of calculating a total score per member, this system calculates scores for **each legislation**, showing how all members voted or participated in that specific bill. The scores are used as input for the adaptive matching algorithm.
 
 ## Features
 
@@ -27,24 +27,32 @@ Instead of calculating a total score per member, this system calculates scores f
 
 ### 3. Score Calculation Logic
 
+The calculation uses **extended group membership dates** for accurate attribution. This means:
+- Group membership dates are extended using `member_party` records
+- A member's effective group membership spans from their party start date to the next group's start date
+- This handles gaps between official group records
+
 #### Bill Submission (議案提出)
 - **Bill Sponsor (議案提出者)**: +10 points
   - Can be multiple members
-  - For Cabinet Bills (閣法), the Prime Minister (内閣総理大臣) at the time of submission is set as the sponsor
+  - For Cabinet Bills (閣法), the Prime Minister (内閣総理大臣) at the time of submission is the sponsor
 - **Bill Supporters (賛成者)**: +5 points
 - **Sponsoring Group Members (所属会派メンバー)**: +2 points
   - Members in the same parliamentary group as the sponsor on the submission date
+  - If `bill_sponsor_groups` is set, uses that group directly
+  - Otherwise, uses the sponsor's group from `member_group` with extended dates
   - Excludes bill sponsors and supporters (to avoid double counting)
 
 #### Bill Voting (議案採決)
 
 **House of Representatives (衆議院) - Standing Vote (起立投票)**
 - Points are applied to all members belonging to the parliamentary group that voted
+- Uses extended group membership dates for accurate attribution
 - **For (賛成)**: +2 points for each member in groups that voted yes
 - **Against (反対)**: -2 points for each member in groups that voted no
 
 **House of Councillors (参議院) - Push-button Voting (押しボタン式投票)**
-- Based on individual member voting records
+- Based on individual member voting records from `bill_votes_result_member`
 - **For (賛成)**: +5 points
 - **Against (反対)**: -5 points
 
@@ -56,7 +64,7 @@ Instead of calculating a total score per member, this system calculates scores f
 
 #### Via Command Line
 ```bash
-npm run calculate:legislation
+pnpm calculate:legislation
 ```
 
 #### Via Web Interface
@@ -98,19 +106,40 @@ interface LegislationScore {
 ```typescript
 interface MemberLegislationScore {
   memberId: number;            // Member ID
-  memberName: string;          // Member name
+  memberName: string;          // Member name (primary name from names array)
   score: number;               // Total score for this legislation
   breakdown: string[];         // Explanation of score calculation
 }
 ```
 
+## Extended Group Membership Algorithm
+
+The scoring system uses an extended group membership algorithm to handle gaps in official group records:
+
+```typescript
+function getExtendedGroupDates(memberId, group, allMemberGroups, memberParties, groupChamber) {
+  // 1. Find member parties in the same chamber
+  // 2. Find the party that contains the group's start date
+  //    → Use party's start_date as extended start (bounded by previous group's end)
+  // 3. Find the party that contains the group's end date
+  //    → Use party's end_date as extended end (bounded by next group's start)
+}
+```
+
+This ensures members are correctly attributed to groups even when:
+- There are gaps between consecutive group records
+- Party names change slightly between sessions
+- Official records have incomplete date ranges
+
 ## Files
 
-- **Script**: `/scripts/calculate_legislation_scores.ts`
-- **Data Output**: `/src/lib/data/legislation_scores.json`
-- **API Endpoint**: `/src/routes/api/calculate/+server.ts`
-- **Page**: `/src/routes/legislation-scores/+page.svelte`
-- **Server Load**: `/src/routes/legislation-scores/+page.server.ts`
+| File | Description |
+|------|-------------|
+| `/scripts/calculate_legislation_scores.ts` | Score calculation script |
+| `/src/lib/data/legislation_scores.json` | Generated JSON output |
+| `/src/routes/api/calculate/+server.ts` | API endpoint for recalculation |
+| `/src/routes/legislation-scores/+page.svelte` | UI component |
+| `/src/routes/legislation-scores/+page.server.ts` | Server-side data loading |
 
 ## API Endpoint
 
@@ -127,6 +156,20 @@ Triggers the legislation score calculation.
 }
 ```
 
+## Performance Optimizations
+
+The calculation script pre-loads all data from the database to minimize queries:
+
+```typescript
+// Data loaded upfront
+- members, groups
+- memberGroups, memberParties (for extended date calculation)
+- billSponsors, billSponsorGroups, billSupporters
+- billVotes, billVotesResultGroup, billVotesResultMember
+```
+
+This allows processing hundreds of bills efficiently with O(1) lookups per member/group.
+
 ## Development
 
 ### Adding New Features
@@ -137,10 +180,27 @@ Triggers the legislation score calculation.
 
 ### Testing
 
-1. Start dev server: `npm run dev`
+1. Start dev server: `pnpm dev`
 2. Navigate to `http://localhost:5173/legislation-scores`
 3. Test search, sorting, and modal functionality
 4. Click "スコアを再計算" to test calculation trigger
+
+## Related Tables
+
+The calculation uses data from these database tables:
+
+| Table | Purpose |
+|-------|---------|
+| `member` | Member information |
+| `group` | Parliamentary group information (with chamber) |
+| `member_group` | Group membership with date ranges |
+| `member_party` | Party membership with date ranges (for extended dates) |
+| `bill_sponsors` | Bill sponsor relationships |
+| `bill_sponsor_groups` | Explicit sponsor group relationships |
+| `bill_supporters` | Bill supporter relationships |
+| `bill_votes` | Voting events per bill |
+| `bill_votes_result_group` | Group voting results (衆議院) |
+| `bill_votes_result_member` | Individual voting results (参議院) |
 
 ## Performance Considerations
 

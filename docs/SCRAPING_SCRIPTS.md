@@ -4,11 +4,106 @@ This document describes all the scraping algorithms used in the candidate-match 
 
 ## Table of Contents
 
+- [scrape_sessions.ts](#scrape_sessionsts)
+- [scrape_kokkai_members.ts](#scrape_kokkai_membersts)
 - [scrape_kantei.ts](#scrape_kanteits)
 - [scrape_sangiin.ts](#scrape_sangiints)
 - [scrape_shugiin.ts](#scrape_shugiints)
 - [scrape_debates.ts](#scrape_debatests)
 - [scrape_member_groups.ts](#scrape_member_groupsts)
+
+---
+
+## scrape_sessions.ts
+
+### Purpose
+
+Scrapes Diet session information from the House of Representatives website. This provides the official session numbers, types, and date ranges.
+
+### Data Source
+
+- **URL**: `https://www.shugiin.go.jp/internet/itdb_annai.nsf/html/statics/shiryo/kaiki.htm`
+
+### What It Scrapes
+
+- Session number (回)
+- Session type (常会/臨時会/特別会)
+- Start date
+- End date (may include dissolution notes)
+
+### Database Tables Updated
+
+- `congress_session` - Session records with dates
+
+### Command-Line Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `--dry-run` | Flag | No | - | Preview without database writes |
+
+### Usage Examples
+
+```bash
+# Scrape all sessions
+pnpm scrape:sessions
+
+# Dry run
+pnpm scrape:sessions --dry-run
+```
+
+---
+
+## scrape_kokkai_members.ts
+
+### Purpose
+
+Scrapes Diet member information from 国会議員白書 (kokkai.sugawarataku.net) for historical terms, and from sangiin.go.jp for recent terms. It collects member names, party affiliations, and districts.
+
+### Data Sources
+
+- **Primary**: `https://kokkai.sugawarataku.net/` (国会議員白書) - For terms up to 参議院 26期
+- **Secondary**: `https://www.sangiin.go.jp/` - For 参議院 27期 onwards
+
+### What It Scrapes
+
+For each Diet term:
+- Member names (including alternate readings)
+- Party affiliation
+- Electoral district
+- Number of elections won
+- Profile URL
+
+### Database Tables Updated
+
+- `member` - Member records with name variations (stored as `names` array)
+- `party` - Political party records
+- `member_party` - Member-party affiliations with date ranges and chamber
+
+### Command-Line Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `--dry-run` | Flag | No | - | Parse pages without database writes |
+| `--shugiin` | Flag | No | - | Only scrape 衆議院 |
+| `--sangiin` | Flag | No | - | Only scrape 参議院 |
+| `[start_term]` | Positional (1st) | No | Varies | First term to process |
+| `[end_term]` | Positional (2nd) | No | Varies | Last term to process |
+
+### Usage Examples
+
+```bash
+# Scrape all terms for both houses
+pnpm scrape:members
+
+# Scrape only 衆議院 terms 45-50
+pnpm scrape:members --shugiin 45 50
+
+# Scrape only 参議院 terms 20-27
+pnpm scrape:members --sangiin 20 27
+
+# Dry run
+pnpm scrape:members --dry-run
+```
 
 ---
 
@@ -50,10 +145,10 @@ Scrapes historical cabinet (Prime Minister) information from the Prime Minister'
 
 ```bash
 # Normal run - scrapes and saves to database
-pnpm tsx scripts/scrape_kantei.ts
+pnpm scrape:kantei
 
 # Dry run - preview what would be scraped without DB writes
-pnpm tsx scripts/scrape_kantei.ts --dry-run
+pnpm scrape:kantei --dry-run
 ```
 
 ---
@@ -88,7 +183,7 @@ For each bill:
 - Bill title
 - Submission date
 - Deliberation completion status
-- Pass/fail status
+- Pass/fail/withdrawn/expired result
 - Committee assignments (both chambers)
 - Voting methods and dates
 - Individual vote results (for push-button voting)
@@ -96,7 +191,6 @@ For each bill:
 ### Database Tables Updated
 
 - `bill` - Main bill records
-- `bill_detail` - Bill titles
 - `committee` - Committee records
 - `committee_bill` - Bill-committee assignments
 - `bill_votes` - Voting records
@@ -122,16 +216,16 @@ For each bill:
 
 ```bash
 # Scrape all sessions from 198 to 219 (default)
-pnpm tsx scripts/scrape_sangiin.ts
+pnpm scrape:sangiin
 
 # Scrape a specific session range
-pnpm tsx scripts/scrape_sangiin.ts 213 215
+pnpm scrape:sangiin 213 215
 
 # Scrape only session 215
-pnpm tsx scripts/scrape_sangiin.ts 215 215
+pnpm scrape:sangiin 215 215
 
 # Dry run for a specific session
-pnpm tsx scripts/scrape_sangiin.ts --dry-run 215 215
+pnpm scrape:sangiin --dry-run 215 215
 ```
 
 ### Notes
@@ -140,7 +234,7 @@ pnpm tsx scripts/scrape_sangiin.ts --dry-run 215 215
 - Handles special deliberation status cases:
   - 撤回 (withdrawn) in remarks
   - 否決 (rejected) at plenary sessions
-  - 未了 (incomplete) when both plenary sessions are empty
+  - 未了 (incomplete/expired) when both plenary sessions are empty
 
 ---
 
@@ -203,13 +297,13 @@ For all bill types:
 
 ```bash
 # Scrape sessions 213-219 (default)
-pnpm tsx scripts/scrape_shugiin.ts
+pnpm scrape:shugiin
 
 # Scrape a specific session range
-pnpm tsx scripts/scrape_shugiin.ts 215 218
+pnpm scrape:shugiin 215 218
 
 # Dry run
-pnpm tsx scripts/scrape_shugiin.ts --dry-run 215 215
+pnpm scrape:shugiin --dry-run 215 215
 ```
 
 ### Dependencies
@@ -241,6 +335,10 @@ For each bill:
   - Speech content (full text)
   - Meeting metadata (date, house, committee, issue number)
 
+### Bill Matching
+
+Uses precise bill identification: session number, bill type (衆法/参法/閣法), and bill number. This ensures accurate matching even for bills with similar titles.
+
 ### Database Tables Updated
 
 - `bill_debates` - Speech records for each bill
@@ -253,6 +351,8 @@ For each bill:
 | `--skip-existing` | Flag | No | - | Skip bills that already have debate records |
 | `--verbose` | Flag | No | - | Enable verbose logging |
 | `--bill-id=N` | Named | No | - | Process only a specific bill by ID |
+| `--dry-run` | Flag | No | - | Run without database writes |
+| `--concurrency=N` | Named | No | 3 | Number of parallel browser pages |
 
 ### Environment Variables
 
@@ -264,30 +364,31 @@ For each bill:
 
 ```bash
 # Process all bills (with rate limiting)
-pnpm tsx scripts/scrape_debates.ts
+pnpm scrape:debates
 
 # Process first 10 bills that don't have debates yet
-pnpm tsx scripts/scrape_debates.ts --limit=10 --skip-existing
+pnpm scrape:debates --limit=10 --skip-existing
 
 # Process a specific bill with verbose output
-pnpm tsx scripts/scrape_debates.ts --bill-id=42 --verbose
+pnpm scrape:debates --bill-id=42 --verbose
 
 # Combine options
-pnpm tsx scripts/scrape_debates.ts --limit=5 --skip-existing --verbose
+pnpm scrape:debates --limit=5 --skip-existing --verbose
 ```
 
 ### Technical Notes
 
 - Uses **Playwright** for browser automation (headless Chromium)
 - Implements rate limiting:
-  - 500ms delay between API requests
-  - 1000ms delay between bills
+  - 2000ms delay between API requests (conservative)
+  - Parallel page processing with staggered starts
 - Handles multiple pages of search results from hourei.ndl.go.jp
-- Parses multiple URL formats from the Kokkai API
+- Full pagination support for speech API (fetches all speeches, not just first page)
+- Meeting speech caching to avoid re-fetching same meeting for multiple bills
 
 ### Dependencies
 
-- **Requires**: Bills must exist in database with titles (`bill` and `bill_detail` tables)
+- **Requires**: Bills must exist in database with titles (`bill` table)
 - **Browser**: Uses Playwright with Chromium
 
 ---
@@ -312,7 +413,7 @@ For each member in the database:
 
 ### Database Tables Updated
 
-- `group` - Political group/party records
+- `group` - Political group/party records (with chamber)
 - `member_group` - Member-group affiliation records with date ranges
 
 ### Command-Line Parameters
@@ -334,19 +435,19 @@ For each member in the database:
 
 ```bash
 # Process all members from 1947 to today
-pnpm tsx scripts/scrape_member_groups.ts
+pnpm scrape:member-groups
 
 # Process members with speeches from 2020 onwards
-pnpm tsx scripts/scrape_member_groups.ts 2020-01-01
+pnpm scrape:member-groups 2020-01-01
 
 # Process a specific date range
-pnpm tsx scripts/scrape_member_groups.ts 2015-01-01 2020-12-31
+pnpm scrape:member-groups 2015-01-01 2020-12-31
 
 # Process only a specific member
-pnpm tsx scripts/scrape_member_groups.ts 1947-01-01 2025-01-01 42
+pnpm scrape:member-groups 1947-01-01 2025-01-01 42
 
 # Dry run
-pnpm tsx scripts/scrape_member_groups.ts --dry-run
+pnpm scrape:member-groups --dry-run
 ```
 
 ### Technical Notes
@@ -358,7 +459,7 @@ pnpm tsx scripts/scrape_member_groups.ts --dry-run
 
 ### Dependencies
 
-- **Requires**: Members must exist in database first (populated by other scraping scripts)
+- **Requires**: Members must exist in database first (populated by `scrape_kokkai_members.ts`)
 
 ---
 
@@ -366,19 +467,23 @@ pnpm tsx scripts/scrape_member_groups.ts --dry-run
 
 For a complete data refresh, run the scripts in this order:
 
-1. **`scrape_kantei.ts`** - Populates Prime Minister records
-2. **`scrape_sangiin.ts`** - Creates bill records and basic metadata
-3. **`scrape_shugiin.ts`** - Adds sponsors and voting group data
-4. **`scrape_member_groups.ts`** - Populates party affiliation history
-5. **`scrape_debates.ts`** - Fetches debate speech content
+1. **`scrape_sessions.ts`** - Populates session dates
+2. **`scrape_kokkai_members.ts`** - Populates member and party records
+3. **`scrape_kantei.ts`** - Populates Prime Minister records
+4. **`scrape_sangiin.ts`** - Creates bill records and basic metadata
+5. **`scrape_shugiin.ts`** - Adds sponsors and voting group data
+6. **`scrape_member_groups.ts`** - Populates group affiliation history
+7. **`scrape_debates.ts`** - Fetches debate speech content
 
 ```bash
 # Full refresh example
-pnpm tsx scripts/scrape_kantei.ts
-pnpm tsx scripts/scrape_sangiin.ts
-pnpm tsx scripts/scrape_shugiin.ts
-pnpm tsx scripts/scrape_member_groups.ts
-pnpm tsx scripts/scrape_debates.ts --skip-existing
+pnpm scrape:sessions
+pnpm scrape:members
+pnpm scrape:kantei
+pnpm scrape:sangiin
+pnpm scrape:shugiin
+pnpm scrape:member-groups
+pnpm scrape:debates --skip-existing
 ```
 
 ## Common Environment Setup
@@ -395,8 +500,22 @@ All scripts implement rate limiting to be respectful to the data sources:
 
 | Script | Delay | Notes |
 |--------|-------|-------|
+| scrape_sessions.ts | None | Single page, low volume |
+| scrape_kokkai_members.ts | 500ms | Between term pages |
 | scrape_kantei.ts | None | Low volume, single page |
 | scrape_sangiin.ts | None | Sequential requests |
 | scrape_shugiin.ts | None | Sequential requests |
-| scrape_debates.ts | 500ms-1000ms | High volume API |
+| scrape_debates.ts | 2000ms | Conservative API rate limiting |
 | scrape_member_groups.ts | 3000ms | Per API documentation |
+
+## npm Scripts Reference
+
+| Script | Command |
+|--------|---------|
+| `scrape:sessions` | `tsx ./scripts/scrape_sessions.ts` |
+| `scrape:members` | `tsx ./scripts/scrape_kokkai_members.ts` |
+| `scrape:kantei` | `tsx ./scripts/scrape_kantei.ts` |
+| `scrape:sangiin` | `tsx ./scripts/scrape_sangiin.ts` |
+| `scrape:shugiin` | `tsx ./scripts/scrape_shugiin.ts` |
+| `scrape:member-groups` | `tsx ./scripts/scrape_member_groups.ts` |
+| `scrape:debates` | `tsx ./scripts/scrape_debates.ts` |
