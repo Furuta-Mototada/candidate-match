@@ -3,6 +3,12 @@
 	import type { PageData } from './$types.js';
 	import { PageHero, ClusterCard, LoadingSpinner, EmptyState } from '$lib/components/index.js';
 
+	interface CommitteeInfo {
+		name: string | null;
+		chamber: string | null;
+		session: number | null;
+	}
+
 	interface BillWithDetails {
 		billId: number;
 		clusterLabel: number;
@@ -12,10 +18,9 @@
 		billNumber: number;
 		title: string | null;
 		description: string | null;
-		deliberationCompleted: boolean | null;
-		passed: boolean | null;
+		result: string | null; // '可決' | '否決' | '撤回' | '未了' | null
 		pdfUrl?: string;
-		committees: Array<{ name: string | null; chamber: string | null }>;
+		committees: CommitteeInfo[];
 	}
 
 	let { data }: { data: PageData } = $props();
@@ -36,6 +41,19 @@
 	let selectedBillId = $state<number | null>(null);
 	let selectedBill = $state<BillWithDetails | null>(null);
 
+	// Bill enrichment data
+	interface EnrichmentData {
+		summaryShort: string | null;
+		summaryDetailed: string | null;
+		keyPoints: Array<{ who: string; what: string; when: string }>;
+		impactTags: string[];
+		prosAndCons: { pros: string[]; cons: string[] } | null;
+		exampleScenario: string | null;
+		enrichmentStatus: string;
+	}
+	let enrichmentData = $state<EnrichmentData | null>(null);
+	let isLoadingEnrichment = $state(false);
+
 	// 2D visualization data
 	let visualizationData = $state<
 		Array<{
@@ -50,6 +68,62 @@
 		}>
 	>([]);
 	let isLoadingViz = $state(false);
+
+	// Zoom and pan state for visualization
+	let zoomLevel = $state(1);
+	let panX = $state(0);
+	let panY = $state(0);
+	const MIN_ZOOM = 0.5;
+	const MAX_ZOOM = 5;
+	const ZOOM_STEP = 0.5;
+
+	function zoomIn() {
+		zoomLevel = Math.min(MAX_ZOOM, zoomLevel + ZOOM_STEP);
+	}
+
+	function zoomOut() {
+		zoomLevel = Math.max(MIN_ZOOM, zoomLevel - ZOOM_STEP);
+	}
+
+	function resetZoom() {
+		zoomLevel = 1;
+		panX = 0;
+		panY = 0;
+	}
+
+	// Compute viewBox based on zoom and pan
+	let viewBox = $derived.by(() => {
+		const baseSize = 240;
+		const size = baseSize / zoomLevel;
+		const x = -size / 2 + panX;
+		const y = -size / 2 + panY;
+		return `${x} ${y} ${size} ${size}`;
+	});
+
+	// Pre-compute normalized visualization data to avoid O(n²) in template
+	let normalizedVizData = $derived.by(() => {
+		if (visualizationData.length === 0) return [];
+
+		const maxX = Math.max(...visualizationData.map((p) => Math.abs(p.x))) || 1;
+		const maxY = Math.max(...visualizationData.map((p) => Math.abs(p.y))) || 1;
+
+		return visualizationData.map((point) => ({
+			...point,
+			nx: (point.x / maxX) * 90,
+			ny: -(point.y / maxY) * 90
+		}));
+	});
+
+	// Pre-compute unique clusters for legend
+	let uniqueClusters = $derived.by(() => {
+		const clusters = Array.from(new Set(visualizationData.map((p) => p.cluster))).sort(
+			(a, b) => a - b
+		);
+		return clusters.map((cluster) => ({
+			cluster,
+			count: visualizationData.filter((p) => p.cluster === cluster).length
+		}));
+	});
 
 	// Cluster label names from LLM
 	let labelNames = $state<Record<number, { name: string; description: string | null }>>({});
@@ -180,9 +254,34 @@
 		}
 	}
 
+	async function loadEnrichmentData(billId: number) {
+		isLoadingEnrichment = true;
+		enrichmentData = null;
+		try {
+			const response = await fetch(`/api/bill-enrichment?billId=${billId}`);
+			if (response.ok) {
+				const data = await response.json();
+				enrichmentData = {
+					summaryShort: data.summaryShort,
+					summaryDetailed: data.summaryDetailed,
+					keyPoints: data.keyPoints || [],
+					impactTags: data.impactTags || [],
+					prosAndCons: data.prosAndCons,
+					exampleScenario: data.exampleScenario,
+					enrichmentStatus: data.enrichmentStatus
+				};
+			}
+		} catch (error) {
+			console.error('Failed to load enrichment data:', error);
+		} finally {
+			isLoadingEnrichment = false;
+		}
+	}
+
 	function selectBill(bill: BillWithDetails) {
 		selectedBillId = bill.billId;
 		selectedBill = bill;
+		loadEnrichmentData(bill.billId);
 	}
 
 	interface VisualizationPoint {
@@ -205,6 +304,7 @@
 				const foundBill = bills.find((b) => b.billId === point.billId);
 				if (foundBill) {
 					selectedBill = foundBill;
+					loadEnrichmentData(point.billId);
 					return;
 				}
 			}
@@ -220,10 +320,24 @@
 			clusterLabel: point.cluster,
 			distance: null,
 			description: null,
-			deliberationCompleted: null,
-			passed: null,
+			result: null,
 			committees: []
 		};
+		loadEnrichmentData(point.billId);
+	}
+
+	// Group committees by session for display
+	function groupCommitteesBySession(committees: CommitteeInfo[]): Map<number, CommitteeInfo[]> {
+		const grouped = new Map<number, CommitteeInfo[]>();
+		for (const c of committees) {
+			const session = c.session ?? 0;
+			if (!grouped.has(session)) {
+				grouped.set(session, []);
+			}
+			grouped.get(session)!.push(c);
+		}
+		// Sort by session descending (most recent first)
+		return new Map([...grouped.entries()].sort((a, b) => b[0] - a[0]));
 	}
 
 	function getClusterColor(clusterLabel: number): string {
@@ -361,31 +475,59 @@
 							768次元の埋め込みベクトルを主成分分析(PCA)で2次元に縮約して表示しています。
 						</p>
 
-						<div class="scatter-plot-container">
-							<svg
-								class="scatter-plot"
-								viewBox="-120 -120 240 240"
-								preserveAspectRatio="xMidYMid meet"
+						<!-- Zoom Controls -->
+						<div class="zoom-controls">
+							<button
+								class="zoom-btn"
+								onclick={zoomOut}
+								disabled={zoomLevel <= MIN_ZOOM}
+								title="ズームアウト"
 							>
-								<!-- Grid lines -->
-								<line x1="-100" y1="0" x2="100" y2="0" stroke="#e5e7eb" stroke-width="0.5" />
-								<line x1="0" y1="-100" x2="0" y2="100" stroke="#e5e7eb" stroke-width="0.5" />
+								−
+							</button>
+							<span class="zoom-level">{Math.round(zoomLevel * 100)}%</span>
+							<button
+								class="zoom-btn"
+								onclick={zoomIn}
+								disabled={zoomLevel >= MAX_ZOOM}
+								title="ズームイン"
+							>
+								+
+							</button>
+							<button class="zoom-btn reset" onclick={resetZoom} title="リセット"> ⟲ </button>
+						</div>
 
-								<!-- Data points -->
-								{#each visualizationData as point}
-									{@const x =
-										(point.x / Math.max(...visualizationData.map((p) => Math.abs(p.x)))) * 90}
-									{@const y =
-										-(point.y / Math.max(...visualizationData.map((p) => Math.abs(p.y)))) * 90}
+						<div class="scatter-plot-container">
+							<svg class="scatter-plot" {viewBox} preserveAspectRatio="xMidYMid meet">
+								<!-- Grid lines -->
+								<line
+									x1="-100"
+									y1="0"
+									x2="100"
+									y2="0"
+									stroke="#e5e7eb"
+									stroke-width={0.5 / zoomLevel}
+								/>
+								<line
+									x1="0"
+									y1="-100"
+									x2="0"
+									y2="100"
+									stroke="#e5e7eb"
+									stroke-width={0.5 / zoomLevel}
+								/>
+
+								<!-- Data points (using pre-normalized coordinates) -->
+								{#each normalizedVizData as point}
 									{@const color = getClusterColor(point.cluster)}
 
 									<circle
-										cx={x}
-										cy={y}
-										r="4"
+										cx={point.nx}
+										cy={point.ny}
+										r={4 / zoomLevel}
 										fill={color}
 										stroke="white"
-										stroke-width="1"
+										stroke-width={1 / zoomLevel}
 										class="data-point"
 										class:selected={selectedBillId === point.billId}
 										onclick={() => selectBillFromViz(point)}
@@ -401,12 +543,12 @@
 									<!-- Labels for selected point -->
 									{#if selectedBillId === point.billId}
 										<text
-											{x}
-											y={y - 8}
+											x={point.nx}
+											y={point.ny - 8 / zoomLevel}
 											text-anchor="middle"
 											class="point-label"
 											fill="#1f2937"
-											font-size="4"
+											font-size={4 / zoomLevel}
 											font-weight="600"
 										>
 											{point.type}-{point.number}
@@ -415,11 +557,10 @@
 								{/each}
 							</svg>
 
-							<!-- Legend -->
+							<!-- Legend (using pre-computed unique clusters) -->
 							<div class="legend">
 								<div class="legend-title">クラスタ:</div>
-								{#each Array.from(new Set(visualizationData.map((p) => p.cluster))).sort() as cluster}
-									{@const count = visualizationData.filter((p) => p.cluster === cluster).length}
+								{#each uniqueClusters as { cluster, count }}
 									{@const labelName = labelNames[cluster]?.name}
 									<div class="legend-item" title={labelNames[cluster]?.description || ''}>
 										<div
@@ -463,10 +604,14 @@
 										</div>
 										<div class="bill-title">{bill.title || '(タイトルなし)'}</div>
 										<div class="bill-status">
-											{#if bill.passed}
+											{#if bill.result === '可決'}
 												<span class="status-badge passed">可決</span>
-											{:else if bill.deliberationCompleted}
-												<span class="status-badge completed">審議終了</span>
+											{:else if bill.result === '否決'}
+												<span class="status-badge rejected">否決</span>
+											{:else if bill.result === '撤回'}
+												<span class="status-badge withdrawn">撤回</span>
+											{:else if bill.result === '未了'}
+												<span class="status-badge expired">未了</span>
 											{:else}
 												<span class="status-badge pending">審議中</span>
 											{/if}
@@ -519,12 +664,19 @@
 					</div>
 				{/if}
 				{#if selectedBill.committees && selectedBill.committees.length > 0}
-					<div class="detail-row">
+					<div class="detail-row full-width">
 						<span class="label">委員会</span>
-						<div class="committees">
-							{#each selectedBill.committees as committee}
-								<div class="committee-tag">
-									{committee.chamber} - {committee.name}
+						<div class="committees-grouped">
+							{#each [...groupCommitteesBySession(selectedBill.committees)] as [session, sessionCommittees]}
+								<div class="session-group">
+									<div class="session-label">第{session}回国会</div>
+									<div class="committees">
+										{#each sessionCommittees as committee}
+											<div class="committee-tag">
+												{committee.chamber} - {committee.name}
+											</div>
+										{/each}
+									</div>
 								</div>
 							{/each}
 						</div>
@@ -550,6 +702,98 @@
 					<span class="value"
 						>{selectedBill.distance ? Number(selectedBill.distance).toFixed(4) : 'N/A'}</span
 					>
+				</div>
+
+				<!-- Enrichment Data Section -->
+				<div class="enrichment-section">
+					<h4 class="enrichment-title">📚 詳細情報</h4>
+
+					{#if isLoadingEnrichment}
+						<p class="loading-text">読み込み中...</p>
+					{:else if enrichmentData}
+						{#if enrichmentData.enrichmentStatus === 'pending'}
+							<p class="enrichment-pending">この法案の詳細情報はまだ生成されていません。</p>
+						{:else}
+							{#if enrichmentData.summaryShort}
+								<div class="enrichment-row">
+									<span class="enrichment-label">概要</span>
+									<p class="enrichment-value">{enrichmentData.summaryShort}</p>
+								</div>
+							{/if}
+
+							{#if enrichmentData.summaryDetailed}
+								<div class="enrichment-row">
+									<span class="enrichment-label">詳細説明</span>
+									<p class="enrichment-value detailed">{enrichmentData.summaryDetailed}</p>
+								</div>
+							{/if}
+
+							{#if enrichmentData.impactTags && enrichmentData.impactTags.length > 0}
+								<div class="enrichment-row">
+									<span class="enrichment-label">影響タグ</span>
+									<div class="impact-tags">
+										{#each enrichmentData.impactTags as tag}
+											<span class="impact-tag">{tag}</span>
+										{/each}
+									</div>
+								</div>
+							{/if}
+
+							{#if enrichmentData.keyPoints && enrichmentData.keyPoints.length > 0}
+								<div class="enrichment-row">
+									<span class="enrichment-label">主要ポイント</span>
+									<div class="key-points">
+										{#each enrichmentData.keyPoints as point}
+											<div class="key-point">
+												<span class="key-point-who">{point.who}</span>
+												<span class="key-point-what">{point.what}</span>
+												{#if point.when}
+													<span class="key-point-when">{point.when}</span>
+												{/if}
+											</div>
+										{/each}
+									</div>
+								</div>
+							{/if}
+
+							{#if enrichmentData.prosAndCons}
+								<div class="enrichment-row">
+									<span class="enrichment-label">賛否両論</span>
+									<div class="pros-cons">
+										{#if enrichmentData.prosAndCons.pros && enrichmentData.prosAndCons.pros.length > 0}
+											<div class="pros">
+												<span class="pros-cons-label">👍 賛成意見</span>
+												<ul>
+													{#each enrichmentData.prosAndCons.pros as pro}
+														<li>{pro}</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
+										{#if enrichmentData.prosAndCons.cons && enrichmentData.prosAndCons.cons.length > 0}
+											<div class="cons">
+												<span class="pros-cons-label">👎 反対意見</span>
+												<ul>
+													{#each enrichmentData.prosAndCons.cons as con}
+														<li>{con}</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
+									</div>
+								</div>
+							{/if}
+
+							{#if enrichmentData.exampleScenario}
+								<div class="enrichment-row">
+									<span class="enrichment-label">具体例</span>
+									<p class="enrichment-value example">{enrichmentData.exampleScenario}</p>
+								</div>
+							{/if}
+						{/if}
+					{:else}
+						<p class="enrichment-pending">詳細情報を取得できませんでした。</p>
+					{/if}
 				</div>
 			</div>
 		</aside>
@@ -826,14 +1070,67 @@
 		color: #166534;
 	}
 
-	.status-badge.completed {
+	.status-badge.rejected {
+		background: #fee2e2;
+		color: #991b1b;
+	}
+
+	.status-badge.withdrawn {
+		background: #e5e7eb;
+		color: #374151;
+	}
+
+	.status-badge.expired {
+		background: #fef3c7;
+		color: #92400e;
+	}
+
+	.status-badge.pending {
 		background: #dbeafe;
 		color: #1e40af;
 	}
 
-	.status-badge.pending {
-		background: #fef3c7;
-		color: #92400e;
+	/* ===== ZOOM CONTROLS ===== */
+	.zoom-controls {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin-bottom: 1rem;
+	}
+
+	.zoom-btn {
+		width: 32px;
+		height: 32px;
+		border: 1px solid #e5e7eb;
+		border-radius: 6px;
+		background: white;
+		cursor: pointer;
+		font-size: 1.2rem;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		transition: all 0.2s;
+	}
+
+	.zoom-btn:hover:not(:disabled) {
+		background: #f3f4f6;
+		border-color: #d1d5db;
+	}
+
+	.zoom-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.zoom-btn.reset {
+		font-size: 1rem;
+	}
+
+	.zoom-level {
+		min-width: 50px;
+		text-align: center;
+		font-size: 0.875rem;
+		color: #6b7280;
 	}
 
 	/* ===== DETAIL PANEL ===== */
@@ -910,6 +1207,34 @@
 		font-size: 0.95rem;
 	}
 
+	.detail-row.full-width {
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.5rem;
+	}
+
+	.committees-grouped {
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+		width: 100%;
+	}
+
+	.session-group {
+		background: #f8fafc;
+		border-radius: 8px;
+		padding: 0.75rem;
+	}
+
+	.session-label {
+		font-size: 0.75rem;
+		font-weight: 600;
+		color: #64748b;
+		margin-bottom: 0.5rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+
 	.committees {
 		display: flex;
 		flex-direction: column;
@@ -934,6 +1259,152 @@
 	.pdf-link:hover {
 		color: #4f46e5;
 		text-decoration: underline;
+	}
+
+	/* ===== ENRICHMENT SECTION ===== */
+	.enrichment-section {
+		margin-top: 1.5rem;
+		padding-top: 1.5rem;
+		border-top: 1px solid #e5e7eb;
+	}
+
+	.enrichment-title {
+		font-size: 1rem;
+		font-weight: 600;
+		color: #1f2937;
+		margin: 0 0 1rem 0;
+	}
+
+	.loading-text {
+		color: #6b7280;
+		font-size: 0.875rem;
+	}
+
+	.enrichment-pending {
+		color: #9ca3af;
+		font-size: 0.875rem;
+		font-style: italic;
+	}
+
+	.enrichment-row {
+		margin-bottom: 1rem;
+	}
+
+	.enrichment-label {
+		display: block;
+		font-size: 0.75rem;
+		font-weight: 600;
+		color: #6b7280;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		margin-bottom: 0.25rem;
+	}
+
+	.enrichment-value {
+		color: #374151;
+		font-size: 0.875rem;
+		line-height: 1.5;
+		margin: 0;
+	}
+
+	.enrichment-value.detailed {
+		background: #f9fafb;
+		padding: 0.75rem;
+		border-radius: 8px;
+		border-left: 3px solid #6366f1;
+	}
+
+	.enrichment-value.example {
+		background: #fffbeb;
+		padding: 0.75rem;
+		border-radius: 8px;
+		border-left: 3px solid #f59e0b;
+	}
+
+	.impact-tags {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+
+	.impact-tag {
+		background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+		color: white;
+		padding: 0.25rem 0.75rem;
+		border-radius: 9999px;
+		font-size: 0.75rem;
+		font-weight: 500;
+	}
+
+	.key-points {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.key-point {
+		background: #f3f4f6;
+		padding: 0.5rem 0.75rem;
+		border-radius: 6px;
+		font-size: 0.8rem;
+	}
+
+	.key-point-who {
+		font-weight: 600;
+		color: #4f46e5;
+	}
+
+	.key-point-what {
+		display: block;
+		color: #374151;
+		margin-top: 0.25rem;
+	}
+
+	.key-point-when {
+		display: block;
+		color: #9ca3af;
+		font-size: 0.75rem;
+		margin-top: 0.25rem;
+	}
+
+	.pros-cons {
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+	}
+
+	.pros-cons-label {
+		font-weight: 600;
+		font-size: 0.8rem;
+		display: block;
+		margin-bottom: 0.25rem;
+	}
+
+	.pros {
+		background: #ecfdf5;
+		padding: 0.75rem;
+		border-radius: 8px;
+	}
+
+	.cons {
+		background: #fef2f2;
+		padding: 0.75rem;
+		border-radius: 8px;
+	}
+
+	.pros ul,
+	.cons ul {
+		margin: 0;
+		padding-left: 1.25rem;
+		font-size: 0.8rem;
+	}
+
+	.pros li {
+		color: #166534;
+	}
+
+	.cons li {
+		color: #991b1b;
 	}
 
 	/* ===== RESPONSIVE ===== */

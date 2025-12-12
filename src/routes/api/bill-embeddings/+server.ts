@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types.js';
 import { db } from '$lib/server/db/index.js';
-import { billEmbeddings, bill, billDetail, billClusterAssignments } from '$lib/server/db/schema.js';
+import { billEmbeddings, bill, billClusterAssignments } from '$lib/server/db/schema.js';
 import { eq, isNotNull, and } from 'drizzle-orm';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -44,11 +44,10 @@ export const GET: RequestHandler = async ({ url }): Promise<Response> => {
 					type: bill.type,
 					session: bill.submissionSession,
 					number: bill.number,
-					title: billDetail.title
+					title: bill.title
 				})
 				.from(billClusterAssignments)
 				.leftJoin(bill, eq(billClusterAssignments.billId, bill.id))
-				.leftJoin(billDetail, eq(bill.id, billDetail.billId))
 				.where(
 					and(
 						eq(billClusterAssignments.clusterId, clusterIdNum),
@@ -103,11 +102,10 @@ export const GET: RequestHandler = async ({ url }): Promise<Response> => {
 				billType: bill.type,
 				submissionSession: bill.submissionSession,
 				billNumber: bill.number,
-				title: billDetail.title
+				title: bill.title
 			})
 			.from(billEmbeddings)
-			.leftJoin(bill, eq(billEmbeddings.billId, bill.id))
-			.leftJoin(billDetail, eq(bill.id, billDetail.billId));
+			.leftJoin(bill, eq(billEmbeddings.billId, bill.id));
 
 		// Parse embeddings from JSON strings
 		const embeddings = embeddingsData.map((item) => ({

@@ -112,7 +112,7 @@ def summarize_debates(
 
     # Build debate context (truncate to avoid token limits)
     # Japanese text: ~1 token per character
-    # gpt-4.1 has higher rate limits, but we still cap for cost efficiency
+    # gpt-5.1 has higher rate limits, but we still cap for cost efficiency
     debate_texts = []
     total_chars = 0
     max_chars = 30000  # Limit context size

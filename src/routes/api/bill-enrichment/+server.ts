@@ -3,7 +3,6 @@ import type { RequestHandler } from './$types.js';
 import { db } from '$lib/server/db/index.js';
 import {
 	bill,
-	billDetail,
 	billEnrichment,
 	billDebates,
 	billEmbeddings,
@@ -91,13 +90,11 @@ export const GET: RequestHandler = async ({ url }): Promise<Response> => {
 		const [billData] = await db
 			.select({
 				id: bill.id,
-				passed: bill.passed,
-				title: billDetail.title,
-				description: billDetail.description,
+				result: bill.result,
+				title: bill.title,
 				pdfUrl: billEmbeddings.pdfUrl
 			})
 			.from(bill)
-			.innerJoin(billDetail, eq(bill.id, billDetail.billId))
 			.leftJoin(billEmbeddings, eq(bill.id, billEmbeddings.billId))
 			.where(eq(bill.id, billId));
 
@@ -171,8 +168,8 @@ export const GET: RequestHandler = async ({ url }): Promise<Response> => {
 		const result: EnrichedBillData = {
 			billId: billData.id,
 			title: billData.title || '',
-			description: billData.description,
-			passed: billData.passed || false,
+			description: enrichmentData?.summaryShort || null,
+			passed: billData.result === '可決',
 
 			summaryShort: enrichmentData?.summaryShort || null,
 			summaryDetailed: enrichmentData?.summaryDetailed || null,

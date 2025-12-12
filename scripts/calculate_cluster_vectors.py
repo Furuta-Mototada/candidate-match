@@ -66,12 +66,9 @@ def load_bill_info(conn) -> Dict[int, Dict]:
 
     bills = {}
     for row in cursor.fetchall():
-        result = row[1]
         bills[row[0]] = {
             "id": row[0],
-            "result": result,
-            "passed": result == "可決",
-            "deliberation_completed": result is not None,
+            "result": row[1],
             "title": row[2] or "",
         }
     cursor.close()
@@ -80,25 +77,28 @@ def load_bill_info(conn) -> Dict[int, Dict]:
 
 def get_bill_weight(bill_info: Dict, title: str = "") -> float:
     """
-    Calculate importance weight for a bill based on its status.
+    Calculate importance weight for a bill based on its result status.
 
-    Weights:
-    - Passed bills (可決): 1.0
-    - In progress (審議中): 0.8
-    - Failed/discarded (否決・廃案): 0.6
+    Weights based on bill.result:
+    - '可決' (passed): 1.0
+    - '否決' (rejected): 0.6
+    - '撤回' (withdrawn): 0.5
+    - '未了' (expired/unfinished): 0.7
+    - null (still in deliberation): 0.8
     """
-    passed = bill_info.get("passed", False)
-    deliberation_completed = bill_info.get("deliberation_completed", False)
+    result = bill_info.get("result")
 
-    if passed:
-        # Bill has passed
+    if result == "可決":
         return 1.0
-    elif not deliberation_completed:
-        # Bill is still in progress (deliberation not completed)
-        return 0.8
-    else:
-        # Bill failed or was discarded (deliberation completed but not passed)
+    elif result == "否決":
         return 0.6
+    elif result == "撤回":
+        return 0.3
+    elif result == "未了":
+        return 0.2
+    else:
+        # null means still in deliberation
+        return 0.8
 
 
 def normalize_score(
@@ -167,8 +167,7 @@ def build_voting_matrix(
             {
                 "billId": bill_id,
                 "title": title,
-                "passed": info.get("passed", False),
-                "deliberationCompleted": info.get("deliberation_completed", False),
+                "result": info.get("result"),
             }
         )
 

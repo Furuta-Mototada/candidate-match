@@ -6,8 +6,8 @@ import {
 	billClusterAssignments,
 	billClusterLabelNames,
 	bill,
-	billDetail,
 	billEmbeddings,
+	billEnrichment,
 	committee,
 	committeeBill
 } from '$lib/server/db/schema.js';
@@ -44,15 +44,14 @@ export const GET: RequestHandler = async ({ url }): Promise<Response> => {
 					billType: bill.type,
 					submissionSession: bill.submissionSession,
 					billNumber: bill.number,
-					title: billDetail.title,
-					description: billDetail.description,
+					title: bill.title,
+					description: billEnrichment.summaryShort,
 					pdfUrl: billEmbeddings.pdfUrl,
-					deliberationCompleted: bill.deliberationCompleted,
-					passed: bill.passed
+					result: bill.result
 				})
 				.from(billClusterAssignments)
 				.leftJoin(bill, eq(billClusterAssignments.billId, bill.id))
-				.leftJoin(billDetail, eq(bill.id, billDetail.billId))
+				.leftJoin(billEnrichment, eq(bill.id, billEnrichment.billId))
 				.leftJoin(billEmbeddings, eq(bill.id, billEmbeddings.billId))
 				.where(eq(billClusterAssignments.clusterId, clusterIdNum)); // Get committee assignments for all bills
 			const billIds = assignments.map((a) => a.billId);
@@ -63,7 +62,8 @@ export const GET: RequestHandler = async ({ url }): Promise<Response> => {
 							.select({
 								billId: committeeBill.billId,
 								committeeName: committee.name,
-								chamber: committee.chamber
+								chamber: committee.chamber,
+								session: committeeBill.session
 							})
 							.from(committeeBill)
 							.leftJoin(committee, eq(committeeBill.committeeId, committee.id))
@@ -80,10 +80,9 @@ export const GET: RequestHandler = async ({ url }): Promise<Response> => {
 				billNumber: number | null;
 				title: string | null;
 				description: string | null;
-				deliberationCompleted: boolean | null;
-				passed: boolean | null;
+				result: string | null;
 				pdfUrl: string | null;
-				committees: Array<{ name: string | null; chamber: string | null }>;
+				committees: Array<{ name: string | null; chamber: string | null; session: number }>;
 			}
 
 			const billsByCluster: Record<number, BillWithDetails[]> = {};
@@ -105,12 +104,12 @@ export const GET: RequestHandler = async ({ url }): Promise<Response> => {
 					billNumber: assignment.billNumber,
 					title: assignment.title,
 					description: assignment.description,
-					deliberationCompleted: assignment.deliberationCompleted,
-					passed: assignment.passed,
+					result: assignment.result,
 					pdfUrl: assignment.pdfUrl,
 					committees: billCommittees.map((c) => ({
 						name: c.committeeName,
-						chamber: c.chamber
+						chamber: c.chamber,
+						session: c.session
 					}))
 				});
 			}

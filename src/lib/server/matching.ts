@@ -13,7 +13,7 @@
  */
 
 import { db } from './db/index.js';
-import { bill, billDetail, group, memberGroup } from './db/schema.js';
+import { bill, group, memberGroup } from './db/schema.js';
 import { eq, inArray } from 'drizzle-orm';
 
 // ============================================================================
@@ -429,12 +429,10 @@ export async function loadBillInfo(billIds: number[]): Promise<Map<number, Parti
 	const bills = await db
 		.select({
 			id: bill.id,
-			passed: bill.passed,
-			title: billDetail.title,
-			description: billDetail.description
+			result: bill.result,
+			title: bill.title
 		})
 		.from(bill)
-		.leftJoin(billDetail, eq(bill.id, billDetail.billId))
 		.where(inArray(bill.id, billIds));
 
 	const map = new Map<number, Partial<BillInfo>>();
@@ -442,8 +440,8 @@ export async function loadBillInfo(billIds: number[]): Promise<Map<number, Parti
 		map.set(b.id, {
 			billId: b.id,
 			title: b.title || `法案 ${b.id}`,
-			description: b.description,
-			passed: b.passed || false
+			description: null,
+			passed: b.result === '可決'
 		});
 	}
 

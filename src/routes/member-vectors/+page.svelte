@@ -20,8 +20,7 @@
 	interface RepresentativeBill {
 		billId: number;
 		title: string;
-		passed: boolean;
-		deliberationCompleted: boolean;
+		result: '可決' | '否決' | '撤回' | '未了' | null;
 		loading: number;
 		absLoading: number;
 	}
@@ -1083,7 +1082,9 @@
 					<h3>次元別の代表法案</h3>
 					<div class="bills-legend">
 						<span class="legend-item"><span class="legend-dot passed"></span> 可決</span>
-						<span class="legend-item"><span class="legend-dot completed"></span> 審議終了</span>
+						<span class="legend-item"><span class="legend-dot rejected"></span> 否決</span>
+						<span class="legend-item"><span class="legend-dot withdrawn"></span> 撤回</span>
+						<span class="legend-item"><span class="legend-dot expired"></span> 未了</span>
 						<span class="legend-item"><span class="legend-dot pending"></span> 審議中</span>
 					</div>
 				</div>
@@ -1099,9 +1100,11 @@
 							{#each bills as bill}
 								<div
 									class="bill-item"
-									class:passed={bill.passed}
-									class:completed={!bill.passed && bill.deliberationCompleted}
-									class:pending={!bill.passed && !bill.deliberationCompleted}
+									class:passed={bill.result === '可決'}
+									class:rejected={bill.result === '否決'}
+									class:withdrawn={bill.result === '撤回'}
+									class:expired={bill.result === '未了'}
+									class:pending={bill.result === null}
 								>
 									<span class="bill-title">{bill.title || '法案 ' + bill.billId}</span>
 									<span class="bill-loading" title="因子負荷量">
@@ -2028,7 +2031,17 @@
 		border-color: #22c55e;
 	}
 
-	.bills-legend .legend-dot.completed {
+	.bills-legend .legend-dot.rejected {
+		background: #fee2e2;
+		border-color: #ef4444;
+	}
+
+	.bills-legend .legend-dot.withdrawn {
+		background: #e5e7eb;
+		border-color: #6b7280;
+	}
+
+	.bills-legend .legend-dot.expired {
 		background: #dbeafe;
 		border-color: #3b82f6;
 	}
@@ -2084,7 +2097,15 @@
 		border-left-color: #22c55e;
 	}
 
-	.bill-item.completed {
+	.bill-item.rejected {
+		border-left-color: #ef4444;
+	}
+
+	.bill-item.withdrawn {
+		border-left-color: #6b7280;
+	}
+
+	.bill-item.expired {
 		border-left-color: #3b82f6;
 	}
 

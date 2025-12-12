@@ -21,7 +21,7 @@ interface ClusterVectorResult {
 		Array<{
 			billId: number;
 			title: string;
-			passed: boolean;
+			result: string | null;
 			loading: number;
 			absLoading: number;
 		}>
