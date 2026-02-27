@@ -229,7 +229,7 @@
 			} else {
 				console.error('Failed to load visualization data:', response.statusText);
 				// Fallback: try to load the static file
-				const fallbackResponse = await fetch('/src/lib/data/bill_embeddings_2d.json');
+				const fallbackResponse = await fetch('/data/bill_embeddings_2d.json');
 				if (fallbackResponse.ok) {
 					visualizationData = await fallbackResponse.json();
 					console.log(`Loaded ${visualizationData.length} visualization points from fallback`);
@@ -239,7 +239,7 @@
 			console.error('Failed to load visualization data:', error);
 			// Try fallback
 			try {
-				const fallbackResponse = await fetch('/src/lib/data/bill_embeddings_2d.json');
+				const fallbackResponse = await fetch('/data/bill_embeddings_2d.json');
 				if (fallbackResponse.ok) {
 					visualizationData = await fallbackResponse.json();
 					console.log(

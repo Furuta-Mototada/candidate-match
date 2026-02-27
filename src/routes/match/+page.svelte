@@ -16,8 +16,7 @@
 		ClusterResult,
 		GlobalMemberScore,
 		MatchingPhase,
-		MemberVectorForViz,
-		SavedSessionWithDetails
+		MemberVectorForViz
 	} from '$lib/types/index.js';
 
 	interface NextQuestion {
@@ -58,11 +57,7 @@
 
 	// Save state
 	let isSaving: boolean = $state(false);
-	let savedSessionId: number | null = $state(data.resumeSessionId || null);
-	let isResumeMode: boolean = $state(false);
-	let resumeSession: SavedSessionWithDetails | null = $state(
-		data.resumeSession as SavedSessionWithDetails | null
-	);
+	let snapshotSaved: boolean = $state(false);
 	let clusterId: number | null = $state(null);
 	let nComponents: number = $state(3);
 	let currentClusterMatches: MemberMatch[] = $state([]);
@@ -154,12 +149,7 @@
 
 	// Check if this is the last cluster in the current session
 	let isLastClusterInSession = $derived.by(() => {
-		if (!isResumeMode) {
-			// In normal mode, just check if we're at the last index
-			return currentClusterIndex >= clusterLabelsToProcess.length - 1;
-		}
-
-		// In resume mode, check if there are more clusters with unanswered bills after current
+		// Check if there are more clusters with unanswered bills after current
 		if (!selectedGroupedVector) return true;
 
 		for (let i = currentClusterIndex + 1; i < clusterLabelsToProcess.length; i++) {
@@ -197,8 +187,7 @@
 		error = null;
 		clusterResults = [];
 		globalScores = [];
-		savedSessionId = null;
-		isResumeMode = false;
+		snapshotSaved = false;
 
 		// Store cluster info for saving later
 		clusterId = selectedGroupedVector.clusterId;
@@ -234,9 +223,6 @@
 	 */
 	async function continueAnswering() {
 		if (!selectedGroupedVector) return;
-
-		// Enable resume mode when continuing to answer
-		isResumeMode = true;
 
 		// Find the first cluster with unanswered bills
 		let clusterToResume: number | null = null;
@@ -292,9 +278,10 @@
 
 			sessionId = result.sessionId;
 			currentQuestion = result.nextQuestion;
-			answeredCount = existingResult?.answeredCount || 0;
+			answeredCount = result.preExistingAnswerCount || existingResult?.answeredCount || 0;
 			currentClusterBillCount = clusterVectorInfo.billCount;
-			currentClusterAnsweredBills = existingResult?.answeredBills || [];
+			currentClusterAnsweredBills =
+				result.preExistingAnsweredBills || existingResult?.answeredBills || [];
 			topMatches = result.topMatches || [];
 			uncertainty = result.uncertainty || [];
 			userVector = result.userVector || existingResult?.userVector || [];
@@ -320,6 +307,73 @@
 	/**
 	 * Find the next cluster with unanswered bills (for continue mode)
 	 */
+	/**
+	 * Fill in missing cluster results for clusters that were skipped (fully answered from DB).
+	 * This ensures all clusters have entries in clusterResults with their answeredBills.
+	 */
+	async function populateMissingClusterResults() {
+		if (!selectedGroupedVector) return;
+
+		for (const vectorInfo of selectedGroupedVector.vectors) {
+			const label = vectorInfo.clusterLabel;
+			const existingResult = clusterResults.find((cr) => cr.clusterLabel === label);
+
+			if (!existingResult) {
+				// This cluster was never processed — start a session to get pre-existing data
+				try {
+					const response = await fetch('/api/match', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							action: 'start',
+							savedVectorId: vectorInfo.id
+						})
+					});
+
+					const result = await response.json();
+
+					if (response.ok && result.success) {
+						// Get full matches by calling results
+						let matches: MemberMatch[] = [];
+						if (result.preExistingAnswerCount > 0) {
+							const resultsResponse = await fetch('/api/match', {
+								method: 'POST',
+								headers: { 'Content-Type': 'application/json' },
+								body: JSON.stringify({
+									action: 'results',
+									sessionId: result.sessionId
+								})
+							});
+							const resultsData = await resultsResponse.json();
+							if (resultsResponse.ok && resultsData.success) {
+								matches = resultsData.matches || [];
+							}
+						}
+
+						const newResult: ClusterResult = {
+							clusterLabel: label,
+							clusterLabelName: clusterLabelNameMap[label] || null,
+							matches,
+							answeredCount: result.preExistingAnswerCount || 0,
+							importance: 3, // Default importance
+							userVector: result.userVector || [],
+							answeredBills: result.preExistingAnsweredBills || [],
+							memberVectorsForViz: result.memberVectors || [],
+							explainedVariance: result.explainedVariance || [],
+							userVectorHistory: [],
+							xDimension: 0,
+							yDimension: 1
+						};
+
+						clusterResults = [...clusterResults, newResult];
+					}
+				} catch {
+					// Silently skip — this cluster just won't appear in results
+				}
+			}
+		}
+	}
+
 	async function findNextClusterWithUnanswered() {
 		if (!selectedGroupedVector) return;
 
@@ -353,9 +407,10 @@
 
 						sessionId = result.sessionId;
 						currentQuestion = result.nextQuestion;
-						answeredCount = existingResult?.answeredCount || 0;
+						answeredCount = result.preExistingAnswerCount || existingResult?.answeredCount || 0;
 						currentClusterBillCount = vectorInfo.billCount;
-						currentClusterAnsweredBills = existingResult?.answeredBills || [];
+						currentClusterAnsweredBills =
+							result.preExistingAnsweredBills || existingResult?.answeredBills || [];
 						topMatches = result.topMatches || [];
 						userVector = result.userVector || existingResult?.userVector || [];
 						memberVectorsForViz = result.memberVectors || existingResult?.memberVectorsForViz || [];
@@ -369,59 +424,57 @@
 			}
 		}
 
-		// No more clusters with unanswered bills - recalculate scores and auto-save with snapshot
+		// No more clusters with unanswered bills
+		// Fill in any missing cluster results (fully answered clusters that were skipped)
+		await populateMissingClusterResults();
 		calculateGlobalScores();
-
-		// Auto-save in resume mode when done with additional answers
-		if (savedSessionId) {
-			await autoSaveWithSnapshot();
-		}
 
 		phase = 'global-results';
 	}
 
 	/**
-	 * Auto-save session with a new snapshot (for resume mode)
+	 * Save a snapshot of the current matching results
 	 */
-	async function autoSaveWithSnapshot() {
-		if (!savedSessionId || !clusterId) return;
+	async function saveSnapshot(name: string) {
+		if (!clusterId) {
+			throw new Error('セッション情報が不足しています');
+		}
+
+		isSaving = true;
+		error = null;
 
 		try {
 			const response = await fetch('/api/saved-sessions', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					action: 'save',
-					sessionId: savedSessionId,
-					name: '', // Will keep existing name
-					description: '',
+					action: 'snapshot',
+					name,
 					clusterId,
 					nComponents,
-					status: 'completed',
 					clusterResults: clusterResults.map((cr) => ({
 						clusterLabel: cr.clusterLabel,
 						clusterLabelName: cr.clusterLabelName,
-						userVector: cr.userVector,
 						importance: cr.importance,
 						answeredCount: cr.answeredCount,
 						matches: cr.matches,
-						memberVectorsForViz: cr.memberVectorsForViz,
-						explainedVariance: cr.explainedVariance,
-						userVectorHistory: cr.userVectorHistory,
-						xDimension: cr.xDimension,
-						yDimension: cr.yDimension,
 						answeredBills: cr.answeredBills || []
-					})),
-					createSnapshot: true
+					}))
 				})
 			});
 
 			const result = await response.json();
+
 			if (!response.ok || !result.success) {
-				console.error('Auto-save failed:', result.error);
+				throw new Error(result.error || '保存に失敗しました');
 			}
+
+			snapshotSaved = true;
 		} catch (e) {
-			console.error('Auto-save error:', e);
+			error = e instanceof Error ? e.message : '保存に失敗しました';
+			throw e;
+		} finally {
+			isSaving = false;
 		}
 	}
 
@@ -462,7 +515,12 @@
 			currentQuestion = result.nextQuestion;
 			answeredCount = result.preExistingAnswerCount || 0;
 			currentClusterBillCount = savedVector.billCount; // Set the bill count for current cluster
-			currentClusterAnsweredBills = []; // Will be populated from API if pre-existing
+			currentClusterAnsweredBills = result.preExistingAnsweredBills || [];
+
+			console.log(
+				`[startCluster] label=${clusterLabel}, preExistingAnswerCount=${result.preExistingAnswerCount}, preExistingAnsweredBills=${JSON.stringify(result.preExistingAnsweredBills?.length)}, currentClusterAnsweredBills=${currentClusterAnsweredBills.length}`
+			);
+
 			topMatches = result.topMatches || [];
 			uncertainty = result.uncertainty || [];
 			userVector = result.userVector || [];
@@ -891,12 +949,6 @@
 				clusterResults = [...clusterResults, newResult];
 			}
 
-			// In resume mode, try to find next cluster with unanswered bills
-			if (isResumeMode) {
-				await findNextClusterWithUnanswered();
-				return;
-			}
-
 			// Move to next cluster or show results
 			if (currentClusterIndex < clusterLabelsToProcess.length - 1) {
 				const nextIndex = currentClusterIndex + 1;
@@ -904,6 +956,8 @@
 				// Only update the index after successful start
 				currentClusterIndex = nextIndex;
 			} else {
+				// Fill in any missing cluster results before showing global results
+				await populateMissingClusterResults();
 				calculateGlobalScores();
 				phase = 'global-results';
 			}
@@ -967,62 +1021,6 @@
 	}
 
 	/**
-	 * Save matching results to database
-	 */
-	async function saveResults(name: string, description: string) {
-		if (!selectedSavedVectorKey || !clusterId) {
-			throw new Error('セッション情報が不足しています');
-		}
-
-		isSaving = true;
-		error = null;
-
-		try {
-			const response = await fetch('/api/saved-sessions', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					action: 'save',
-					sessionId: savedSessionId, // null for new session, id for update
-					name,
-					description,
-					clusterId,
-					nComponents,
-					status: 'completed',
-					clusterResults: clusterResults.map((cr) => ({
-						clusterLabel: cr.clusterLabel,
-						clusterLabelName: cr.clusterLabelName,
-						userVector: cr.userVector,
-						importance: cr.importance,
-						answeredCount: cr.answeredCount,
-						matches: cr.matches,
-						memberVectorsForViz: cr.memberVectorsForViz,
-						explainedVariance: cr.explainedVariance,
-						userVectorHistory: cr.userVectorHistory,
-						xDimension: cr.xDimension,
-						yDimension: cr.yDimension,
-						answeredBills: cr.answeredBills || []
-					})),
-					createSnapshot: true
-				})
-			});
-
-			const result = await response.json();
-
-			if (!response.ok || !result.success) {
-				throw new Error(result.error || '保存に失敗しました');
-			}
-
-			savedSessionId = result.sessionId;
-		} catch (e) {
-			error = e instanceof Error ? e.message : '保存に失敗しました';
-			throw e;
-		} finally {
-			isSaving = false;
-		}
-	}
-
-	/**
 	 * Reset and start over
 	 */
 	function reset() {
@@ -1047,73 +1045,10 @@
 		xDimension = 0;
 		yDimension = 1;
 		// Reset save state
-		savedSessionId = null;
-		isResumeMode = false;
-		resumeSession = null;
+		snapshotSaved = false;
 		clusterId = null;
 		// Clear URL params
 		goto('/match', { replaceState: true });
-	}
-
-	/**
-	 * Initialize resume mode if we have a resume session
-	 */
-	async function initializeResumeMode() {
-		if (!resumeSession) return;
-
-		isResumeMode = true;
-		savedSessionId = resumeSession.id;
-
-		// Find matching saved vector key by clusterId
-		// The key format is "name|clusterId" — find a grouped vector that uses the same clusterId
-		const matchingGroup = groupedSavedVectors.find((g) => g.clusterId === resumeSession!.clusterId);
-		if (!matchingGroup) {
-			error = '保存済みベクトルが見つかりません';
-			return;
-		}
-		selectedSavedVectorKey = matchingGroup.key;
-
-		// Find the grouped vector
-		const groupedVector = matchingGroup;
-
-		clusterId = resumeSession.clusterId;
-		nComponents = resumeSession.nComponents;
-
-		// Load existing cluster results
-		clusterResults = resumeSession.clusterResults.map((cr) => ({
-			clusterLabel: cr.clusterLabel,
-			clusterLabelName: cr.clusterLabelName,
-			matches: cr.matches,
-			answeredCount: cr.answeredCount,
-			importance: cr.importance,
-			userVector: cr.userVector,
-			answeredBills: cr.answeredBills,
-			memberVectorsForViz: cr.memberVectorsForViz || [],
-			explainedVariance: cr.explainedVariance || [],
-			userVectorHistory: cr.userVectorHistory || [],
-			xDimension: cr.xDimension,
-			yDimension: cr.yDimension
-		}));
-
-		// Build cluster label name map
-		const nameMap: Record<number, string> = {};
-		for (const cr of resumeSession.clusterResults) {
-			if (cr.clusterLabelName) {
-				nameMap[cr.clusterLabel] = cr.clusterLabelName;
-			}
-		}
-		clusterLabelNameMap = nameMap;
-
-		// Get all labels and determine which have unanswered bills
-		clusterLabelsToProcess = groupedVector.vectors.map((v) => v.clusterLabel).sort((a, b) => a - b);
-
-		// Calculate global scores from existing results
-		if (clusterResults.length > 0) {
-			calculateGlobalScores();
-		}
-
-		// Directly start answering remaining questions instead of showing results first
-		await continueAnswering();
 	}
 
 	// Trigger animations on mount
@@ -1121,11 +1056,6 @@
 		setTimeout(() => {
 			mounted = true;
 		}, 100);
-
-		// Initialize resume mode if we have a session to resume
-		if (resumeSession) {
-			initializeResumeMode();
-		}
 
 		// Check for pending save after login/register
 		const pendingSave = sessionStorage.getItem('pendingSaveData');
@@ -1194,11 +1124,10 @@
 		<section class="hero">
 			<div class="hero-badge animate-in" style="--delay: 0">🗳️ AI議員マッチング</div>
 			<h1 class="hero-title animate-in" style="--delay: 1">
-				<span class="gradient-text">マッチング診断</span>を<br />
-				開始しましょう
+				<span class="gradient-text">マッチング診断</span>
 			</h1>
 			<p class="hero-subtitle animate-in" style="--delay: 2">
-				保存済みのベクトル設定を選択し、各分野（クラスター）ごとに法案への賛否を答えることで、あなたの政治的立場と議員との総合マッチ度を算出します。
+				法案への賛否を答えて、あなたに近い議員を見つけましょう。過去の回答は自動的に引き継がれます。
 			</p>
 		</section>
 	{:else}
@@ -1345,10 +1274,9 @@
 				{clusterResults}
 				{globalScores}
 				onReset={reset}
-				onSave={data.user ? saveResults : undefined}
+				onSave={data.user ? saveSnapshot : undefined}
 				{isSaving}
-				{savedSessionId}
-				{isResumeMode}
+				{snapshotSaved}
 				onContinue={continueAnswering}
 				{totalUnansweredBills}
 				isContinuing={isLoading}

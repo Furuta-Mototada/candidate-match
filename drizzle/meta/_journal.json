@@ -127,6 +127,13 @@
       "when": 1772192985611,
       "tag": "0017_bill_centric_answers",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1772195223175,
+      "tag": "0018_remove_sessions",
+      "breakpoints": true
     }
   ]
 }

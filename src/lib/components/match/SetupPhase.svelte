@@ -62,7 +62,7 @@
 					<span class="loading-spinner">⏳</span>
 					準備中...
 				{:else}
-					🚀 マッチング開始（{selectedGroupedVector.clusterCount}クラスター）
+					🚀 回答を始める（{selectedGroupedVector.clusterCount}クラスター）
 				{/if}
 			</button>
 		{/if}

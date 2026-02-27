@@ -1,9 +1,9 @@
 <script lang="ts">
-	import type { ClusterResult } from '$lib/types/index.js';
+	import type { BaseClusterResult } from '$lib/types/index.js';
 	import MemberRankingList from '$lib/components/match/MemberRankingList.svelte';
 
 	interface Props {
-		result: ClusterResult;
+		result: BaseClusterResult;
 	}
 
 	let { result }: Props = $props();

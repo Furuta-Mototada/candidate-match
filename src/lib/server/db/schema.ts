@@ -402,9 +402,6 @@ export const session = pgTable('auth_session', {
 export type Session = typeof session.$inferSelect;
 export type NewSession = typeof session.$inferInsert;
 
-// Session status enum
-export const sessionStatusEnum = pgEnum('session_status', ['in_progress', 'completed']);
-
 // ============================================================================
 // User Bill Answers - global per-user answers to bills (shared across sessions)
 // ============================================================================
@@ -429,71 +426,22 @@ export const userBillAnswer = pgTable(
 export type UserBillAnswer = typeof userBillAnswer.$inferSelect;
 export type NewUserBillAnswer = typeof userBillAnswer.$inferInsert;
 
-// Saved matching sessions - stores user's complete matching session data
-export const savedMatchingSession = pgTable('saved_matching_session', {
+// Result snapshots - standalone point-in-time snapshots of matching results
+export const resultSnapshot = pgTable('result_snapshot', {
 	id: serial('id').primaryKey(),
 	userId: text('user_id')
 		.notNull()
 		.references(() => user.id, { onDelete: 'cascade' }),
-	name: text('name').notNull(),
-	description: text('description'),
 	clusterId: integer('cluster_id')
 		.notNull()
 		.references(() => billClusters.id),
 	nComponents: integer('n_components').notNull(),
-	status: text('status').notNull().default('in_progress'), // 'in_progress' or 'completed'
-	createdAt: timestamp('created_at').notNull().defaultNow(),
-	updatedAt: timestamp('updated_at').notNull().defaultNow()
+	name: text('name').notNull(),
+	globalScoresJson: text('global_scores_json').notNull(), // JSON: GlobalMemberScore[]
+	clusterResultsJson: text('cluster_results_json').notNull(), // JSON: summary of cluster results at this point
+	totalAnswered: integer('total_answered').notNull(),
+	createdAt: timestamp('created_at').notNull().defaultNow()
 });
-
-export type SavedMatchingSession = typeof savedMatchingSession.$inferSelect;
-export type NewSavedMatchingSession = typeof savedMatchingSession.$inferInsert;
-
-// Session cluster results - stores per-cluster results within a session
-export const sessionClusterResult = pgTable(
-	'session_cluster_result',
-	{
-		id: serial('id').primaryKey(),
-		sessionId: integer('session_id')
-			.notNull()
-			.references(() => savedMatchingSession.id, { onDelete: 'cascade' }),
-		clusterLabel: integer('cluster_label').notNull(),
-		clusterLabelName: text('cluster_label_name'),
-		userVector: text('user_vector').notNull(), // JSON: number[]
-		importance: integer('importance').notNull().default(3), // 1-5 rating
-		answeredCount: integer('answered_count').notNull().default(0),
-		matchesJson: text('matches_json').notNull(), // JSON: MemberMatch[]
-		memberVectorsVizJson: text('member_vectors_viz_json'), // JSON: MemberVectorForViz[]
-		explainedVarianceJson: text('explained_variance_json'), // JSON: number[]
-		userVectorHistoryJson: text('user_vector_history_json'), // JSON: number[][]
-		xDimension: integer('x_dimension').default(0),
-		yDimension: integer('y_dimension').default(1),
-		createdAt: timestamp('created_at').notNull().defaultNow(),
-		updatedAt: timestamp('updated_at').notNull().defaultNow()
-	},
-	(table) => [unique().on(table.sessionId, table.clusterLabel)]
-);
-
-export type SessionClusterResult = typeof sessionClusterResult.$inferSelect;
-export type NewSessionClusterResult = typeof sessionClusterResult.$inferInsert;
-
-// Result snapshots - point-in-time snapshots of matching results
-export const resultSnapshot = pgTable(
-	'result_snapshot',
-	{
-		id: serial('id').primaryKey(),
-		sessionId: integer('session_id')
-			.notNull()
-			.references(() => savedMatchingSession.id, { onDelete: 'cascade' }),
-		snapshotNumber: integer('snapshot_number').notNull().default(1),
-		name: text('name'),
-		globalScoresJson: text('global_scores_json').notNull(), // JSON: GlobalMemberScore[]
-		clusterResultsJson: text('cluster_results_json').notNull(), // JSON: summary of cluster results at this point
-		totalAnswered: integer('total_answered').notNull(),
-		createdAt: timestamp('created_at').notNull().defaultNow()
-	},
-	(table) => [unique().on(table.sessionId, table.snapshotNumber)]
-);
 
 export type ResultSnapshot = typeof resultSnapshot.$inferSelect;
 export type NewResultSnapshot = typeof resultSnapshot.$inferInsert;

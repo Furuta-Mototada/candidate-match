@@ -6,10 +6,17 @@ export const load: PageServerLoad = async ({ fetch, locals }) => {
 		throw redirect(302, '/auth/login');
 	}
 
-	const response = await fetch('/api/saved-sessions');
-	const data = await response.json();
+	const [snapshotsRes, answersRes] = await Promise.all([
+		fetch('/api/saved-sessions'),
+		fetch('/api/saved-sessions?answers=true')
+	]);
+
+	const snapshotsData = await snapshotsRes.json();
+	const answersData = await answersRes.json();
 
 	return {
-		sessions: data.success ? data.sessions : []
+		snapshots: snapshotsData.success ? snapshotsData.snapshots : [],
+		totalAnswers: answersData.success ? answersData.totalAnswers : 0,
+		answers: answersData.success ? answersData.answers : []
 	};
 };

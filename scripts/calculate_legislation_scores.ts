@@ -573,7 +573,7 @@ async function main() {
 		console.log(`\n=== Processed ${legislationScores.length} bills ===`);
 
 		// Create output directory
-		const outputDir = path.join(process.cwd(), 'src', 'lib', 'data');
+		const outputDir = path.join(process.cwd(), 'static', 'data');
 		if (!fs.existsSync(outputDir)) {
 			fs.mkdirSync(outputDir, { recursive: true });
 		}

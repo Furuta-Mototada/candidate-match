@@ -136,7 +136,7 @@ This ensures members are correctly attributed to groups even when:
 | File | Description |
 |------|-------------|
 | `/scripts/calculate_legislation_scores.ts` | Score calculation script |
-| `/src/lib/data/legislation_scores.json` | Generated JSON output |
+| `/static/data/legislation_scores.json` | Generated JSON output |
 | `/src/routes/api/calculate/+server.ts` | API endpoint for recalculation |
 | `/src/routes/legislation-scores/+page.svelte` | UI component |
 | `/src/routes/legislation-scores/+page.server.ts` | Server-side data loading |

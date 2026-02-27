@@ -42,12 +42,22 @@ export interface MemberMatch {
 	latentVector?: number[];
 }
 
-export interface ClusterResult {
+/** Common fields shared between live ClusterResult and SnapshotClusterResult */
+export interface BaseClusterResult {
 	clusterLabel: number;
 	clusterLabelName: string | null;
-	matches: MemberMatch[];
+	matches: { memberId: number; name: string; group: string | null; similarity: number }[];
 	answeredCount: number;
 	importance: number; // 1-5 stars
+	answeredBills?: {
+		billId: number;
+		title: string;
+		answer: number; // 1=Agree, -1=Disagree, 0=Neutral/Skip
+	}[];
+}
+
+export interface ClusterResult extends BaseClusterResult {
+	matches: MemberMatch[];
 	userVector: number[];
 	// Visualization data
 	memberVectorsForViz: MemberVectorForViz[];
@@ -55,12 +65,6 @@ export interface ClusterResult {
 	userVectorHistory: number[][];
 	xDimension: number;
 	yDimension: number;
-	// Answer history
-	answeredBills?: {
-		billId: number;
-		title: string;
-		answer: number; // 1=Agree, -1=Disagree, 0=Neutral/Skip
-	}[];
 }
 
 export interface MemberVectorForViz {
@@ -86,40 +90,8 @@ export type MatchingPhase =
 	| 'global-results';
 
 // ============================================================================
-// Saved Session Types
+// Saved Data Types
 // ============================================================================
-
-export type SessionStatus = 'in_progress' | 'completed';
-
-export interface SavedMatchingSession {
-	id: number;
-	name: string;
-	description: string | null;
-	clusterId: number;
-	nComponents: number;
-	status: SessionStatus;
-	createdAt: string;
-	updatedAt: string;
-}
-
-export interface SessionClusterResultData {
-	id: number;
-	sessionId: number;
-	clusterLabel: number;
-	clusterLabelName: string | null;
-	userVector: number[];
-	importance: number;
-	answeredCount: number;
-	matches: MemberMatch[];
-	memberVectorsForViz?: MemberVectorForViz[];
-	explainedVariance?: number[];
-	userVectorHistory?: number[][];
-	xDimension: number;
-	yDimension: number;
-	answeredBills: AnsweredBill[];
-	createdAt: string;
-	updatedAt: string;
-}
 
 export interface AnsweredBill {
 	billId: number;
@@ -129,60 +101,30 @@ export interface AnsweredBill {
 
 export interface ResultSnapshotData {
 	id: number;
-	sessionId: number;
-	snapshotNumber: number;
-	name: string | null;
+	clusterId: number;
+	nComponents: number;
+	name: string;
 	globalScores: GlobalMemberScore[];
 	clusterResults: SnapshotClusterResult[];
 	totalAnswered: number;
 	createdAt: string;
 }
 
-export interface SnapshotClusterResult {
-	clusterLabel: number;
-	clusterLabelName: string | null;
-	answeredCount: number;
-	importance: number;
-	matches: { memberId: number; name: string; group: string | null; similarity: number }[];
-	answeredBills?: { billId: number; title: string; answer: number }[];
-}
+export type SnapshotClusterResult = BaseClusterResult;
 
-export interface ClusterResultSummary {
-	clusterLabel: number;
-	clusterLabelName: string | null;
-	answeredCount: number;
-	importance: number;
-	topMatches: { memberId: number; name: string; similarity: number }[];
-}
-
-export interface SavedSessionWithDetails extends SavedMatchingSession {
-	clusterResults: SessionClusterResultData[];
-	snapshots: ResultSnapshotData[];
-	totalAnswered: number;
-	totalBills: number;
-	globalScores?: GlobalMemberScore[];
-}
-
-export interface SavedSessionListItem {
+export interface SnapshotListItem {
 	id: number;
 	name: string;
-	description: string | null;
-	status: SessionStatus;
+	clusterId: number;
+	nComponents: number;
 	totalAnswered: number;
-	totalBills: number;
-	clusterCount: number;
-	latestSnapshotDate: string | null;
+	topMatch: { name: string; score: number } | null;
 	createdAt: string;
-	updatedAt: string;
 }
 
-// For resuming a session - contains unanswered bills info
-export interface ResumableClusterInfo {
-	clusterLabel: number;
-	clusterLabelName: string | null;
-	answeredBillIds: number[];
-	totalBills: number;
-	remainingBills: number;
+export interface UserAnswerSummary {
+	totalAnswers: number;
+	answers: AnsweredBill[];
 }
 
 // ============================================================================

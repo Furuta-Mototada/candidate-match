@@ -162,9 +162,9 @@ def reduce_embeddings_to_2d(database_url: str, cluster_id: int = None):
 
     # Save to cluster-specific file if cluster_id is provided, otherwise use default
     if cluster_id is not None:
-        output_file = f"src/lib/data/bill_embeddings_2d_cluster_{cluster_id}.json"
+        output_file = f"static/data/bill_embeddings_2d_cluster_{cluster_id}.json"
     else:
-        output_file = "src/lib/data/bill_embeddings_2d.json"
+        output_file = "static/data/bill_embeddings_2d.json"
 
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(viz_data, f, ensure_ascii=False, indent=2)

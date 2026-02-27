@@ -3,17 +3,16 @@
 	import MemberRankingList from '$lib/components/match/MemberRankingList.svelte';
 	import TopMatchSpotlight from '$lib/components/match/TopMatchSpotlight.svelte';
 	import ClusterInsightCard from '$lib/components/match/ClusterInsightCard.svelte';
-	import type { ClusterResult, GlobalMemberScore } from '$lib/types/index.js';
+	import type { ClusterResult, BaseClusterResult, GlobalMemberScore } from '$lib/types/index.js';
 
 	interface Props {
-		clusterResults: ClusterResult[];
+		clusterResults: BaseClusterResult[];
 		globalScores: GlobalMemberScore[];
-		onReset: () => void;
+		onReset?: () => void;
 		// Save functionality
-		onSave?: (name: string, description: string) => Promise<void>;
+		onSave?: (name: string) => Promise<void>;
 		isSaving?: boolean;
-		savedSessionId?: number | null;
-		isResumeMode?: boolean;
+		snapshotSaved?: boolean;
 		// Continue answering functionality
 		onContinue?: () => void;
 		totalUnansweredBills?: number;
@@ -21,6 +20,8 @@
 		// Auth
 		isLoggedIn?: boolean;
 		onLoginToSave?: () => void;
+		// Read-only mode (for snapshot display)
+		readonly?: boolean;
 	}
 
 	let {
@@ -29,13 +30,13 @@
 		onReset,
 		onSave,
 		isSaving = false,
-		savedSessionId = null,
-		isResumeMode = false,
+		snapshotSaved = false,
 		onContinue,
 		totalUnansweredBills = 0,
 		isContinuing = false,
 		isLoggedIn = false,
-		onLoginToSave
+		onLoginToSave,
+		readonly: isReadonly = false
 	}: Props = $props();
 
 	let activeTab = $state('overview'); // 'overview' | 'analysis' | 'all-candidates'
@@ -46,11 +47,15 @@
 	// Save modal state
 	let showSaveModal = $state(false);
 	let saveName = $state('');
-	let saveDescription = $state('');
 	let saveError = $state<string | null>(null);
 
 	// Derived state
 	let topMembers = $derived(globalScores.slice(0, 3));
+
+	/** Check if a BaseClusterResult is actually a full ClusterResult with viz data */
+	function hasVizData(result: BaseClusterResult): result is ClusterResult {
+		return 'memberVectorsForViz' in result && 'userVector' in result;
+	}
 
 	let filteredMembers = $derived.by(() => {
 		let members = [...globalScores];
@@ -138,10 +143,9 @@
 
 		saveError = null;
 		try {
-			await onSave(saveName.trim(), saveDescription.trim());
+			await onSave(saveName.trim());
 			showSaveModal = false;
 			saveName = '';
-			saveDescription = '';
 		} catch (e) {
 			saveError = e instanceof Error ? e.message : '保存に失敗しました';
 		}
@@ -151,7 +155,6 @@
 		// Set default name with date
 		const now = new Date();
 		saveName = `マッチング結果 ${now.toLocaleDateString('ja-JP')}`;
-		saveDescription = '';
 		saveError = null;
 		showSaveModal = true;
 	}
@@ -162,34 +165,38 @@
 	<div class="results-header fade-in-up">
 		<div class="header-top">
 			<h2 class="results-title">マッチング結果</h2>
-			<div class="header-actions">
-				{#if totalUnansweredBills > 0 && onContinue}
-					<button class="btn-continue" onclick={onContinue} disabled={isContinuing}>
-						<span>{isContinuing ? '⏳' : '➕'}</span>
-						{isContinuing ? '読み込み中...' : `追加回答 (${totalUnansweredBills}件)`}
-					</button>
-				{/if}
-				{#if savedSessionId}
-					<a href="/match/saved/{savedSessionId}" class="btn-view-saved">
-						<span>📋</span>
-						保存済み結果を見る
-					</a>
-				{:else if onSave}
-					<button class="btn-save" onclick={openSaveModal} disabled={isSaving}>
-						<span>💾</span>
-						{isSaving ? '保存中...' : '結果を保存'}
-					</button>
-				{:else if !isLoggedIn}
-					<button class="btn-login-to-save" onclick={onLoginToSave}>
-						<span>🔒</span>
-						ログインして保存
-					</button>
-				{/if}
-				<button class="btn-reset" onclick={onReset}>
-					<span>🔄</span>
-					最初から
-				</button>
-			</div>
+			{#if !isReadonly}
+				<div class="header-actions">
+					{#if totalUnansweredBills > 0 && onContinue}
+						<button class="btn-continue" onclick={onContinue} disabled={isContinuing}>
+							<span>{isContinuing ? '⏳' : '➕'}</span>
+							{isContinuing ? '読み込み中...' : `追加回答 (${totalUnansweredBills}件)`}
+						</button>
+					{/if}
+					{#if snapshotSaved}
+						<a href="/match/saved" class="btn-view-saved">
+							<span>📋</span>
+							保存済み結果を見る
+						</a>
+					{:else if onSave}
+						<button class="btn-save" onclick={openSaveModal} disabled={isSaving}>
+							<span>💾</span>
+							{isSaving ? '保存中...' : 'スナップショットを保存'}
+						</button>
+					{:else if !isLoggedIn}
+						<button class="btn-login-to-save" onclick={onLoginToSave}>
+							<span>🔒</span>
+							ログインして保存
+						</button>
+					{/if}
+					{#if onReset}
+						<button class="btn-reset" onclick={onReset}>
+							<span>🔄</span>
+							設定に戻る
+						</button>
+					{/if}
+				</div>
+			{/if}
 		</div>
 
 		<div class="tabs-container">
@@ -248,31 +255,33 @@
 								<span class="trajectory-stars">{getStars(result.importance)}</span>
 							</div>
 
-							<div class="cluster-content-grid">
-								<!-- Graph Column -->
-								<div class="viz-section">
-									<h4 class="subsection-title">あなたの立ち位置</h4>
-									<div class="viz-container">
-										<LatentSpaceVisualization
-											members={result.memberVectorsForViz}
-											explainedVariance={result.explainedVariance}
-											xDimension={result.xDimension}
-											yDimension={result.yDimension}
-											userVector={result.userVector}
-											userVectorHistory={result.userVectorHistory}
-											highlightedMembers={result.matches
-												.slice(0, 5)
-												.map((m) => ({ memberId: m.memberId, similarity: m.similarity }))}
-											width={400}
-											height={300}
-											showDimensionSelectors={false}
-											title=""
-											showLegend={true}
-											compact={true}
-											collapsible={false}
-										/>
+							<div class="cluster-content-grid" class:no-viz={!hasVizData(result)}>
+								<!-- Graph Column (only when viz data is available) -->
+								{#if hasVizData(result)}
+									<div class="viz-section">
+										<h4 class="subsection-title">あなたの立ち位置</h4>
+										<div class="viz-container">
+											<LatentSpaceVisualization
+												members={result.memberVectorsForViz}
+												explainedVariance={result.explainedVariance}
+												xDimension={result.xDimension}
+												yDimension={result.yDimension}
+												userVector={result.userVector}
+												userVectorHistory={result.userVectorHistory}
+												highlightedMembers={result.matches
+													.slice(0, 5)
+													.map((m) => ({ memberId: m.memberId, similarity: m.similarity }))}
+												width={400}
+												height={300}
+												showDimensionSelectors={false}
+												title=""
+												showLegend={true}
+												compact={true}
+												collapsible={false}
+											/>
+										</div>
 									</div>
-								</div>
+								{/if}
 
 								<!-- Answers Column -->
 								<div class="answers-section">
@@ -398,18 +407,22 @@
 	</div>
 
 	<!-- Actions -->
-	<div class="final-actions">
-		{#if savedSessionId}
-			<a href="/match/saved/{savedSessionId}" class="view-saved-button"> 📋 保存済み結果を見る </a>
-		{:else if onSave}
-			<button onclick={openSaveModal} class="save-button" disabled={isSaving}>
-				💾 {isSaving ? '保存中...' : '結果を保存する'}
-			</button>
-		{:else if !isLoggedIn}
-			<button onclick={onLoginToSave} class="save-button"> 🔒 ログインして保存 </button>
-		{/if}
-		<button onclick={onReset} class="restart-button"> 🔄 最初からやり直す </button>
-	</div>
+	{#if !isReadonly}
+		<div class="final-actions">
+			{#if snapshotSaved}
+				<a href="/match/saved" class="view-saved-button"> 📋 保存済み結果を見る </a>
+			{:else if onSave}
+				<button onclick={openSaveModal} class="save-button" disabled={isSaving}>
+					💾 {isSaving ? '保存中...' : 'スナップショットを保存する'}
+				</button>
+			{:else if !isLoggedIn}
+				<button onclick={onLoginToSave} class="save-button"> 🔒 ログインして保存 </button>
+			{/if}
+			{#if onReset}
+				<button onclick={onReset} class="restart-button"> 🔄 設定に戻る </button>
+			{/if}
+		</div>
+	{/if}
 
 	<!-- Save Modal -->
 	{#if showSaveModal}
@@ -422,10 +435,8 @@
 			<div class="modal-container" onclick={(e) => e.stopPropagation()} role="dialog">
 				<button class="modal-close-btn" onclick={() => (showSaveModal = false)}>×</button>
 
-				<h2 class="modal-title">💾 結果を保存</h2>
-				<p class="modal-desc">
-					マッチング結果を保存して、後で確認したり追加の回答をしたりできます。
-				</p>
+				<h2 class="modal-title">� スナップショットを保存</h2>
+				<p class="modal-desc">現在のマッチング結果をスナップショットとして保存します。</p>
 
 				{#if saveError}
 					<div class="modal-error">{saveError}</div>
@@ -439,16 +450,6 @@
 						bind:value={saveName}
 						placeholder="例: 2024年マッチング結果"
 					/>
-				</div>
-
-				<div class="form-group">
-					<label for="save-description">説明（任意）</label>
-					<textarea
-						id="save-description"
-						bind:value={saveDescription}
-						placeholder="メモや覚え書きなど..."
-						rows="3"
-					></textarea>
 				</div>
 
 				<div class="modal-actions">
@@ -703,6 +704,10 @@
 		display: grid;
 		grid-template-columns: 1fr 1fr;
 		gap: 2rem;
+	}
+
+	.cluster-content-grid.no-viz {
+		grid-template-columns: 1fr;
 	}
 
 	.subsection-title {

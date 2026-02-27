@@ -6,16 +6,16 @@ export const load: PageServerLoad = async ({ params, fetch, locals }) => {
 		throw redirect(302, '/auth/login');
 	}
 
-	const sessionId = params.id;
+	const snapshotId = params.id;
 
-	const response = await fetch(`/api/saved-sessions?id=${sessionId}`);
+	const response = await fetch(`/api/saved-sessions?id=${snapshotId}`);
 	const data = await response.json();
 
 	if (!response.ok || !data.success) {
-		throw error(404, 'セッションが見つかりません');
+		throw error(404, 'スナップショットが見つかりません');
 	}
 
 	return {
-		session: data.session
+		snapshot: data.snapshot
 	};
 };

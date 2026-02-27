@@ -378,7 +378,7 @@ def main():
     parser.add_argument(
         "--legislation-scores",
         type=str,
-        default="src/lib/data/legislation_scores.json",
+        default="static/data/legislation_scores.json",
         help="Path to legislation scores JSON",
     )
     args = parser.parse_args()

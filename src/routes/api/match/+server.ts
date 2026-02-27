@@ -266,6 +266,10 @@ async function handleStart(
 				and(eq(userBillAnswer.userId, userId), inArray(userBillAnswer.billId, clusterData.billIds))
 			);
 
+		console.log(
+			`[handleStart] cluster=${selectedLabel}, userId=${userId}, billIds count=${clusterData.billIds.length}, existingAnswers count=${existingAnswers.length}`
+		);
+
 		if (existingAnswers.length > 0) {
 			// Build bill loadings map for vector updates
 			const billLoadingsMap = new Map<number, number[]>();
@@ -355,6 +359,14 @@ async function handleStart(
 			latentVector: clusterData.memberVectors[String(m.member.memberId)]
 		})),
 		preExistingAnswerCount: state.answeredBills.length,
+		preExistingAnsweredBills: state.answeredBills.map((ab) => {
+			const info = billInfoMap.get(ab.billId);
+			return {
+				billId: ab.billId,
+				title: info?.title || `法案 #${ab.billId}`,
+				answer: ab.score
+			};
+		}),
 		memberVectors: memberVectorsForViz,
 		explainedVariance: clusterData.explainedVariance
 	});
@@ -499,7 +511,7 @@ async function handleResume(
 		dimensions: clusterData.dimensions,
 		totalBills: clusterData.billCount,
 		totalMembers: clusterData.memberCount,
-		questionCount: answeredBillIds.length,
+		questionCount: state.answeredBills.length,
 		nextQuestion: nextQuestion
 			? {
 					billId: nextQuestion.bill.billId,
@@ -513,6 +525,15 @@ async function handleResume(
 		uncertainty: state.uncertainty,
 		userVector: state.userVector,
 		topMatches: matchResults,
+		preExistingAnswerCount: state.answeredBills.length,
+		preExistingAnsweredBills: state.answeredBills.map((ab) => {
+			const info = billInfoMap.get(ab.billId);
+			return {
+				billId: ab.billId,
+				title: info?.title || `法案 #${ab.billId}`,
+				answer: ab.score
+			};
+		}),
 		memberVectors: memberVectorsForViz,
 		explainedVariance: clusterData.explainedVariance
 	});

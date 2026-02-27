@@ -21,7 +21,7 @@ export const GET: RequestHandler = async ({ url }): Promise<Response> => {
 	try {
 		if (clusterId) {
 			const clusterIdNum = parseInt(clusterId);
-			const clusterFile = `src/lib/data/bill_embeddings_2d_cluster_${clusterIdNum}.json`;
+			const clusterFile = `static/data/bill_embeddings_2d_cluster_${clusterIdNum}.json`;
 
 			// First, try JSON file cache (fastest)
 			try {

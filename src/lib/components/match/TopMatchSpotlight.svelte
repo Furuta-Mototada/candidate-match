@@ -1,9 +1,9 @@
 <script lang="ts">
-	import type { GlobalMemberScore, ClusterResult } from '$lib/types/index.js';
+	import type { GlobalMemberScore, BaseClusterResult } from '$lib/types/index.js';
 
 	interface Props {
 		members: GlobalMemberScore[]; // Changed from single member to array
-		clusterResults: ClusterResult[];
+		clusterResults: BaseClusterResult[];
 	}
 
 	let { members, clusterResults }: Props = $props();
