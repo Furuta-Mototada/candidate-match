@@ -25,7 +25,8 @@
 
 	let { data }: { data: PageData } = $props();
 
-	let legislationScores: LegislationScore[] = $state(data.legislationScores || []);
+	let legislationScores: LegislationScore[] = $state([]);
+	let loadingScores: boolean = $state(true);
 	let selectedBill: LegislationScore | null = $state(null);
 	let searchTerm: string = $state('');
 	let memberSearchTerm: string = $state('');
@@ -275,7 +276,21 @@
 	});
 
 	// Chart setup
-	onMount(() => {
+	onMount(async () => {
+		// Fetch legislation scores from static JSON
+		try {
+			const response = await fetch('/data/legislation_scores.json');
+			if (response.ok) {
+				legislationScores = await response.json();
+			} else {
+				console.error('Failed to fetch legislation scores:', response.status);
+			}
+		} catch (error) {
+			console.error('Error fetching legislation scores:', error);
+		} finally {
+			loadingScores = false;
+		}
+
 		if (typeof window !== 'undefined') {
 			// Load Chart.js dynamically
 			const script = document.createElement('script');
@@ -454,7 +469,12 @@
 
 	<!-- Bills Table Section -->
 	<section class="bills-section">
-		{#if sortedBills.length === 0}
+		{#if loadingScores}
+			<div class="loading-container">
+				<LoadingSpinner />
+				<p>議案データを読み込み中...</p>
+			</div>
+		{:else if sortedBills.length === 0}
 			<div class="no-results">
 				<span class="no-results-icon">📭</span>
 				<p>検索条件に一致する議案が見つかりませんでした。</p>
