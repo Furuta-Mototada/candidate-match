@@ -14,6 +14,12 @@
 
 		<div class="navbar-actions">
 			{#if data.user}
+				<a href="/friends" class="btn-nav btn-nav-friends">
+					フレンド
+					{#if data.pendingFriendRequests > 0}
+						<span class="badge-pending">{data.pendingFriendRequests}</span>
+					{/if}
+				</a>
 				<a href="/settings" class="user-chip" title="設定">
 					<span class="user-chip-avatar">
 						{data.user.username.charAt(0).toUpperCase()}
@@ -176,6 +182,26 @@
 	.btn-logout:hover {
 		color: #ef4444;
 		background: #fef2f2;
+	}
+
+	.btn-nav-friends {
+		position: relative;
+	}
+
+	.badge-pending {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 1.125rem;
+		height: 1.125rem;
+		padding: 0 0.3125rem;
+		border-radius: 9999px;
+		background: #ef4444;
+		color: white;
+		font-size: 0.625rem;
+		font-weight: 700;
+		line-height: 1;
+		margin-left: 0.125rem;
 	}
 
 	@media (max-width: 480px) {

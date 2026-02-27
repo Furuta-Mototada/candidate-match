@@ -565,3 +565,33 @@ export const billDebateSummary = pgTable('bill_debate_summary', {
 
 export type BillDebateSummary = typeof billDebateSummary.$inferSelect;
 export type NewBillDebateSummary = typeof billDebateSummary.$inferInsert;
+
+// ============================================================================
+// Friend Requests
+// ============================================================================
+
+export const friendRequestStatusEnum = pgEnum('friend_request_status', [
+	'pending',
+	'accepted',
+	'rejected'
+]);
+
+export const friendRequest = pgTable(
+	'friend_request',
+	{
+		id: serial('id').primaryKey(),
+		senderId: text('sender_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		receiverId: text('receiver_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		status: friendRequestStatusEnum('status').notNull().default('pending'),
+		createdAt: timestamp('created_at').notNull().defaultNow(),
+		updatedAt: timestamp('updated_at').notNull().defaultNow()
+	},
+	(table) => [unique().on(table.senderId, table.receiverId)]
+);
+
+export type FriendRequest = typeof friendRequest.$inferSelect;
+export type NewFriendRequest = typeof friendRequest.$inferInsert;

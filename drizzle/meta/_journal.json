@@ -134,6 +134,13 @@
       "when": 1772195223175,
       "tag": "0018_remove_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1772200959884,
+      "tag": "0019_friend_requests",
+      "breakpoints": true
     }
   ]
 }
