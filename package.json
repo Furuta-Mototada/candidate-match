@@ -69,6 +69,7 @@
 		"@eslint/compat": "^1.4.1",
 		"@eslint/js": "^9.39.0",
 		"@inlang/paraglide-js": "^2.4.0",
+		"@node-rs/argon2": "^2.0.2",
 		"@oslojs/crypto": "^1.0.1",
 		"@oslojs/encoding": "^1.1.0",
 		"@playwright/test": "^1.56.1",

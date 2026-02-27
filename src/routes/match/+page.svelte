@@ -1126,7 +1126,62 @@
 		if (resumeSession) {
 			initializeResumeMode();
 		}
+
+		// Check for pending save after login/register
+		const pendingSave = sessionStorage.getItem('pendingSaveData');
+		if (pendingSave && data.user) {
+			try {
+				const parsed = JSON.parse(pendingSave);
+				sessionStorage.removeItem('pendingSaveData');
+				// Restore matching state
+				selectedSavedVectorKey = parsed.selectedSavedVectorKey;
+				clusterId = parsed.clusterId;
+				nComponents = parsed.nComponents;
+				clusterResults = parsed.clusterResults;
+				globalScores = parsed.globalScores;
+				clusterLabelsToProcess = parsed.clusterLabelsToProcess;
+				clusterLabelNameMap = parsed.clusterLabelNameMap;
+				phase = 'global-results';
+				// Auto-open save after a short delay so UI renders
+				showPendingSavePrompt = true;
+			} catch {
+				sessionStorage.removeItem('pendingSaveData');
+			}
+		}
 	});
+
+	// Pending save prompt state
+	let showPendingSavePrompt = $state(false);
+
+	/**
+	 * Store matching state and redirect to login for saving
+	 */
+	function loginToSave() {
+		const saveData = {
+			selectedSavedVectorKey,
+			clusterId,
+			nComponents,
+			clusterResults: clusterResults.map((cr) => ({
+				clusterLabel: cr.clusterLabel,
+				clusterLabelName: cr.clusterLabelName,
+				userVector: cr.userVector,
+				importance: cr.importance,
+				answeredCount: cr.answeredCount,
+				matches: cr.matches,
+				memberVectorsForViz: cr.memberVectorsForViz,
+				explainedVariance: cr.explainedVariance,
+				userVectorHistory: cr.userVectorHistory,
+				xDimension: cr.xDimension,
+				yDimension: cr.yDimension,
+				answeredBills: cr.answeredBills || []
+			})),
+			globalScores,
+			clusterLabelsToProcess,
+			clusterLabelNameMap
+		};
+		sessionStorage.setItem('pendingSaveData', JSON.stringify(saveData));
+		goto('/auth/login?redirect=/match');
+	}
 </script>
 
 <svelte:head>
@@ -1156,6 +1211,15 @@
 	{/if}
 
 	<main class="main-container">
+		{#if showPendingSavePrompt}
+			<div class="success-alert animate-in" style="margin-bottom: 1rem;">
+				<div style="display: flex; align-items: center; gap: 0.5rem;">
+					<span>✅</span>
+					<span>ログインしました。マッチング結果を保存できます。</span>
+				</div>
+			</div>
+		{/if}
+
 		{#if error}
 			<div class="error-alert animate-in">
 				<div class="error-icon">⚠️</div>
@@ -1281,13 +1345,15 @@
 				{clusterResults}
 				{globalScores}
 				onReset={reset}
-				onSave={saveResults}
+				onSave={data.user ? saveResults : undefined}
 				{isSaving}
 				{savedSessionId}
 				{isResumeMode}
 				onContinue={continueAnswering}
 				{totalUnansweredBills}
 				isContinuing={isLoading}
+				isLoggedIn={!!data.user}
+				onLoginToSave={loginToSave}
 			/>
 		{/if}
 	</main>

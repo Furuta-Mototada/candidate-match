@@ -18,18 +18,22 @@ import type {
 /**
  * GET /api/saved-sessions
  *
- * Get all saved matching sessions
+ * Get saved matching sessions for the current user
  */
-export const GET: RequestHandler = async ({ url }) => {
+export const GET: RequestHandler = async ({ url, locals }) => {
 	try {
+		if (!locals.user) {
+			return json({ error: 'Authentication required' }, { status: 401 });
+		}
+
 		const sessionId = url.searchParams.get('id');
 
 		if (sessionId) {
-			// Get specific session with full details
-			return await getSessionDetails(parseInt(sessionId));
+			// Get specific session with full details (verify ownership)
+			return await getSessionDetails(parseInt(sessionId), locals.user.id);
 		}
 
-		// Get all sessions with summary info
+		// Get all sessions for this user with summary info
 		const sessions = await db
 			.select({
 				id: savedMatchingSession.id,
@@ -43,6 +47,7 @@ export const GET: RequestHandler = async ({ url }) => {
 				updatedAt: savedMatchingSession.updatedAt
 			})
 			.from(savedMatchingSession)
+			.where(eq(savedMatchingSession.userId, locals.user.id))
 			.orderBy(desc(savedMatchingSession.updatedAt));
 
 		// Enrich with cluster results and snapshot info
@@ -106,11 +111,11 @@ export const GET: RequestHandler = async ({ url }) => {
 /**
  * Get detailed session info including all cluster results and snapshots
  */
-async function getSessionDetails(sessionId: number) {
+async function getSessionDetails(sessionId: number, userId: string) {
 	const [session] = await db
 		.select()
 		.from(savedMatchingSession)
-		.where(eq(savedMatchingSession.id, sessionId));
+		.where(and(eq(savedMatchingSession.id, sessionId), eq(savedMatchingSession.userId, userId)));
 
 	if (!session) {
 		return json({ error: 'Session not found' }, { status: 404 });
@@ -274,20 +279,24 @@ function calculateGlobalScores(
  * - action: "snapshot" - Create a new snapshot for a session
  * - action: "delete" - Delete a session
  */
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async ({ request, locals }) => {
 	try {
+		if (!locals.user) {
+			return json({ error: 'Authentication required to save sessions' }, { status: 401 });
+		}
+
 		const body = await request.json();
 		const { action } = body;
 
 		switch (action) {
 			case 'save':
-				return await handleSave(body);
+				return await handleSave(body, locals.user.id);
 
 			case 'snapshot':
 				return await handleSnapshot(body);
 
 			case 'delete':
-				return await handleDelete(body);
+				return await handleDelete(body, locals.user.id);
 
 			case 'update-importance':
 				return await handleUpdateImportance(body);
@@ -307,41 +316,44 @@ export const POST: RequestHandler = async ({ request }) => {
 /**
  * Save a new session or update existing one
  */
-async function handleSave(body: {
-	sessionId?: number;
-	name: string;
-	description?: string;
-	savedVectorKey: string;
-	clusterId: number;
-	nComponents: number;
-	status: string;
-	clusterResults: Array<{
-		clusterLabel: number;
-		clusterLabelName: string | null;
-		userVector: number[];
-		importance: number;
-		answeredCount: number;
-		matches: Array<{
-			memberId: number;
-			name: string;
-			group: string | null;
-			similarity: number;
-			rank: number;
+async function handleSave(
+	body: {
+		sessionId?: number;
+		name: string;
+		description?: string;
+		savedVectorKey: string;
+		clusterId: number;
+		nComponents: number;
+		status: string;
+		clusterResults: Array<{
+			clusterLabel: number;
+			clusterLabelName: string | null;
+			userVector: number[];
+			importance: number;
+			answeredCount: number;
+			matches: Array<{
+				memberId: number;
+				name: string;
+				group: string | null;
+				similarity: number;
+				rank: number;
+			}>;
+			memberVectorsForViz?: Array<{
+				memberId: number;
+				name: string;
+				group: string | null;
+				latentVector: number[];
+			}>;
+			explainedVariance?: number[];
+			userVectorHistory?: number[][];
+			xDimension?: number;
+			yDimension?: number;
+			answeredBills: Array<{ billId: number; title: string; answer: number }>;
 		}>;
-		memberVectorsForViz?: Array<{
-			memberId: number;
-			name: string;
-			group: string | null;
-			latentVector: number[];
-		}>;
-		explainedVariance?: number[];
-		userVectorHistory?: number[][];
-		xDimension?: number;
-		yDimension?: number;
-		answeredBills: Array<{ billId: number; title: string; answer: number }>;
-	}>;
-	createSnapshot?: boolean;
-}) {
+		createSnapshot?: boolean;
+	},
+	userId: string
+) {
 	const {
 		sessionId,
 		name,
@@ -384,6 +396,7 @@ async function handleSave(body: {
 		const [newSession] = await db
 			.insert(savedMatchingSession)
 			.values({
+				userId,
 				name,
 				description,
 				savedVectorKey,
@@ -552,10 +565,13 @@ async function createNewSnapshot(
 /**
  * Delete a session
  */
-async function handleDelete(body: { sessionId: number }) {
+async function handleDelete(body: { sessionId: number }, userId: string) {
 	const { sessionId } = body;
 
-	await db.delete(savedMatchingSession).where(eq(savedMatchingSession.id, sessionId));
+	// Only delete if owned by user
+	await db
+		.delete(savedMatchingSession)
+		.where(and(eq(savedMatchingSession.id, sessionId), eq(savedMatchingSession.userId, userId)));
 
 	return json({ success: true });
 }

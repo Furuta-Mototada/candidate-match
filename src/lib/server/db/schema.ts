@@ -373,12 +373,44 @@ export const clusterVectorResults = pgTable('cluster_vector_results', {
 export type ClusterVectorResult = typeof clusterVectorResults.$inferSelect;
 export type NewClusterVectorResult = typeof clusterVectorResults.$inferInsert;
 
+// ============================================================================
+// Auth Tables
+// ============================================================================
+
+export const roleEnum = pgEnum('user_role', ['user', 'admin']);
+
+export const user = pgTable('auth_user', {
+	id: text('id').primaryKey(), // UUID or random string
+	username: text('username').notNull().unique(),
+	passwordHash: text('password_hash').notNull(),
+	role: roleEnum('role').notNull().default('user'),
+	createdAt: timestamp('created_at').notNull().defaultNow(),
+	updatedAt: timestamp('updated_at').notNull().defaultNow()
+});
+
+export type User = typeof user.$inferSelect;
+export type NewUser = typeof user.$inferInsert;
+
+export const session = pgTable('auth_session', {
+	id: text('id').primaryKey(),
+	userId: text('user_id')
+		.notNull()
+		.references(() => user.id, { onDelete: 'cascade' }),
+	expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull()
+});
+
+export type Session = typeof session.$inferSelect;
+export type NewSession = typeof session.$inferInsert;
+
 // Session status enum
 export const sessionStatusEnum = pgEnum('session_status', ['in_progress', 'completed']);
 
 // Saved matching sessions - stores user's complete matching session data
 export const savedMatchingSession = pgTable('saved_matching_session', {
 	id: serial('id').primaryKey(),
+	userId: text('user_id')
+		.notNull()
+		.references(() => user.id, { onDelete: 'cascade' }),
 	name: text('name').notNull(),
 	description: text('description'),
 	savedVectorKey: text('saved_vector_key').notNull(), // "name|clusterId" key for the saved vector group

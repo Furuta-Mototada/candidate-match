@@ -2,6 +2,7 @@ import type { RequestEvent } from '@sveltejs/kit';
 import { eq } from 'drizzle-orm';
 import { sha256 } from '@oslojs/crypto/sha2';
 import { encodeBase64url, encodeHexLowerCase } from '@oslojs/encoding';
+import { hash, verify } from '@node-rs/argon2';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 
@@ -13,6 +14,24 @@ export function generateSessionToken() {
 	const bytes = crypto.getRandomValues(new Uint8Array(18));
 	const token = encodeBase64url(bytes);
 	return token;
+}
+
+export function generateUserId() {
+	const bytes = crypto.getRandomValues(new Uint8Array(15));
+	return encodeBase64url(bytes);
+}
+
+export async function hashPassword(password: string): Promise<string> {
+	return await hash(password, {
+		memoryCost: 19456,
+		timeCost: 2,
+		outputLen: 32,
+		parallelism: 1
+	});
+}
+
+export async function verifyPassword(hash: string, password: string): Promise<boolean> {
+	return await verify(hash, password);
 }
 
 export async function createSession(token: string, userId: string) {
@@ -30,8 +49,11 @@ export async function validateSessionToken(token: string) {
 	const sessionId = encodeHexLowerCase(sha256(new TextEncoder().encode(token)));
 	const [result] = await db
 		.select({
-			// Adjust user table here to tweak returned data
-			user: { id: table.user.id, username: table.user.username },
+			user: {
+				id: table.user.id,
+				username: table.user.username,
+				role: table.user.role
+			},
 			session: table.session
 		})
 		.from(table.session)

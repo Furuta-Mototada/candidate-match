@@ -18,6 +18,9 @@
 		onContinue?: () => void;
 		totalUnansweredBills?: number;
 		isContinuing?: boolean;
+		// Auth
+		isLoggedIn?: boolean;
+		onLoginToSave?: () => void;
 	}
 
 	let {
@@ -30,7 +33,9 @@
 		isResumeMode = false,
 		onContinue,
 		totalUnansweredBills = 0,
-		isContinuing = false
+		isContinuing = false,
+		isLoggedIn = false,
+		onLoginToSave
 	}: Props = $props();
 
 	let activeTab = $state('overview'); // 'overview' | 'analysis' | 'all-candidates'
@@ -173,6 +178,11 @@
 					<button class="btn-save" onclick={openSaveModal} disabled={isSaving}>
 						<span>💾</span>
 						{isSaving ? '保存中...' : '結果を保存'}
+					</button>
+				{:else if !isLoggedIn}
+					<button class="btn-login-to-save" onclick={onLoginToSave}>
+						<span>🔒</span>
+						ログインして保存
 					</button>
 				{/if}
 				<button class="btn-reset" onclick={onReset}>
@@ -395,6 +405,8 @@
 			<button onclick={openSaveModal} class="save-button" disabled={isSaving}>
 				💾 {isSaving ? '保存中...' : '結果を保存する'}
 			</button>
+		{:else if !isLoggedIn}
+			<button onclick={onLoginToSave} class="save-button"> 🔒 ログインして保存 </button>
 		{/if}
 		<button onclick={onReset} class="restart-button"> 🔄 最初からやり直す </button>
 	</div>
@@ -505,6 +517,27 @@
 	.btn-save:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
+	}
+
+	.btn-login-to-save {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.625rem 1rem;
+		background: linear-gradient(135deg, #6366f1, #8b5cf6);
+		color: white;
+		border: none;
+		border-radius: 8px;
+		font-weight: 600;
+		font-size: 0.875rem;
+		cursor: pointer;
+		text-decoration: none;
+		transition: all 0.2s ease;
+	}
+
+	.btn-login-to-save:hover {
+		transform: translateY(-1px);
+		box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
 	}
 
 	.btn-continue {

@@ -1,7 +1,11 @@
 import type { PageServerLoad } from './$types.js';
-import { error } from '@sveltejs/kit';
+import { error, redirect } from '@sveltejs/kit';
 
-export const load: PageServerLoad = async ({ params, fetch }) => {
+export const load: PageServerLoad = async ({ params, fetch, locals }) => {
+	if (!locals.user) {
+		throw redirect(302, '/auth/login');
+	}
+
 	const sessionId = params.id;
 
 	const response = await fetch(`/api/saved-sessions?id=${sessionId}`);
