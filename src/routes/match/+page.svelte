@@ -384,7 +384,7 @@
 	 * Auto-save session with a new snapshot (for resume mode)
 	 */
 	async function autoSaveWithSnapshot() {
-		if (!savedSessionId || !selectedSavedVectorKey || !clusterId) return;
+		if (!savedSessionId || !clusterId) return;
 
 		try {
 			const response = await fetch('/api/saved-sessions', {
@@ -395,7 +395,6 @@
 					sessionId: savedSessionId,
 					name: '', // Will keep existing name
 					description: '',
-					savedVectorKey: selectedSavedVectorKey,
 					clusterId,
 					nComponents,
 					status: 'completed',
@@ -461,10 +460,10 @@
 
 			sessionId = result.sessionId;
 			currentQuestion = result.nextQuestion;
-			answeredCount = 0;
+			answeredCount = result.preExistingAnswerCount || 0;
 			currentClusterBillCount = savedVector.billCount; // Set the bill count for current cluster
-			currentClusterAnsweredBills = []; // Reset answered bills
-			topMatches = [];
+			currentClusterAnsweredBills = []; // Will be populated from API if pre-existing
+			topMatches = result.topMatches || [];
 			uncertainty = result.uncertainty || [];
 			userVector = result.userVector || [];
 
@@ -987,7 +986,6 @@
 					sessionId: savedSessionId, // null for new session, id for update
 					name,
 					description,
-					savedVectorKey: selectedSavedVectorKey,
 					clusterId,
 					nComponents,
 					status: 'completed',
@@ -1066,15 +1064,17 @@
 		isResumeMode = true;
 		savedSessionId = resumeSession.id;
 
-		// Find matching saved vector key
-		selectedSavedVectorKey = resumeSession.savedVectorKey;
-
-		// Find the grouped vector
-		const groupedVector = groupedSavedVectors.find((g) => g.key === selectedSavedVectorKey);
-		if (!groupedVector) {
+		// Find matching saved vector key by clusterId
+		// The key format is "name|clusterId" — find a grouped vector that uses the same clusterId
+		const matchingGroup = groupedSavedVectors.find((g) => g.clusterId === resumeSession!.clusterId);
+		if (!matchingGroup) {
 			error = '保存済みベクトルが見つかりません';
 			return;
 		}
+		selectedSavedVectorKey = matchingGroup.key;
+
+		// Find the grouped vector
+		const groupedVector = matchingGroup;
 
 		clusterId = resumeSession.clusterId;
 		nComponents = resumeSession.nComponents;

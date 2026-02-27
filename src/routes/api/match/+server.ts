@@ -8,9 +8,10 @@ import {
 	billClusterAssignments,
 	clusterVectorResults,
 	billClusterLabelNames,
-	member
+	member,
+	userBillAnswer
 } from '$lib/server/db/schema.js';
-import { eq, inArray, desc, and } from 'drizzle-orm';
+import { eq, inArray, desc, and, sql } from 'drizzle-orm';
 import {
 	initializeMatchingState,
 	updateMatchingState,
@@ -70,7 +71,7 @@ setInterval(cleanupSessions, 10 * 60 * 1000);
  * - action: "results" - Get current matching results
  * - action: "skip" - Skip current question and get next
  */
-export const POST: RequestHandler = async ({ request }): Promise<Response> => {
+export const POST: RequestHandler = async ({ request, locals }): Promise<Response> => {
 	try {
 		const body = await request.json();
 		const {
@@ -86,18 +87,20 @@ export const POST: RequestHandler = async ({ request }): Promise<Response> => {
 			answeredBillIds
 		} = body;
 
+		const userId = locals.user?.id || null;
+
 		switch (action) {
 			case 'start':
-				return await handleStart(clusterId, clusterLabel, nComponents, savedVectorId);
+				return await handleStart(clusterId, clusterLabel, nComponents, savedVectorId, userId);
 
 			case 'resume':
-				return await handleResume(savedVectorId, existingUserVector, answeredBillIds);
+				return await handleResume(savedVectorId, existingUserVector, answeredBillIds, userId);
 
 			case 'answer':
-				return await handleAnswer(sessionId, billId, score);
+				return await handleAnswer(sessionId, billId, score, userId);
 
 			case 'skip':
-				return await handleSkip(sessionId, billId);
+				return await handleSkip(sessionId, billId, userId);
 
 			case 'results':
 				return await handleResults(sessionId);
@@ -123,7 +126,8 @@ async function handleStart(
 	clusterId: number,
 	clusterLabel: number | null,
 	nComponents: number = 3,
-	savedVectorId: number | null = null
+	savedVectorId: number | null = null,
+	userId: string | null = null
 ) {
 	let clusterData: ClusterVectorData;
 	let clusterInfo: { id: number; name: string };
@@ -253,6 +257,34 @@ async function handleStart(
 		clusterData.dimensions
 	);
 
+	// If user is logged in, pre-populate with existing bill answers
+	if (userId) {
+		const existingAnswers = await db
+			.select()
+			.from(userBillAnswer)
+			.where(
+				and(eq(userBillAnswer.userId, userId), inArray(userBillAnswer.billId, clusterData.billIds))
+			);
+
+		if (existingAnswers.length > 0) {
+			// Build bill loadings map for vector updates
+			const billLoadingsMap = new Map<number, number[]>();
+			for (let i = 0; i < clusterData.billIds.length; i++) {
+				billLoadingsMap.set(clusterData.billIds[i], clusterData.billLoadings[i]);
+			}
+
+			// Apply each existing answer to update the user vector
+			for (const answer of existingAnswers) {
+				const userAnswer: UserAnswer = { billId: answer.billId, score: answer.score };
+				const newState = updateMatchingState(state, userAnswer, billLoadingsMap);
+				state.userVector = newState.userVector;
+				state.answeredBills = newState.answeredBills;
+				state.questionCount = newState.questionCount;
+				state.uncertainty = newState.uncertainty;
+			}
+		}
+	}
+
 	// Generate session ID
 	const sessionIdValue = crypto.randomUUID();
 
@@ -264,7 +296,7 @@ async function handleStart(
 		createdAt: new Date()
 	});
 
-	// Get first question
+	// Get first question (will skip already-answered bills)
 	const nextQuestion = selectNextQuestion(state, clusterData, billInfoMap);
 
 	// Prepare member vectors for 2D visualization
@@ -279,6 +311,19 @@ async function handleStart(
 		latentVector: vector
 	}));
 
+	// Get current matches if we have pre-existing answers
+	const preExistingMatches =
+		state.answeredBills.length > 0 ? findMatchingMembers(state.userVector, clusterData, 10) : [];
+
+	// Enrich matches with group info
+	if (preExistingMatches.length > 0) {
+		const matchMemberIds = preExistingMatches.map((m: MatchResult) => m.member.memberId);
+		const matchGroupMap = await loadMemberGroups(matchMemberIds);
+		for (const match of preExistingMatches) {
+			match.member.group = matchGroupMap.get(match.member.memberId) || null;
+		}
+	}
+
 	return json({
 		success: true,
 		sessionId: sessionIdValue,
@@ -288,7 +333,7 @@ async function handleStart(
 		dimensions: clusterData.dimensions,
 		totalBills: clusterData.billCount,
 		totalMembers: clusterData.memberCount,
-		questionCount: 0,
+		questionCount: state.answeredBills.length,
 		nextQuestion: nextQuestion
 			? {
 					billId: nextQuestion.bill.billId,
@@ -301,6 +346,15 @@ async function handleStart(
 			: null,
 		uncertainty: state.uncertainty,
 		userVector: state.userVector,
+		topMatches: preExistingMatches.slice(0, 5).map((m: MatchResult) => ({
+			memberId: m.member.memberId,
+			name: m.member.name,
+			group: m.member.group,
+			similarity: m.similarity,
+			rank: m.rank,
+			latentVector: clusterData.memberVectors[String(m.member.memberId)]
+		})),
+		preExistingAnswerCount: state.answeredBills.length,
 		memberVectors: memberVectorsForViz,
 		explainedVariance: clusterData.explainedVariance
 	});
@@ -312,7 +366,8 @@ async function handleStart(
 async function handleResume(
 	savedVectorId: number | null,
 	existingUserVector: number[] | null,
-	answeredBillIds: number[] = []
+	answeredBillIds: number[] = [],
+	userId: string | null = null
 ) {
 	if (!savedVectorId) {
 		return json({ error: 'savedVectorId is required for resume' }, { status: 400 });
@@ -361,14 +416,42 @@ async function handleResume(
 		clusterData.dimensions
 	);
 
-	// If we have an existing user vector, restore it
-	if (existingUserVector && existingUserVector.length === clusterData.dimensions) {
-		state.userVector = [...existingUserVector];
-	}
+	// If user is logged in, load all answers from user_bill_answer for bills in this cluster
+	if (userId) {
+		const existingAnswers = await db
+			.select()
+			.from(userBillAnswer)
+			.where(
+				and(eq(userBillAnswer.userId, userId), inArray(userBillAnswer.billId, clusterData.billIds))
+			);
 
-	// Mark answered bills as answered in the state
-	for (const billId of answeredBillIds) {
-		state.answeredBills.push({ billId, score: 0 }); // Score doesn't matter for exclusion
+		if (existingAnswers.length > 0) {
+			// Build bill loadings map for vector updates
+			const billLoadingsMap = new Map<number, number[]>();
+			for (let i = 0; i < clusterData.billIds.length; i++) {
+				billLoadingsMap.set(clusterData.billIds[i], clusterData.billLoadings[i]);
+			}
+
+			// Apply each existing answer to update the user vector
+			for (const answer of existingAnswers) {
+				const userAnswer: UserAnswer = { billId: answer.billId, score: answer.score };
+				const newState = updateMatchingState(state, userAnswer, billLoadingsMap);
+				state.userVector = newState.userVector;
+				state.answeredBills = newState.answeredBills;
+				state.questionCount = newState.questionCount;
+				state.uncertainty = newState.uncertainty;
+			}
+		}
+	} else {
+		// Not logged in — use the provided existingUserVector and answeredBillIds
+		if (existingUserVector && existingUserVector.length === clusterData.dimensions) {
+			state.userVector = [...existingUserVector];
+		}
+
+		// Mark answered bills as answered in the state
+		for (const billId of answeredBillIds) {
+			state.answeredBills.push({ billId, score: 0 }); // Score doesn't matter for exclusion
+		}
 	}
 
 	// Generate session ID
@@ -438,7 +521,12 @@ async function handleResume(
 /**
  * Handle user answer and return next question
  */
-async function handleAnswer(sessionId: string, billId: number, score: number) {
+async function handleAnswer(
+	sessionId: string,
+	billId: number,
+	score: number,
+	userId: string | null = null
+) {
 	if (!sessionId) {
 		return json({ error: 'sessionId is required' }, { status: 400 });
 	}
@@ -454,6 +542,24 @@ async function handleAnswer(sessionId: string, billId: number, score: number) {
 
 	// Validate score is in range [-1, 1]
 	const normalizedScore = Math.max(-1, Math.min(1, score));
+
+	// Persist answer to user_bill_answer if user is logged in
+	if (userId) {
+		await db
+			.insert(userBillAnswer)
+			.values({
+				userId,
+				billId,
+				score: normalizedScore
+			})
+			.onConflictDoUpdate({
+				target: [userBillAnswer.userId, userBillAnswer.billId],
+				set: {
+					score: normalizedScore,
+					updatedAt: sql`now()`
+				}
+			});
+	}
 
 	// Create answer
 	const answer: UserAnswer = { billId, score: normalizedScore };
@@ -511,7 +617,7 @@ async function handleAnswer(sessionId: string, billId: number, score: number) {
 /**
  * Skip a question and get next
  */
-async function handleSkip(sessionId: string, billId: number) {
+async function handleSkip(sessionId: string, billId: number, userId: string | null = null) {
 	if (!sessionId) {
 		return json({ error: 'sessionId is required' }, { status: 400 });
 	}
@@ -519,6 +625,24 @@ async function handleSkip(sessionId: string, billId: number) {
 	const session = sessions.get(sessionId);
 	if (!session) {
 		return json({ error: 'Session not found or expired' }, { status: 404 });
+	}
+
+	// Persist skip to user_bill_answer if user is logged in
+	if (userId) {
+		await db
+			.insert(userBillAnswer)
+			.values({
+				userId,
+				billId,
+				score: 0
+			})
+			.onConflictDoUpdate({
+				target: [userBillAnswer.userId, userBillAnswer.billId],
+				set: {
+					score: 0,
+					updatedAt: sql`now()`
+				}
+			});
 	}
 
 	// Add bill to answered with score 0 (neutral/skip)

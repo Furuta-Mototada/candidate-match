@@ -4,11 +4,13 @@ import { db } from '$lib/server/db/index.js';
 import {
 	savedMatchingSession,
 	sessionClusterResult,
-	sessionAnswer,
 	resultSnapshot,
-	clusterVectorResults
+	clusterVectorResults,
+	userBillAnswer,
+	billClusterAssignments,
+	bill
 } from '$lib/server/db/schema.js';
-import { eq, desc, and, sql } from 'drizzle-orm';
+import { eq, desc, and, sql, inArray } from 'drizzle-orm';
 import type {
 	SavedSessionListItem,
 	SavedSessionWithDetails,
@@ -39,7 +41,6 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 				id: savedMatchingSession.id,
 				name: savedMatchingSession.name,
 				description: savedMatchingSession.description,
-				savedVectorKey: savedMatchingSession.savedVectorKey,
 				clusterId: savedMatchingSession.clusterId,
 				nComponents: savedMatchingSession.nComponents,
 				status: savedMatchingSession.status,
@@ -128,44 +129,86 @@ async function getSessionDetails(sessionId: number, userId: string) {
 		.where(eq(sessionClusterResult.sessionId, sessionId))
 		.orderBy(sessionClusterResult.clusterLabel);
 
-	// Get answers for each cluster result
-	const clusterResultsWithAnswers = await Promise.all(
-		clusterResults.map(async (cr) => {
-			const answers = await db
-				.select({
-					billId: sessionAnswer.billId,
-					title: sessionAnswer.billTitle,
-					answer: sessionAnswer.score
-				})
-				.from(sessionAnswer)
-				.where(eq(sessionAnswer.clusterResultId, cr.id));
-
-			return {
-				id: cr.id,
-				sessionId: cr.sessionId,
-				clusterLabel: cr.clusterLabel,
-				clusterLabelName: cr.clusterLabelName,
-				userVector: JSON.parse(cr.userVector),
-				importance: cr.importance,
-				answeredCount: cr.answeredCount,
-				matches: JSON.parse(cr.matchesJson),
-				memberVectorsForViz: cr.memberVectorsVizJson
-					? JSON.parse(cr.memberVectorsVizJson)
-					: undefined,
-				explainedVariance: cr.explainedVarianceJson
-					? JSON.parse(cr.explainedVarianceJson)
-					: undefined,
-				userVectorHistory: cr.userVectorHistoryJson
-					? JSON.parse(cr.userVectorHistoryJson)
-					: undefined,
-				xDimension: cr.xDimension ?? 0,
-				yDimension: cr.yDimension ?? 1,
-				answeredBills: answers,
-				createdAt: cr.createdAt.toISOString(),
-				updatedAt: cr.updatedAt.toISOString()
-			};
+	// Get all bill assignments for this session's cluster to map bills to cluster labels
+	const clusterAssignments = await db
+		.select({
+			billId: billClusterAssignments.billId,
+			clusterLabel: billClusterAssignments.clusterLabel
 		})
-	);
+		.from(billClusterAssignments)
+		.where(eq(billClusterAssignments.clusterId, session.clusterId));
+
+	// Build a map of clusterLabel -> billIds
+	const clusterBillMap = new Map<number, number[]>();
+	for (const a of clusterAssignments) {
+		const bills = clusterBillMap.get(a.clusterLabel) || [];
+		bills.push(a.billId);
+		clusterBillMap.set(a.clusterLabel, bills);
+	}
+
+	// Get all user answers for bills in this cluster
+	const allBillIds = clusterAssignments.map((a) => a.billId);
+	const userAnswers =
+		allBillIds.length > 0
+			? await db
+					.select({
+						billId: userBillAnswer.billId,
+						score: userBillAnswer.score
+					})
+					.from(userBillAnswer)
+					.where(and(eq(userBillAnswer.userId, userId), inArray(userBillAnswer.billId, allBillIds)))
+			: [];
+
+	// Get bill titles for answered bills
+	const answeredBillIds = userAnswers.map((a) => a.billId);
+	const billTitles =
+		answeredBillIds.length > 0
+			? await db
+					.select({ id: bill.id, title: bill.title })
+					.from(bill)
+					.where(inArray(bill.id, answeredBillIds))
+			: [];
+	const billTitleMap = new Map(billTitles.map((b) => [b.id, b.title || '']));
+
+	// Build a map of billId -> answer
+	const answerMap = new Map(userAnswers.map((a) => [a.billId, a.score]));
+
+	// Build answers per cluster result
+	const clusterResultsWithAnswers = clusterResults.map((cr) => {
+		const billIdsInCluster = clusterBillMap.get(cr.clusterLabel) || [];
+		const answersForCluster = billIdsInCluster
+			.filter((bId) => answerMap.has(bId))
+			.map((bId) => ({
+				billId: bId,
+				title: billTitleMap.get(bId) || '',
+				answer: answerMap.get(bId)!
+			}));
+
+		return {
+			id: cr.id,
+			sessionId: cr.sessionId,
+			clusterLabel: cr.clusterLabel,
+			clusterLabelName: cr.clusterLabelName,
+			userVector: JSON.parse(cr.userVector),
+			importance: cr.importance,
+			answeredCount: answersForCluster.length,
+			matches: JSON.parse(cr.matchesJson),
+			memberVectorsForViz: cr.memberVectorsVizJson
+				? JSON.parse(cr.memberVectorsVizJson)
+				: undefined,
+			explainedVariance: cr.explainedVarianceJson
+				? JSON.parse(cr.explainedVarianceJson)
+				: undefined,
+			userVectorHistory: cr.userVectorHistoryJson
+				? JSON.parse(cr.userVectorHistoryJson)
+				: undefined,
+			xDimension: cr.xDimension ?? 0,
+			yDimension: cr.yDimension ?? 1,
+			answeredBills: answersForCluster,
+			createdAt: cr.createdAt.toISOString(),
+			updatedAt: cr.updatedAt.toISOString()
+		};
+	});
 
 	// Get snapshots
 	const snapshots = await db
@@ -321,7 +364,6 @@ async function handleSave(
 		sessionId?: number;
 		name: string;
 		description?: string;
-		savedVectorKey: string;
 		clusterId: number;
 		nComponents: number;
 		status: string;
@@ -358,7 +400,6 @@ async function handleSave(
 		sessionId,
 		name,
 		description,
-		savedVectorKey,
 		clusterId,
 		nComponents,
 		status,
@@ -399,7 +440,6 @@ async function handleSave(
 				userId,
 				name,
 				description,
-				savedVectorKey,
 				clusterId,
 				nComponents,
 				status
@@ -411,36 +451,39 @@ async function handleSave(
 
 	// Insert cluster results
 	for (const cr of clusterResults) {
-		const [insertedResult] = await db
-			.insert(sessionClusterResult)
-			.values({
-				sessionId: finalSessionId,
-				clusterLabel: cr.clusterLabel,
-				clusterLabelName: cr.clusterLabelName,
-				userVector: JSON.stringify(cr.userVector),
-				importance: cr.importance,
-				answeredCount: cr.answeredCount,
-				matchesJson: JSON.stringify(cr.matches),
-				memberVectorsVizJson: cr.memberVectorsForViz
-					? JSON.stringify(cr.memberVectorsForViz)
-					: null,
-				explainedVarianceJson: cr.explainedVariance ? JSON.stringify(cr.explainedVariance) : null,
-				userVectorHistoryJson: cr.userVectorHistory ? JSON.stringify(cr.userVectorHistory) : null,
-				xDimension: cr.xDimension ?? 0,
-				yDimension: cr.yDimension ?? 1
-			})
-			.returning({ id: sessionClusterResult.id });
+		await db.insert(sessionClusterResult).values({
+			sessionId: finalSessionId,
+			clusterLabel: cr.clusterLabel,
+			clusterLabelName: cr.clusterLabelName,
+			userVector: JSON.stringify(cr.userVector),
+			importance: cr.importance,
+			answeredCount: cr.answeredCount,
+			matchesJson: JSON.stringify(cr.matches),
+			memberVectorsVizJson: cr.memberVectorsForViz ? JSON.stringify(cr.memberVectorsForViz) : null,
+			explainedVarianceJson: cr.explainedVariance ? JSON.stringify(cr.explainedVariance) : null,
+			userVectorHistoryJson: cr.userVectorHistory ? JSON.stringify(cr.userVectorHistory) : null,
+			xDimension: cr.xDimension ?? 0,
+			yDimension: cr.yDimension ?? 1
+		});
 
-		// Insert answers
+		// Persist bill answers to user_bill_answer (upsert)
 		if (cr.answeredBills && cr.answeredBills.length > 0) {
-			await db.insert(sessionAnswer).values(
-				cr.answeredBills.map((ab) => ({
-					clusterResultId: insertedResult.id,
-					billId: ab.billId,
-					billTitle: ab.title,
-					score: ab.answer
-				}))
-			);
+			for (const ab of cr.answeredBills) {
+				await db
+					.insert(userBillAnswer)
+					.values({
+						userId,
+						billId: ab.billId,
+						score: ab.answer
+					})
+					.onConflictDoUpdate({
+						target: [userBillAnswer.userId, userBillAnswer.billId],
+						set: {
+							score: ab.answer,
+							updatedAt: sql`now()`
+						}
+					});
+			}
 		}
 	}
 
@@ -471,28 +514,83 @@ async function handleSnapshot(body: { sessionId: number; name?: string }) {
 		return json({ error: 'No cluster results found for session' }, { status: 400 });
 	}
 
-	// Get answers for each cluster result
-	const resultsForSnapshot = await Promise.all(
-		clusterResults.map(async (cr) => {
-			const answers = await db
-				.select({
-					billId: sessionAnswer.billId,
-					title: sessionAnswer.billTitle,
-					answer: sessionAnswer.score
-				})
-				.from(sessionAnswer)
-				.where(eq(sessionAnswer.clusterResultId, cr.id));
+	// Get the session to find userId and clusterId
+	const [sessionData] = await db
+		.select()
+		.from(savedMatchingSession)
+		.where(eq(savedMatchingSession.id, sessionId));
 
-			return {
-				clusterLabel: cr.clusterLabel,
-				clusterLabelName: cr.clusterLabelName,
-				importance: cr.importance,
-				answeredCount: cr.answeredCount,
-				matches: JSON.parse(cr.matchesJson),
-				answeredBills: answers
-			};
+	if (!sessionData) {
+		return json({ error: 'Session not found' }, { status: 404 });
+	}
+
+	// Get cluster assignments to map bills to cluster labels
+	const clusterAssignments = await db
+		.select({
+			billId: billClusterAssignments.billId,
+			clusterLabel: billClusterAssignments.clusterLabel
 		})
-	);
+		.from(billClusterAssignments)
+		.where(eq(billClusterAssignments.clusterId, sessionData.clusterId));
+
+	const clusterBillMap = new Map<number, number[]>();
+	for (const a of clusterAssignments) {
+		const bills = clusterBillMap.get(a.clusterLabel) || [];
+		bills.push(a.billId);
+		clusterBillMap.set(a.clusterLabel, bills);
+	}
+
+	// Get all user answers
+	const allBillIds = clusterAssignments.map((a) => a.billId);
+	const userAnswers =
+		allBillIds.length > 0
+			? await db
+					.select({
+						billId: userBillAnswer.billId,
+						score: userBillAnswer.score
+					})
+					.from(userBillAnswer)
+					.where(
+						and(
+							eq(userBillAnswer.userId, sessionData.userId),
+							inArray(userBillAnswer.billId, allBillIds)
+						)
+					)
+			: [];
+
+	const answerMap = new Map(userAnswers.map((a) => [a.billId, a.score]));
+
+	// Get bill titles
+	const answeredBillIds = userAnswers.map((a) => a.billId);
+	const billTitles =
+		answeredBillIds.length > 0
+			? await db
+					.select({ id: bill.id, title: bill.title })
+					.from(bill)
+					.where(inArray(bill.id, answeredBillIds))
+			: [];
+	const billTitleMap = new Map(billTitles.map((b) => [b.id, b.title || '']));
+
+	// Build results for snapshot
+	const resultsForSnapshot = clusterResults.map((cr) => {
+		const billIdsInCluster = clusterBillMap.get(cr.clusterLabel) || [];
+		const answersForCluster = billIdsInCluster
+			.filter((bId) => answerMap.has(bId))
+			.map((bId) => ({
+				billId: bId,
+				title: billTitleMap.get(bId) || '',
+				answer: answerMap.get(bId)!
+			}));
+
+		return {
+			clusterLabel: cr.clusterLabel,
+			clusterLabelName: cr.clusterLabelName,
+			importance: cr.importance,
+			answeredCount: answersForCluster.length,
+			matches: JSON.parse(cr.matchesJson),
+			answeredBills: answersForCluster
+		};
+	});
 
 	const snapshotId = await createNewSnapshot(sessionId, resultsForSnapshot, name);
 

@@ -95,7 +95,6 @@ export interface SavedMatchingSession {
 	id: number;
 	name: string;
 	description: string | null;
-	savedVectorKey: string; // "name|clusterId" key for the saved vector group
 	clusterId: number;
 	nComponents: number;
 	status: SessionStatus;

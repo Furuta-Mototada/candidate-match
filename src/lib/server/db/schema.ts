@@ -405,6 +405,30 @@ export type NewSession = typeof session.$inferInsert;
 // Session status enum
 export const sessionStatusEnum = pgEnum('session_status', ['in_progress', 'completed']);
 
+// ============================================================================
+// User Bill Answers - global per-user answers to bills (shared across sessions)
+// ============================================================================
+
+export const userBillAnswer = pgTable(
+	'user_bill_answer',
+	{
+		id: serial('id').primaryKey(),
+		userId: text('user_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		billId: integer('bill_id')
+			.notNull()
+			.references(() => bill.id),
+		score: integer('score').notNull(), // -1, 0, or 1
+		createdAt: timestamp('created_at').notNull().defaultNow(),
+		updatedAt: timestamp('updated_at').notNull().defaultNow()
+	},
+	(table) => [unique().on(table.userId, table.billId)]
+);
+
+export type UserBillAnswer = typeof userBillAnswer.$inferSelect;
+export type NewUserBillAnswer = typeof userBillAnswer.$inferInsert;
+
 // Saved matching sessions - stores user's complete matching session data
 export const savedMatchingSession = pgTable('saved_matching_session', {
 	id: serial('id').primaryKey(),
@@ -413,7 +437,6 @@ export const savedMatchingSession = pgTable('saved_matching_session', {
 		.references(() => user.id, { onDelete: 'cascade' }),
 	name: text('name').notNull(),
 	description: text('description'),
-	savedVectorKey: text('saved_vector_key').notNull(), // "name|clusterId" key for the saved vector group
 	clusterId: integer('cluster_id')
 		.notNull()
 		.references(() => billClusters.id),
@@ -453,27 +476,6 @@ export const sessionClusterResult = pgTable(
 
 export type SessionClusterResult = typeof sessionClusterResult.$inferSelect;
 export type NewSessionClusterResult = typeof sessionClusterResult.$inferInsert;
-
-// Session answers - individual bill answers within a cluster result
-export const sessionAnswer = pgTable(
-	'session_answer',
-	{
-		id: serial('id').primaryKey(),
-		clusterResultId: integer('cluster_result_id')
-			.notNull()
-			.references(() => sessionClusterResult.id, { onDelete: 'cascade' }),
-		billId: integer('bill_id')
-			.notNull()
-			.references(() => bill.id),
-		billTitle: text('bill_title').notNull(),
-		score: integer('score').notNull(), // -1, 0, or 1
-		answeredAt: timestamp('answered_at').notNull().defaultNow()
-	},
-	(table) => [unique().on(table.clusterResultId, table.billId)]
-);
-
-export type SessionAnswer = typeof sessionAnswer.$inferSelect;
-export type NewSessionAnswer = typeof sessionAnswer.$inferInsert;
 
 // Result snapshots - point-in-time snapshots of matching results
 export const resultSnapshot = pgTable(
