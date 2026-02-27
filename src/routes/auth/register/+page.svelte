@@ -87,7 +87,9 @@
 		padding: 2.5rem;
 		width: 100%;
 		max-width: 420px;
-		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.06);
+		box-shadow:
+			0 1px 3px rgba(0, 0, 0, 0.04),
+			0 8px 24px rgba(0, 0, 0, 0.06);
 	}
 
 	h1 {
