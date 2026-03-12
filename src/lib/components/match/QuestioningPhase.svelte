@@ -2,6 +2,7 @@
 	import LatentSpaceVisualization from '$lib/components/match/LatentSpaceVisualization.svelte';
 	import MemberRankingList from '$lib/components/match/MemberRankingList.svelte';
 	import EnrichedBillCard from '$lib/components/match/EnrichedBillCard.svelte';
+	import DelegationModal from '$lib/components/match/DelegationModal.svelte';
 	import type {
 		Bill,
 		MemberMatch,
@@ -33,6 +34,8 @@
 		currentClusterAnsweredBills: AnsweredBill[];
 		onSubmitAnswer: (vote: number) => void;
 		onSkipQuestion: () => void;
+		onDelegateBill: (billId: number) => void;
+		isLoggedIn: boolean;
 		onFinishCluster: () => void;
 		onSelectBillToEdit: (bill: AnsweredBill) => void;
 		onCancelEditing: () => void;
@@ -56,6 +59,8 @@
 		currentClusterAnsweredBills = [],
 		onSubmitAnswer,
 		onSkipQuestion,
+		onDelegateBill,
+		isLoggedIn = false,
 		onFinishCluster,
 		onSelectBillToEdit,
 		onCancelEditing
@@ -102,6 +107,23 @@
 			loadEnrichment(currentQuestion.billId);
 		}
 	});
+
+	// Delegation modal state
+	let showDelegationModal = $state(false);
+
+	function openDelegationModal() {
+		showDelegationModal = true;
+	}
+
+	function closeDelegationModal() {
+		showDelegationModal = false;
+	}
+
+	function handleDelegated() {
+		if (currentQuestion) {
+			onDelegateBill(currentQuestion.billId);
+		}
+	}
 
 	function toggleAnsweredBills() {
 		userToggledAnsweredBills = !userToggledAnsweredBills;
@@ -172,12 +194,18 @@
 				</button>
 			</div>
 
-			<!-- Skip / Actions (hide skip when editing, show cancel instead) -->
+			<!-- Actions (hide when editing, show cancel instead) -->
 			{#if !isEditingAnswer}
 				<div class="question-actions">
-					<button onclick={onSkipQuestion} disabled={isLoading} class="action-btn-secondary">
-						スキップ →
-					</button>
+					{#if isLoggedIn}
+						<button onclick={openDelegationModal} disabled={isLoading} class="action-btn-delegate">
+							🤝 フレンドに委任
+						</button>
+					{:else}
+						<button onclick={onSkipQuestion} disabled={isLoading} class="action-btn-secondary">
+							スキップ →
+						</button>
+					{/if}
 					<button
 						onclick={onFinishCluster}
 						disabled={isLoading || answeredCount < 2}
@@ -272,6 +300,20 @@
 		</div>
 	</div>
 </div>
+
+<!-- Delegation Modal -->
+{#if currentQuestion}
+	<DelegationModal
+		show={showDelegationModal}
+		billId={currentQuestion.billId}
+		billTitle={currentQuestion.title}
+		hasExistingVote={currentClusterAnsweredBills.some(
+			(b) => b.billId === currentQuestion?.billId && b.answer !== 0
+		)}
+		onClose={closeDelegationModal}
+		onDelegated={handleDelegated}
+	/>
+{/if}
 
 <style>
 	/* Container */
@@ -467,6 +509,19 @@
 
 	.action-btn-secondary:hover:not(:disabled) {
 		background: #e5e7eb;
+	}
+
+	.action-btn-delegate {
+		background: linear-gradient(135deg, #ede9fe, #ddd6fe);
+		color: #6d28d9;
+		border: 1px solid #c4b5fd;
+	}
+
+	.action-btn-delegate:hover:not(:disabled) {
+		background: linear-gradient(135deg, #ddd6fe, #c4b5fd);
+		border-color: #a78bfa;
+		transform: translateY(-1px);
+		box-shadow: 0 4px 8px rgba(109, 40, 217, 0.15);
 	}
 
 	.action-btn-primary {

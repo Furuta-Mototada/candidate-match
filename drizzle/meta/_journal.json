@@ -141,6 +141,34 @@
       "when": 1772200959884,
       "tag": "0019_friend_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1772202163391,
+      "tag": "0020_vote_delegation",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1773310043877,
+      "tag": "0021_bizarre_lilith",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1773311928093,
+      "tag": "0022_sparkling_ezekiel",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1773316718677,
+      "tag": "0023_unique_gambit",
+      "breakpoints": true
     }
   ]
 }

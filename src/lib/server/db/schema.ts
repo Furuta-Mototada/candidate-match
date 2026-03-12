@@ -576,6 +576,41 @@ export const friendRequestStatusEnum = pgEnum('friend_request_status', [
 	'rejected'
 ]);
 
+// ============================================================================
+// Vote Delegation
+// ============================================================================
+
+export const delegationStatusEnum = pgEnum('delegation_status', [
+	'pending',
+	'accepted',
+	'rejected',
+	'redelegated',
+	'voted'
+]);
+
+export const voteDelegation = pgTable(
+	'vote_delegation',
+	{
+		id: serial('id').primaryKey(),
+		delegatorId: text('delegator_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		delegateId: text('delegate_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		billId: integer('bill_id')
+			.notNull()
+			.references(() => bill.id),
+		status: delegationStatusEnum('status').notNull().default('pending'),
+		createdAt: timestamp('created_at').notNull().defaultNow(),
+		updatedAt: timestamp('updated_at').notNull().defaultNow()
+	},
+	(table) => [unique().on(table.delegatorId, table.billId)]
+);
+
+export type VoteDelegation = typeof voteDelegation.$inferSelect;
+export type NewVoteDelegation = typeof voteDelegation.$inferInsert;
+
 export const friendRequest = pgTable(
 	'friend_request',
 	{

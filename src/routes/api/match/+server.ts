@@ -9,7 +9,8 @@ import {
 	clusterVectorResults,
 	billClusterLabelNames,
 	member,
-	userBillAnswer
+	userBillAnswer,
+	voteDelegation
 } from '$lib/server/db/schema.js';
 import { eq, inArray, desc, and, sql } from 'drizzle-orm';
 import {
@@ -104,6 +105,9 @@ export const POST: RequestHandler = async ({ request, locals }): Promise<Respons
 
 			case 'results':
 				return await handleResults(sessionId);
+
+			case 'retract-answer':
+				return await handleRetractAnswer(billId, userId);
 
 			default:
 				return json({ error: 'Invalid action' }, { status: 400 });
@@ -565,21 +569,36 @@ async function handleAnswer(
 	const normalizedScore = Math.max(-1, Math.min(1, score));
 
 	// Persist answer to user_bill_answer if user is logged in
+	// But skip if user has an active outgoing delegation for this bill (delegate decides)
 	if (userId) {
-		await db
-			.insert(userBillAnswer)
-			.values({
-				userId,
-				billId,
-				score: normalizedScore
-			})
-			.onConflictDoUpdate({
-				target: [userBillAnswer.userId, userBillAnswer.billId],
-				set: {
-					score: normalizedScore,
-					updatedAt: sql`now()`
-				}
-			});
+		const [activeDelegation] = await db
+			.select({ id: voteDelegation.id })
+			.from(voteDelegation)
+			.where(
+				and(
+					eq(voteDelegation.delegatorId, userId),
+					eq(voteDelegation.billId, billId),
+					sql`${voteDelegation.status} != 'rejected'`
+				)
+			)
+			.limit(1);
+
+		if (!activeDelegation) {
+			await db
+				.insert(userBillAnswer)
+				.values({
+					userId,
+					billId,
+					score: normalizedScore
+				})
+				.onConflictDoUpdate({
+					target: [userBillAnswer.userId, userBillAnswer.billId],
+					set: {
+						score: normalizedScore,
+						updatedAt: sql`now()`
+					}
+				});
+		}
 	}
 
 	// Create answer
@@ -649,21 +668,36 @@ async function handleSkip(sessionId: string, billId: number, userId: string | nu
 	}
 
 	// Persist skip to user_bill_answer if user is logged in
+	// But skip if user has an active outgoing delegation for this bill
 	if (userId) {
-		await db
-			.insert(userBillAnswer)
-			.values({
-				userId,
-				billId,
-				score: 0
-			})
-			.onConflictDoUpdate({
-				target: [userBillAnswer.userId, userBillAnswer.billId],
-				set: {
-					score: 0,
-					updatedAt: sql`now()`
-				}
-			});
+		const [activeDelegation] = await db
+			.select({ id: voteDelegation.id })
+			.from(voteDelegation)
+			.where(
+				and(
+					eq(voteDelegation.delegatorId, userId),
+					eq(voteDelegation.billId, billId),
+					sql`${voteDelegation.status} != 'rejected'`
+				)
+			)
+			.limit(1);
+
+		if (!activeDelegation) {
+			await db
+				.insert(userBillAnswer)
+				.values({
+					userId,
+					billId,
+					score: 0
+				})
+				.onConflictDoUpdate({
+					target: [userBillAnswer.userId, userBillAnswer.billId],
+					set: {
+						score: 0,
+						updatedAt: sql`now()`
+					}
+				});
+		}
 	}
 
 	// Add bill to answered with score 0 (neutral/skip)
@@ -698,6 +732,50 @@ async function handleSkip(sessionId: string, billId: number, userId: string | nu
 		uncertainty: newState.uncertainty,
 		isComplete: nextQuestion === null
 	});
+}
+
+/**
+ * Retract a user's own answer on a bill
+ */
+async function handleRetractAnswer(billId: number, userId: string | null) {
+	if (!userId) {
+		return json({ error: 'ログインが必要です' }, { status: 401 });
+	}
+
+	if (!billId) {
+		return json({ error: '法案IDが必要です' }, { status: 400 });
+	}
+
+	// Check if there's an active incoming delegation where this user voted on someone else's behalf
+	const [incomingVoted] = await db
+		.select()
+		.from(voteDelegation)
+		.where(
+			and(
+				eq(voteDelegation.delegateId, userId),
+				eq(voteDelegation.billId, billId),
+				eq(voteDelegation.status, 'voted')
+			)
+		);
+
+	if (incomingVoted) {
+		return json(
+			{ error: 'この法案は代理投票済みのため、先に委任タブから対応してください' },
+			{ status: 400 }
+		);
+	}
+
+	// Delete the user's answer
+	const result = await db
+		.delete(userBillAnswer)
+		.where(and(eq(userBillAnswer.userId, userId), eq(userBillAnswer.billId, billId)))
+		.returning();
+
+	if (result.length === 0) {
+		return json({ error: 'この法案への回答が見つかりません' }, { status: 404 });
+	}
+
+	return json({ success: true, message: '回答を取り消しました' });
 }
 
 /**

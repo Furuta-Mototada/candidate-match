@@ -710,6 +710,14 @@
 	}
 
 	/**
+	 * Handle delegation: after a bill is delegated, skip to the next question
+	 */
+	async function handleDelegateBill(_billId: number) {
+		// After delegating, move to next question (same as skip behavior)
+		await skipQuestion();
+	}
+
+	/**
 	 * Navigate to a specific cluster by index
 	 */
 	async function navigateToCluster(targetIndex: number) {
@@ -1245,6 +1253,8 @@
 				{currentClusterAnsweredBills}
 				onSubmitAnswer={submitAnswer}
 				onSkipQuestion={skipQuestion}
+				onDelegateBill={handleDelegateBill}
+				isLoggedIn={!!data.user}
 				onFinishCluster={finishCurrentCluster}
 				onSelectBillToEdit={selectBillToEdit}
 				onCancelEditing={cancelEditing}

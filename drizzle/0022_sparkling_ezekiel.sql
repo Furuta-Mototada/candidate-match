@@ -1,0 +1,1 @@
+ALTER TABLE "vote_delegation" DROP COLUMN "voted_score";
