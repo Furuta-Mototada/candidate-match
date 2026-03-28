@@ -51,13 +51,61 @@
 
 	let snapshots: SnapshotListItem[] = $state(data.snapshots || []);
 	let answers: AnsweredBill[] = $state(data.answers || []);
-	let allBills: BillListItem[] = $state(data.allBills || []);
-	let incomingDelegations: IncomingDelegation[] = $state(data.incomingDelegations || []);
-	let outgoingDelegations: OutgoingDelegation[] = $state(data.outgoingDelegations || []);
+	let allBills: BillListItem[] = $state([]);
+	let incomingDelegations: IncomingDelegation[] = $state([]);
+	let outgoingDelegations: OutgoingDelegation[] = $state([]);
 	let isLoading: boolean = $state(false);
 	let error: string | null = $state(null);
 	let mounted: boolean = $state(false);
 	let activeTab: 'snapshots' | 'answers' | 'delegations' = $state('snapshots');
+
+	// Lazy-load flags
+	let delegationsLoaded = $state(false);
+	let delegationsLoading = $state(false);
+	let allBillsLoaded = $state(false);
+	let allBillsLoading = $state(false);
+
+	async function loadDelegations() {
+		if (delegationsLoaded) return;
+		delegationsLoading = true;
+		try {
+			const res = await fetch('/api/delegations?action=all');
+			const data = await res.json();
+			if (data.success) {
+				incomingDelegations = data.incoming || [];
+				outgoingDelegations = data.outgoing || [];
+			}
+		} catch (e) {
+			console.error('Error loading delegations:', e);
+		}
+		delegationsLoaded = true;
+		delegationsLoading = false;
+	}
+
+	async function loadAllBills() {
+		if (allBillsLoaded) return;
+		allBillsLoading = true;
+		try {
+			const res = await fetch('/api/bills/all');
+			const data = await res.json();
+			if (data.success) {
+				allBills = data.bills || [];
+			}
+		} catch (e) {
+			console.error('Error loading bills:', e);
+		}
+		allBillsLoaded = true;
+		allBillsLoading = false;
+	}
+
+	async function switchTab(tab: typeof activeTab) {
+		activeTab = tab;
+		if (tab === 'delegations') {
+			await loadDelegations();
+		} else if (tab === 'answers') {
+			await loadAllBills();
+		}
+	}
 
 	// ── Bills tab search & filter state ──
 	let billSearchQuery: string = $state('');
@@ -637,23 +685,23 @@
 			<button
 				class="tab-btn"
 				class:active={activeTab === 'snapshots'}
-				onclick={() => (activeTab = 'snapshots')}
+				onclick={() => switchTab('snapshots')}
 			>
 				📸 スナップショット ({snapshots.length})
 			</button>
 			<button
 				class="tab-btn"
 				class:active={activeTab === 'answers'}
-				onclick={() => (activeTab = 'answers')}
+				onclick={() => switchTab('answers')}
 			>
-				📝 回答履歴 ({answeredCount}/{allBills.length})
+				📝 回答履歴 ({allBillsLoaded ? `${answeredCount}/${allBills.length}` : '...'})
 			</button>
 			<button
 				class="tab-btn"
 				class:active={activeTab === 'delegations'}
-				onclick={() => (activeTab = 'delegations')}
+				onclick={() => switchTab('delegations')}
 			>
-				🤝 委任 ({totalDelegationCount})
+				🤝 委任 ({delegationsLoaded ? totalDelegationCount : '...'})
 				{#if pendingIncomingCount > 0}
 					<span class="tab-badge">{pendingIncomingCount}</span>
 				{/if}
@@ -742,6 +790,12 @@
 
 		<!-- Answers Tab -->
 		{#if activeTab === 'answers'}
+			{#if allBillsLoading}
+				<div class="loading-state animate-in" style="--delay: 1">
+					<div class="loading-spinner"></div>
+					<p>法案データを読み込み中...</p>
+				</div>
+			{:else}
 			<div class="bills-section animate-in" style="--delay: 1">
 				<!-- Search bar -->
 				<div class="bills-search-bar">
@@ -931,10 +985,17 @@
 					</div>
 				{/if}
 			</div>
+			{/if}
 		{/if}
 
 		<!-- Delegations Tab -->
 		{#if activeTab === 'delegations'}
+			{#if delegationsLoading}
+				<div class="loading-state animate-in" style="--delay: 1">
+					<div class="loading-spinner"></div>
+					<p>委任データを読み込み中...</p>
+				</div>
+			{:else}
 			<div class="delegations-container animate-in" style="--delay: 1">
 				{#if delegationGroups.length === 0}
 					<div class="empty-state">
@@ -1163,6 +1224,7 @@
 					</div>
 				{/if}
 			</div>
+			{/if}
 		{/if}
 	</main>
 
@@ -2543,6 +2605,31 @@
 
 		.filter-select {
 			width: 100%;
+		}
+	}
+
+	.loading-state {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 1rem;
+		padding: 4rem 2rem;
+		color: #64748b;
+		font-size: 0.95rem;
+	}
+
+	.loading-spinner {
+		width: 2rem;
+		height: 2rem;
+		border: 3px solid #e5e7eb;
+		border-top-color: #6366f1;
+		border-radius: 50%;
+		animation: spin 0.7s linear infinite;
+	}
+
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
 		}
 	}
 </style>

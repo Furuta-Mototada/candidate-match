@@ -14,6 +14,7 @@
 
 		<div class="navbar-actions">
 			{#if data.user}
+				<a href="/match/saved" class="btn-nav">保存済み</a>
 				<a href="/friends" class="btn-nav btn-nav-friends">
 					フレンド
 					{#if data.pendingFriendRequests > 0}
