@@ -99,6 +99,22 @@ export interface AnsweredBill {
 	answer: number; // -1, 0, or 1
 }
 
+export interface BillListItem {
+	id: number;
+	type: string;
+	submissionSession: number;
+	number: number;
+	title: string;
+	result: string | null;
+	submissionDate: string | null;
+	answerScore: number | null;
+	delegation: {
+		id: number;
+		status: string;
+		delegateUsername: string;
+	} | null;
+}
+
 export interface ResultSnapshotData {
 	id: number;
 	clusterId: number;

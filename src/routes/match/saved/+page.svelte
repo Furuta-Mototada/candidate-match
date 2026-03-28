@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import type { PageData } from './$types.js';
-	import type { SnapshotListItem, AnsweredBill } from '$lib/types/index.js';
+	import type { SnapshotListItem, AnsweredBill, BillListItem } from '$lib/types/index.js';
 	import DelegationModal from '$lib/components/match/DelegationModal.svelte';
 
 	type IncomingDelegation = {
@@ -51,13 +51,84 @@
 
 	let snapshots: SnapshotListItem[] = $state(data.snapshots || []);
 	let answers: AnsweredBill[] = $state(data.answers || []);
-	let totalAnswers: number = $state(data.totalAnswers || 0);
+	let allBills: BillListItem[] = $state(data.allBills || []);
 	let incomingDelegations: IncomingDelegation[] = $state(data.incomingDelegations || []);
 	let outgoingDelegations: OutgoingDelegation[] = $state(data.outgoingDelegations || []);
 	let isLoading: boolean = $state(false);
 	let error: string | null = $state(null);
 	let mounted: boolean = $state(false);
 	let activeTab: 'snapshots' | 'answers' | 'delegations' = $state('snapshots');
+
+	// ── Bills tab search & filter state ──
+	let billSearchQuery: string = $state('');
+	let billStatusFilter: 'all' | 'answered' | 'unanswered' | 'delegated' = $state('all');
+	let billTypeFilter: string = $state('all');
+	let billSessionFilter: string = $state('all');
+	let billResultFilter: string = $state('all');
+	let billAnswerFilter: string = $state('all'); // 'all' | 'agree' | 'disagree' | 'skip'
+
+	// Derive unique sessions and types for filter dropdowns
+	let availableSessions = $derived(
+		[...new Set(allBills.map((b) => b.submissionSession))].sort((a, b) => b - a)
+	);
+	let availableTypes = $derived([...new Set(allBills.map((b) => b.type))].sort());
+
+	// Filtered bills
+	let filteredBills = $derived.by(() => {
+		let result = allBills;
+
+		// Search filter
+		if (billSearchQuery.trim()) {
+			const q = billSearchQuery.trim().toLowerCase();
+			result = result.filter(
+				(b) =>
+					(b.title && b.title.toLowerCase().includes(q)) ||
+					`第${b.submissionSession}回 ${b.type} 第${b.number}号`.includes(q)
+			);
+		}
+
+		// Status filter
+		if (billStatusFilter === 'answered') {
+			result = result.filter((b) => b.answerScore !== null);
+		} else if (billStatusFilter === 'unanswered') {
+			result = result.filter((b) => b.answerScore === null && !b.delegation);
+		} else if (billStatusFilter === 'delegated') {
+			result = result.filter((b) => b.delegation !== null);
+		}
+
+		// Answer value filter
+		if (billAnswerFilter === 'agree') {
+			result = result.filter((b) => b.answerScore === 1);
+		} else if (billAnswerFilter === 'disagree') {
+			result = result.filter((b) => b.answerScore === -1);
+		} else if (billAnswerFilter === 'skip') {
+			result = result.filter((b) => b.answerScore === 0);
+		}
+
+		// Type filter
+		if (billTypeFilter !== 'all') {
+			result = result.filter((b) => b.type === billTypeFilter);
+		}
+
+		// Session filter
+		if (billSessionFilter !== 'all') {
+			result = result.filter((b) => b.submissionSession === parseInt(billSessionFilter));
+		}
+
+		// Result filter
+		if (billResultFilter !== 'all') {
+			if (billResultFilter === 'none') {
+				result = result.filter((b) => !b.result);
+			} else {
+				result = result.filter((b) => b.result === billResultFilter);
+			}
+		}
+
+		return result;
+	});
+
+	let answeredCount = $derived(allBills.filter((b) => b.answerScore !== null).length);
+	let delegatedCount = $derived(allBills.filter((b) => b.delegation !== null).length);
 
 	// Delete confirmation
 	let deleteConfirmId: number | null = $state(null);
@@ -71,9 +142,6 @@
 	let redelegateLoading: boolean = $state(false);
 	let redelegateConfirmingFriend: { friendId: string; friendUsername: string } | null =
 		$state(null);
-
-	// Delegate-from-answer modal
-	let delegatingAnswer: { billId: number; title: string } | null = $state(null);
 
 	// Retract confirmation
 	let retractAnswerConfirmId: number | null = $state(null);
@@ -465,7 +533,8 @@
 			}
 
 			answers = answers.filter((a) => a.billId !== billId);
-			totalAnswers = answers.length;
+			// Also update allBills to clear the answer
+			allBills = allBills.map((b) => (b.id === billId ? { ...b, answerScore: null } : b));
 			retractAnswerConfirmId = null;
 		} catch (e) {
 			error = e instanceof Error ? e.message : '不明なエラーが発生しました';
@@ -474,25 +543,54 @@
 		}
 	}
 
-	function openDelegateFromAnswer(bill: AnsweredBill) {
-		delegatingAnswer = { billId: bill.billId, title: bill.title };
+	function openDelegateFromBill(b: BillListItem) {
+		delegatingBill = { billId: b.id, title: b.title, hasExistingVote: b.answerScore !== null };
 	}
 
-	async function onDelegatedFromAnswer() {
-		if (delegatingAnswer) {
-			// Retract the existing answer since user is delegating instead
-			try {
-				await fetch('/api/match', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ action: 'retract-answer', billId: delegatingAnswer.billId })
-				});
-			} catch {
-				// Best-effort retract — delegation was already created
+	// Delegate-from-bill-list modal
+	let delegatingBill: { billId: number; title: string; hasExistingVote: boolean } | null =
+		$state(null);
+
+	async function onDelegatedFromBill() {
+		if (delegatingBill) {
+			if (delegatingBill.hasExistingVote) {
+				// Retract existing answer since user is delegating instead
+				try {
+					await fetch('/api/match', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ action: 'retract-answer', billId: delegatingBill.billId })
+					});
+				} catch {
+					// Best-effort retract
+				}
+				answers = answers.filter((a) => a.billId !== delegatingBill!.billId);
+				allBills = allBills.map((b) =>
+					b.id === delegatingBill!.billId ? { ...b, answerScore: null } : b
+				);
 			}
-			answers = answers.filter((a) => a.billId !== delegatingAnswer!.billId);
-			totalAnswers = answers.length;
-			delegatingAnswer = null;
+			// Refresh delegation status for this bill
+			try {
+				const res = await fetch(`/api/delegations?action=for-bill&billId=${delegatingBill.billId}`);
+				const data = await res.json();
+				if (data.success && data.delegation) {
+					allBills = allBills.map((b) =>
+						b.id === delegatingBill!.billId
+							? {
+									...b,
+									delegation: {
+										id: data.delegation.id,
+										status: data.delegation.status,
+										delegateUsername: data.delegation.delegateUsername
+									}
+								}
+							: b
+					);
+				}
+			} catch {
+				// Best-effort refresh
+			}
+			delegatingBill = null;
 		}
 	}
 
@@ -548,7 +646,7 @@
 				class:active={activeTab === 'answers'}
 				onclick={() => (activeTab = 'answers')}
 			>
-				📝 回答履歴 ({totalAnswers})
+				📝 回答履歴 ({answeredCount}/{allBills.length})
 			</button>
 			<button
 				class="tab-btn"
@@ -644,56 +742,184 @@
 
 		<!-- Answers Tab -->
 		{#if activeTab === 'answers'}
-			{#if answers.length === 0}
-				<div class="empty-state animate-in" style="--delay: 1">
-					<div class="empty-icon">📝</div>
-					<h2 class="empty-title">回答がありません</h2>
-					<p class="empty-desc">マッチングで法案に回答すると、ここに履歴が表示されます。</p>
-					<a href="/match" class="btn-primary"> マッチングへ </a>
+			<div class="bills-section animate-in" style="--delay: 1">
+				<!-- Search bar -->
+				<div class="bills-search-bar">
+					<span class="search-icon">🔍</span>
+					<input
+						type="text"
+						class="bills-search-input"
+						placeholder="法案名で検索..."
+						bind:value={billSearchQuery}
+					/>
+					{#if billSearchQuery}
+						<button class="search-clear-btn" onclick={() => (billSearchQuery = '')}>✕</button>
+					{/if}
 				</div>
-			{:else}
-				<div class="answers-section animate-in" style="--delay: 1">
-					<p class="answers-summary">合計 {totalAnswers} 件の回答</p>
-					<div class="answers-list">
-						{#each answers as bill (bill.billId)}
-							<div class="answer-item">
-								<div class="answer-item-main">
-									<span class="answer-badge {getAnswerClass(bill.answer)}">
-										{getAnswerLabel(bill.answer)}
+
+				<!-- Filters -->
+				<div class="bills-filters">
+					<div class="filter-group">
+						<label class="filter-label" for="filter-status">ステータス</label>
+						<select id="filter-status" class="filter-select" bind:value={billStatusFilter}>
+							<option value="all">すべて</option>
+							<option value="answered">回答済み ({answeredCount})</option>
+							<option value="unanswered">未回答</option>
+							<option value="delegated">委任済み ({delegatedCount})</option>
+						</select>
+					</div>
+
+					{#if billStatusFilter === 'answered' || billStatusFilter === 'all'}
+						<div class="filter-group">
+							<label class="filter-label" for="filter-answer">回答</label>
+							<select id="filter-answer" class="filter-select" bind:value={billAnswerFilter}>
+								<option value="all">すべて</option>
+								<option value="agree">賛成</option>
+								<option value="disagree">反対</option>
+								<option value="skip">スキップ</option>
+							</select>
+						</div>
+					{/if}
+
+					<div class="filter-group">
+						<label class="filter-label" for="filter-type">種類</label>
+						<select id="filter-type" class="filter-select" bind:value={billTypeFilter}>
+							<option value="all">すべて</option>
+							{#each availableTypes as type (type)}
+								<option value={type}>{type}</option>
+							{/each}
+						</select>
+					</div>
+
+					<div class="filter-group">
+						<label class="filter-label" for="filter-session">回次</label>
+						<select id="filter-session" class="filter-select" bind:value={billSessionFilter}>
+							<option value="all">すべて</option>
+							{#each availableSessions as session (session)}
+								<option value={session.toString()}>第{session}回</option>
+							{/each}
+						</select>
+					</div>
+
+					<div class="filter-group">
+						<label class="filter-label" for="filter-result">結果</label>
+						<select id="filter-result" class="filter-select" bind:value={billResultFilter}>
+							<option value="all">すべて</option>
+							<option value="可決">可決</option>
+							<option value="否決">否決</option>
+							<option value="撤回">撤回</option>
+							<option value="未了">未了</option>
+							<option value="none">審議中</option>
+						</select>
+					</div>
+				</div>
+
+				<!-- Results summary -->
+				<p class="bills-summary">
+					{filteredBills.length} 件表示 / 全 {allBills.length} 件（回答済み {answeredCount} 件、委任 {delegatedCount} 件）
+				</p>
+
+				<!-- Bill list -->
+				{#if filteredBills.length === 0}
+					<div class="empty-state-inline">
+						<p>該当する法案がありません</p>
+					</div>
+				{:else}
+					<div class="bills-list">
+						{#each filteredBills as b (b.id)}
+							<div
+								class="bill-item"
+								class:bill-item-answered={b.answerScore !== null}
+								class:bill-item-delegated={b.delegation !== null && b.answerScore === null}
+							>
+								<div class="bill-item-header">
+									<span class="bill-item-id">
+										第{b.submissionSession}回 {b.type} 第{b.number}号
 									</span>
-									<span class="answer-title">{bill.title}</span>
-								</div>
-								<div class="answer-item-actions">
-									{#if retractAnswerConfirmId === bill.billId}
-										<div class="delete-confirm">
-											<span>取り消しますか？</span>
-											<button
-												class="btn-confirm-delete"
-												onclick={() => retractAnswer(bill.billId)}
-												disabled={isLoading}
-											>
-												取り消す
-											</button>
-											<button
-												class="btn-cancel"
-												onclick={() => (retractAnswerConfirmId = null)}
-												disabled={isLoading}
-											>
-												キャンセル
-											</button>
-										</div>
-									{:else}
-										<button
-											class="btn-answer-action btn-retract-answer"
-											onclick={() => (retractAnswerConfirmId = bill.billId)}
-											disabled={isLoading}
-											title="回答を取り消す"
+									{#if b.result}
+										<span
+											class="bill-result-badge"
+											class:result-passed={b.result === '可決'}
+											class:result-rejected={b.result === '否決'}
+											class:result-withdrawn={b.result === '撤回'}
+											class:result-expired={b.result === '未了'}
 										>
-											↩️ 取り消す
-										</button>
+											{b.result}
+										</span>
+									{:else}
+										<span class="bill-result-badge result-pending">審議中</span>
+									{/if}
+								</div>
+
+								<div class="bill-item-main">
+									<span class="bill-item-title">{b.title || `法案 #${b.id}`}</span>
+								</div>
+
+								<div class="bill-item-status-row">
+									<!-- Answer status -->
+									{#if b.answerScore !== null}
+										<span class="answer-badge {getAnswerClass(b.answerScore)}">
+											{getAnswerLabel(b.answerScore)}
+										</span>
+									{:else if b.delegation}
+										<!-- Delegation status with no direct answer -->
+										<span
+											class="delegation-badge {getDelegationStatusClass(b.delegation.status)}"
+										>
+											🤝 {b.delegation.delegateUsername}に委任
+											({getDelegationStatusLabel(b.delegation.status)})
+										</span>
+									{:else}
+										<span class="answer-badge answer-none">未回答</span>
+									{/if}
+
+									<!-- If answered AND also delegated, show delegation info too -->
+									{#if b.answerScore !== null && b.delegation}
+										<span
+											class="delegation-badge {getDelegationStatusClass(b.delegation.status)}"
+										>
+											🤝 {b.delegation.delegateUsername}に委任
+											({getDelegationStatusLabel(b.delegation.status)})
+										</span>
+									{/if}
+								</div>
+
+								<!-- Actions -->
+								<div class="bill-item-actions">
+									{#if b.answerScore !== null}
+										{#if retractAnswerConfirmId === b.id}
+											<div class="delete-confirm">
+												<span>取り消しますか？</span>
+												<button
+													class="btn-confirm-delete"
+													onclick={() => retractAnswer(b.id)}
+													disabled={isLoading}
+												>
+													取り消す
+												</button>
+												<button
+													class="btn-cancel"
+													onclick={() => (retractAnswerConfirmId = null)}
+													disabled={isLoading}
+												>
+													キャンセル
+												</button>
+											</div>
+										{:else}
+											<button
+												class="btn-answer-action btn-retract-answer"
+												onclick={() => (retractAnswerConfirmId = b.id)}
+												disabled={isLoading}
+												title="回答を取り消す"
+											>
+												↩️ 取り消す
+											</button>
+										{/if}
+									{/if}
+									{#if !b.delegation}
 										<button
 											class="btn-answer-action btn-delegate-answer"
-											onclick={() => openDelegateFromAnswer(bill)}
+											onclick={() => openDelegateFromBill(b)}
 											disabled={isLoading}
 											title="フレンドに委任する"
 										>
@@ -704,8 +930,8 @@
 							</div>
 						{/each}
 					</div>
-				</div>
-			{/if}
+				{/if}
+			</div>
 		{/if}
 
 		<!-- Delegations Tab -->
@@ -1084,15 +1310,15 @@
 		</div>
 	{/if}
 
-	<!-- Delegate from answer modal -->
-	{#if delegatingAnswer}
+	<!-- Delegate from bill list modal -->
+	{#if delegatingBill}
 		<DelegationModal
 			show={true}
-			billId={delegatingAnswer.billId}
-			billTitle={delegatingAnswer.title}
-			hasExistingVote={true}
-			onClose={() => (delegatingAnswer = null)}
-			onDelegated={onDelegatedFromAnswer}
+			billId={delegatingBill.billId}
+			billTitle={delegatingBill.title}
+			hasExistingVote={delegatingBill.hasExistingVote}
+			onClose={() => (delegatingBill = null)}
+			onDelegated={onDelegatedFromBill}
 		/>
 	{/if}
 </div>
@@ -2070,6 +2296,229 @@
 		border-color: #ef4444;
 	}
 
+	/* ── Bills Section (Answer History Tab) ── */
+	.bills-section {
+		background: white;
+		border-radius: 16px;
+		padding: 1.5rem;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+		border: 1px solid #e5e7eb;
+	}
+
+	.bills-search-bar {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		background: #f9fafb;
+		border: 1px solid #e5e7eb;
+		border-radius: 10px;
+		padding: 0.5rem 0.75rem;
+		margin-bottom: 1rem;
+		transition: border-color 0.2s ease;
+	}
+
+	.bills-search-bar:focus-within {
+		border-color: #6366f1;
+		box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+	}
+
+	.search-icon {
+		font-size: 1rem;
+		flex-shrink: 0;
+	}
+
+	.bills-search-input {
+		flex: 1;
+		border: none;
+		background: transparent;
+		font-size: 0.95rem;
+		outline: none;
+		color: #1f2937;
+	}
+
+	.bills-search-input::placeholder {
+		color: #9ca3af;
+	}
+
+	.search-clear-btn {
+		background: none;
+		border: none;
+		color: #9ca3af;
+		cursor: pointer;
+		font-size: 1rem;
+		padding: 0.1rem 0.3rem;
+		border-radius: 4px;
+	}
+
+	.search-clear-btn:hover {
+		color: #6b7280;
+		background: #e5e7eb;
+	}
+
+	.bills-filters {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+		margin-bottom: 1rem;
+	}
+
+	.filter-group {
+		display: flex;
+		flex-direction: column;
+		gap: 0.2rem;
+	}
+
+	.filter-label {
+		font-size: 0.7rem;
+		color: #6b7280;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+
+	.filter-select {
+		padding: 0.35rem 0.6rem;
+		border: 1px solid #e5e7eb;
+		border-radius: 8px;
+		background: white;
+		font-size: 0.85rem;
+		color: #374151;
+		cursor: pointer;
+		outline: none;
+		transition: border-color 0.2s ease;
+	}
+
+	.filter-select:focus {
+		border-color: #6366f1;
+		box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+	}
+
+	.bills-summary {
+		font-size: 0.85rem;
+		color: #6b7280;
+		margin-bottom: 1rem;
+		padding-bottom: 0.75rem;
+		border-bottom: 1px solid #f3f4f6;
+	}
+
+	.empty-state-inline {
+		text-align: center;
+		padding: 2rem;
+		color: #9ca3af;
+		font-size: 0.95rem;
+	}
+
+	.bills-list {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+	}
+
+	.bill-item {
+		padding: 0.75rem;
+		border: 1px solid #f3f4f6;
+		border-radius: 10px;
+		transition: all 0.2s ease;
+	}
+
+	.bill-item:hover {
+		background: #fafbfc;
+		border-color: #e5e7eb;
+	}
+
+	.bill-item-answered {
+		border-left: 3px solid #6366f1;
+	}
+
+	.bill-item-delegated {
+		border-left: 3px solid #f59e0b;
+	}
+
+	.bill-item-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 0.25rem;
+	}
+
+	.bill-item-id {
+		font-size: 0.75rem;
+		color: #9ca3af;
+	}
+
+	.bill-result-badge {
+		font-size: 0.7rem;
+		font-weight: 600;
+		padding: 0.1rem 0.5rem;
+		border-radius: 100px;
+	}
+
+	.result-passed {
+		background: #d1fae5;
+		color: #065f46;
+	}
+
+	.result-rejected {
+		background: #fee2e2;
+		color: #991b1b;
+	}
+
+	.result-withdrawn {
+		background: #f3f4f6;
+		color: #6b7280;
+	}
+
+	.result-expired {
+		background: #fef3c7;
+		color: #92400e;
+	}
+
+	.result-pending {
+		background: #eff6ff;
+		color: #2563eb;
+	}
+
+	.bill-item-main {
+		margin-bottom: 0.4rem;
+	}
+
+	.bill-item-title {
+		font-size: 0.9rem;
+		color: #1f2937;
+		font-weight: 500;
+		line-height: 1.4;
+	}
+
+	.bill-item-status-row {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+		align-items: center;
+		margin-bottom: 0.4rem;
+	}
+
+	.answer-none {
+		background: #f9fafb;
+		color: #9ca3af;
+		border: 1px dashed #d1d5db;
+	}
+
+	.delegation-badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25rem;
+		padding: 0.2rem 0.6rem;
+		border-radius: 100px;
+		font-size: 0.75rem;
+		font-weight: 600;
+	}
+
+	.bill-item-actions {
+		display: flex;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+	}
+
 	@media (max-width: 640px) {
 		.header-content {
 			flex-direction: column;
@@ -2083,6 +2532,18 @@
 		.delete-confirm {
 			flex-direction: column;
 			align-items: flex-start;
+		}
+
+		.bills-filters {
+			flex-direction: column;
+		}
+
+		.filter-group {
+			width: 100%;
+		}
+
+		.filter-select {
+			width: 100%;
 		}
 	}
 </style>
