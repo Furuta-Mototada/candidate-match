@@ -583,7 +583,6 @@ export const friendRequestStatusEnum = pgEnum('friend_request_status', [
 
 export const delegationStatusEnum = pgEnum('delegation_status', [
 	'pending',
-	'accepted',
 	'rejected',
 	'redelegated',
 	'voted'
@@ -635,3 +634,46 @@ export const friendRequest = pgTable(
 
 export type FriendRequest = typeof friendRequest.$inferSelect;
 export type NewFriendRequest = typeof friendRequest.$inferInsert;
+
+// ============================================================================
+// Notifications
+// ============================================================================
+
+export const notificationTypeEnum = pgEnum('notification_type', [
+	// Friend-related
+	'friend_request_received',
+	'friend_request_accepted',
+	'friend_request_rejected',
+	// Delegation-related
+	'delegation_received',
+	'delegation_rejected',
+	'delegation_redelegated',
+	'delegation_voted',
+	'delegation_retracted',
+	// System
+	'welcome'
+]);
+
+export const notification = pgTable(
+	'notification',
+	{
+		id: serial('id').primaryKey(),
+		userId: text('user_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		type: notificationTypeEnum('type').notNull(),
+		actorId: text('actor_id').references(() => user.id, { onDelete: 'set null' }),
+		resourceId: integer('resource_id'), // friendRequest.id or voteDelegation.id
+		billId: integer('bill_id').references(() => bill.id),
+		message: text('message').notNull(),
+		read: boolean('read').notNull().default(false),
+		createdAt: timestamp('created_at').notNull().defaultNow()
+	},
+	(table) => [
+		index('idx_notification_user_read').on(table.userId, table.read),
+		index('idx_notification_user_created').on(table.userId, table.createdAt)
+	]
+);
+
+export type Notification = typeof notification.$inferSelect;
+export type NewNotification = typeof notification.$inferInsert;

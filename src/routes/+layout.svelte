@@ -1,6 +1,7 @@
 <script lang="ts">
 	import '../app.css';
 	import type { LayoutData } from './$types.js';
+	import NotificationDropdown from '$lib/components/NotificationDropdown.svelte';
 
 	let { data, children }: { data: LayoutData; children: any } = $props();
 
@@ -34,6 +35,7 @@
 		<div class="navbar-actions">
 			{#if data.user}
 				<a href="/match/saved" class="btn-nav">保存済み</a>
+				<NotificationDropdown unreadCount={data.unreadNotifications} />
 				<div class="user-dropdown-wrapper">
 					<button
 						class="user-chip"

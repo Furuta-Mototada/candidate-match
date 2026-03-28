@@ -176,6 +176,20 @@
       "when": 1774688193368,
       "tag": "0024_friend_request_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1774695590849,
+      "tag": "0025_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1774696941219,
+      "tag": "0026_remove_accepted_delegation",
+      "breakpoints": true
     }
   ]
 }

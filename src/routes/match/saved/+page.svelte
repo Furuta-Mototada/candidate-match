@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
 	import type { PageData } from './$types.js';
 	import type { SnapshotListItem, AnsweredBill, BillListItem } from '$lib/types/index.js';
 	import DelegationModal from '$lib/components/match/DelegationModal.svelte';
@@ -306,8 +307,6 @@
 		switch (status) {
 			case 'pending':
 				return '⏳ 保留中';
-			case 'accepted':
-				return '✅ 承認済み';
 			case 'rejected':
 				return '❌ 拒否';
 			case 'redelegated':
@@ -323,7 +322,6 @@
 		switch (status) {
 			case 'pending':
 				return 'status-pending';
-			case 'accepted':
 			case 'voted':
 				return 'status-accepted';
 			case 'rejected':
@@ -612,6 +610,10 @@
 	}
 
 	onMount(() => {
+		const tabParam = new URLSearchParams(window.location.search).get('tab');
+		if (tabParam === 'delegations' || tabParam === 'answers' || tabParam === 'snapshots') {
+			switchTab(tabParam);
+		}
 		setTimeout(() => {
 			mounted = true;
 		}, 100);
@@ -1133,7 +1135,13 @@
 												onclick={() => retractDelegation(outgoing.id)}
 												disabled={isLoading}
 											>
-												↩️ {isMiddleman ? '転送を取り消す' : outgoing.status === 'voted' ? '委任を取り消す' : outgoing.status === 'rejected' ? '拒否された委任を削除する' : '取り消して自分で投票する'}
+												↩️ {isMiddleman
+													? '転送を取り消す'
+													: outgoing.status === 'voted'
+														? '委任を取り消す'
+														: outgoing.status === 'rejected'
+															? '拒否された委任を削除する'
+															: '取り消して自分で投票する'}
 											</button>
 										</div>
 									{/if}

@@ -9,6 +9,13 @@ import {
 	checkFriendship,
 	detectDelegationCycle
 } from '$lib/server/delegation-helpers';
+import {
+	notifyDelegationReceived,
+	notifyDelegationRejected,
+	notifyDelegationRedelegated,
+	notifyDelegationVoted,
+	notifyDelegationRetracted
+} from '$lib/server/notifications';
 
 /**
  * GET /api/delegations?action=incoming|outgoing|for-bill&billId=N
@@ -217,6 +224,16 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const body = await request.json();
 	const { action } = body;
 	const userId = locals.user.id;
+	const currentUsername = locals.user.username;
+
+	// Helper to look up bill title
+	async function getBillTitle(billId: number): Promise<string | null> {
+		const [b] = await db
+			.select({ title: table.bill.title })
+			.from(table.bill)
+			.where(eq(table.bill.id, billId));
+		return b?.title ?? null;
+	}
 
 	// ── Create a delegation ──
 	if (action === 'delegate') {
@@ -254,8 +271,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			);
 
 		if (existing) {
-			if (existing.status === 'pending' || existing.status === 'accepted' || existing.status === 'redelegated') {
-				return json({ error: 'この法案には既にアクティブな委任があります。先に取り消してから再委任してください。' }, { status: 400 });
+			if (existing.status === 'pending' || existing.status === 'redelegated') {
+				return json(
+					{
+						error:
+							'この法案には既にアクティブな委任があります。先に取り消してから再委任してください。'
+					},
+					{ status: 400 }
+				);
 			}
 			// If rejected or voted — allow re-delegation by updating
 			await db
@@ -286,15 +309,21 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					and(eq(table.userBillAnswer.userId, userId), eq(table.userBillAnswer.billId, billId))
 				);
 
+			const billTitle = await getBillTitle(billId);
+			await notifyDelegationReceived(delegateId, currentUsername, existing.id, billId, billTitle);
+
 			return json({ success: true, message: '委任を送信しました' });
 		}
 
-		await db.insert(table.voteDelegation).values({
-			delegatorId: userId,
-			delegateId,
-			billId,
-			status: 'pending'
-		});
+		const [inserted] = await db
+			.insert(table.voteDelegation)
+			.values({
+				delegatorId: userId,
+				delegateId,
+				billId,
+				status: 'pending'
+			})
+			.returning({ id: table.voteDelegation.id });
 
 		// Auto-forward all pending incoming delegations for this bill
 		await db
@@ -312,6 +341,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		await db
 			.delete(table.userBillAnswer)
 			.where(and(eq(table.userBillAnswer.userId, userId), eq(table.userBillAnswer.billId, billId)));
+
+		const billTitle = await getBillTitle(billId);
+		await notifyDelegationReceived(delegateId, currentUsername, inserted.id, billId, billTitle);
 
 		return json({ success: true, message: '委任を送信しました' });
 	}
@@ -398,6 +430,19 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				.update(table.voteDelegation)
 				.set({ status: 'voted', updatedAt: new Date() })
 				.where(eq(table.voteDelegation.id, d.id));
+		}
+
+		// Notify all delegators
+		const billTitle = await getBillTitle(delegation.billId);
+		for (const d of allPending) {
+			await notifyDelegationVoted(
+				d.delegatorId,
+				currentUsername,
+				d.id,
+				delegation.billId,
+				billTitle,
+				score
+			);
 		}
 
 		return json({
@@ -505,6 +550,50 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				)
 			);
 
+		// Notify the new delegate about the incoming delegation
+		const billTitle = await getBillTitle(delegation.billId);
+		const outDelegationId =
+			existingOutgoing?.id ??
+			(await db
+				.select({ id: table.voteDelegation.id })
+				.from(table.voteDelegation)
+				.where(
+					and(
+						eq(table.voteDelegation.delegatorId, userId),
+						eq(table.voteDelegation.billId, delegation.billId)
+					)
+				)
+				.then((r) => r[0]?.id));
+		if (outDelegationId) {
+			await notifyDelegationReceived(
+				newDelegateId,
+				currentUsername,
+				outDelegationId,
+				delegation.billId,
+				billTitle
+			);
+		}
+		// Notify original delegators that their delegation was redelegated
+		const redelegatedUpstream = await db
+			.select()
+			.from(table.voteDelegation)
+			.where(
+				and(
+					eq(table.voteDelegation.delegateId, userId),
+					eq(table.voteDelegation.billId, delegation.billId),
+					eq(table.voteDelegation.status, 'redelegated')
+				)
+			);
+		for (const d of redelegatedUpstream) {
+			await notifyDelegationRedelegated(
+				d.delegatorId,
+				currentUsername,
+				d.id,
+				delegation.billId,
+				billTitle
+			);
+		}
+
 		return json({ success: true, message: '委任を転送しました' });
 	}
 
@@ -531,6 +620,18 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			return json({ error: '委任が見つかりません' }, { status: 404 });
 		}
 
+		// Find all pending delegations for this bill before rejecting (for notifications)
+		const allPendingForBill = await db
+			.select()
+			.from(table.voteDelegation)
+			.where(
+				and(
+					eq(table.voteDelegation.delegateId, userId),
+					eq(table.voteDelegation.billId, delegation.billId),
+					eq(table.voteDelegation.status, 'pending')
+				)
+			);
+
 		// Reject ALL pending incoming delegations for the same bill
 		await db
 			.update(table.voteDelegation)
@@ -542,6 +643,18 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					eq(table.voteDelegation.status, 'pending')
 				)
 			);
+
+		// Notify all delegators
+		const billTitle = await getBillTitle(delegation.billId);
+		for (const d of allPendingForBill) {
+			await notifyDelegationRejected(
+				d.delegatorId,
+				currentUsername,
+				d.id,
+				delegation.billId,
+				billTitle
+			);
+		}
 
 		return json({ success: true, message: '委任を拒否しました' });
 	}
@@ -578,6 +691,16 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					eq(table.voteDelegation.status, 'redelegated')
 				)
 			);
+
+		// Notify the delegate that the delegation was retracted
+		const billTitle = await getBillTitle(delegation.billId);
+		await notifyDelegationRetracted(
+			delegation.delegateId,
+			currentUsername,
+			delegationId,
+			delegation.billId,
+			billTitle
+		);
 
 		return json({ success: true, message: '委任を取り消しました' });
 	}

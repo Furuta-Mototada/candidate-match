@@ -139,7 +139,6 @@ export async function detectDelegationCycle(
 					eq(table.voteDelegation.billId, billId),
 					or(
 						eq(table.voteDelegation.status, 'pending'),
-						eq(table.voteDelegation.status, 'accepted'),
 						eq(table.voteDelegation.status, 'redelegated')
 					)
 				)

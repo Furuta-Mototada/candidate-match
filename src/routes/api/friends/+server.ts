@@ -3,6 +3,11 @@ import { eq, or, and, ilike, ne, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import type { RequestHandler } from './$types.js';
+import {
+	notifyFriendRequestReceived,
+	notifyFriendRequestAccepted,
+	notifyFriendRequestRejected
+} from '$lib/server/notifications';
 
 // GET /api/friends?action=list|search|requests
 export const GET: RequestHandler = async ({ url, locals }) => {
@@ -194,6 +199,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						.update(table.friendRequest)
 						.set({ status: 'accepted', updatedAt: new Date() })
 						.where(eq(table.friendRequest.id, existing.id));
+					await notifyFriendRequestAccepted(receiverId, locals.user!.username, existing.id);
 					return json({ success: true, message: 'フレンドになりました！' });
 				}
 				return json({ error: 'リクエスト送信済みです' }, { status: 400 });
@@ -204,15 +210,21 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					.update(table.friendRequest)
 					.set({ senderId: userId, receiverId, status: 'pending', updatedAt: new Date() })
 					.where(eq(table.friendRequest.id, existing.id));
+				await notifyFriendRequestReceived(receiverId, locals.user!.username, existing.id);
 				return json({ success: true, message: 'リクエストを送信しました' });
 			}
 		}
 
-		await db.insert(table.friendRequest).values({
-			senderId: userId,
-			receiverId,
-			status: 'pending'
-		});
+		const [inserted] = await db
+			.insert(table.friendRequest)
+			.values({
+				senderId: userId,
+				receiverId,
+				status: 'pending'
+			})
+			.returning({ id: table.friendRequest.id });
+
+		await notifyFriendRequestReceived(receiverId, locals.user!.username, inserted.id);
 
 		return json({ success: true, message: 'リクエストを送信しました' });
 	}
@@ -243,6 +255,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			.update(table.friendRequest)
 			.set({ status: response, updatedAt: new Date() })
 			.where(eq(table.friendRequest.id, requestId));
+
+		if (response === 'accepted') {
+			await notifyFriendRequestAccepted(req.senderId, locals.user!.username, requestId);
+		} else {
+			await notifyFriendRequestRejected(req.senderId, locals.user!.username, requestId);
+		}
 
 		return json({
 			success: true,
