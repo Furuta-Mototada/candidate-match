@@ -9,7 +9,8 @@ import {
 	unique,
 	primaryKey,
 	pgEnum,
-	real
+	real,
+	index
 } from 'drizzle-orm/pg-core';
 
 // Enums
@@ -625,7 +626,11 @@ export const friendRequest = pgTable(
 		createdAt: timestamp('created_at').notNull().defaultNow(),
 		updatedAt: timestamp('updated_at').notNull().defaultNow()
 	},
-	(table) => [unique().on(table.senderId, table.receiverId)]
+	(table) => [
+		unique().on(table.senderId, table.receiverId),
+		index('idx_friend_request_receiver_status').on(table.receiverId, table.status),
+		index('idx_friend_request_sender_status').on(table.senderId, table.status)
+	]
 );
 
 export type FriendRequest = typeof friendRequest.$inferSelect;

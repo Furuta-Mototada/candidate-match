@@ -1,16 +1,12 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import type { PageData } from './$types.js';
 
-	let stats = $state({
-		totalBills: 0,
-		totalMembers: 0,
-		totalVotes: 0,
-		sessionsAnalyzed: 0
-	});
+	let { data: pageData }: { data: PageData } = $props();
 
-	let isLoading = $state(true);
+	let stats = $state(pageData.stats);
+
 	let mounted = $state(false);
-	let statsLoaded = $state(false);
 
 	// Animated counter effect
 	function animateValue(
@@ -38,30 +34,19 @@
 		totalVotes: 0
 	});
 
-	onMount(async () => {
+	onMount(() => {
 		// Trigger mount animations
 		setTimeout(() => {
 			mounted = true;
 		}, 100);
 
-		try {
-			const response = await fetch('/api/stats');
-			if (response.ok) {
-				const data = await response.json();
-				stats = data;
-				statsLoaded = true;
-
-				// Animate the counters
-				setTimeout(() => {
-					animateValue(0, data.totalBills, 1500, (val) => (displayStats.totalBills = val));
-					animateValue(0, data.totalMembers, 1500, (val) => (displayStats.totalMembers = val));
-					animateValue(0, data.totalVotes, 2000, (val) => (displayStats.totalVotes = val));
-				}, 300);
-			}
-		} catch (err) {
-			console.error('Error loading stats:', err);
-		} finally {
-			isLoading = false;
+		// Data already loaded from server — animate counters
+		if (stats.totalBills || stats.totalMembers || stats.totalVotes) {
+			setTimeout(() => {
+				animateValue(0, stats.totalBills, 1500, (val) => (displayStats.totalBills = val));
+				animateValue(0, stats.totalMembers, 1500, (val) => (displayStats.totalMembers = val));
+				animateValue(0, stats.totalVotes, 2000, (val) => (displayStats.totalVotes = val));
+			}, 300);
 		}
 	});
 </script>
@@ -95,29 +80,17 @@
 			<p class="trust-label">分析データ</p>
 			<div class="trust-stats">
 				<div class="trust-item">
-					{#if isLoading}
-						<span class="trust-number loading-shimmer">000</span>
-					{:else}
-						<span class="trust-number count-up">{displayStats.totalBills.toLocaleString()}</span>
-					{/if}
+					<span class="trust-number count-up">{displayStats.totalBills.toLocaleString()}</span>
 					<span class="trust-text">法案</span>
 				</div>
 				<div class="trust-divider"></div>
 				<div class="trust-item">
-					{#if isLoading}
-						<span class="trust-number loading-shimmer">000</span>
-					{:else}
-						<span class="trust-number count-up">{displayStats.totalMembers.toLocaleString()}</span>
-					{/if}
+					<span class="trust-number count-up">{displayStats.totalMembers.toLocaleString()}</span>
 					<span class="trust-text">議員</span>
 				</div>
 				<div class="trust-divider"></div>
 				<div class="trust-item">
-					{#if isLoading}
-						<span class="trust-number loading-shimmer">00,000</span>
-					{:else}
-						<span class="trust-number count-up">{displayStats.totalVotes.toLocaleString()}</span>
-					{/if}
+					<span class="trust-number count-up">{displayStats.totalVotes.toLocaleString()}</span>
 					<span class="trust-text">投票記録</span>
 				</div>
 			</div>
@@ -543,15 +516,6 @@
 		color: #1a1a2e;
 		min-width: 60px;
 		text-align: right;
-	}
-
-	.trust-number.loading-shimmer {
-		background: linear-gradient(90deg, #e5e7eb 25%, #f3f4f6 50%, #e5e7eb 75%);
-		background-size: 200% 100%;
-		animation: shimmer 1.5s infinite;
-		-webkit-background-clip: text;
-		-webkit-text-fill-color: transparent;
-		background-clip: text;
 	}
 
 	.trust-number.count-up {

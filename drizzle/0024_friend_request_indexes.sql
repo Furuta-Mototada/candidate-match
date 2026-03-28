@@ -1,0 +1,2 @@
+CREATE INDEX "idx_friend_request_receiver_status" ON "friend_request" USING btree ("receiver_id","status");--> statement-breakpoint
+CREATE INDEX "idx_friend_request_sender_status" ON "friend_request" USING btree ("sender_id","status");

@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { eq, or, and, ilike, ne } from 'drizzle-orm';
+import { eq, or, and, ilike, ne, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import type { RequestHandler } from './$types.js';
@@ -19,120 +19,111 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 			return json({ users: [] });
 		}
 
-		// Search users by username, excluding self
-		const users = await db
+		// Single query with LEFT JOIN to get users + friend status
+		const results = await db
 			.select({
 				id: table.user.id,
-				username: table.user.username
+				username: table.user.username,
+				requestId: table.friendRequest.id,
+				senderId: table.friendRequest.senderId,
+				requestStatus: table.friendRequest.status
 			})
 			.from(table.user)
+			.leftJoin(
+				table.friendRequest,
+				or(
+					and(
+						eq(table.friendRequest.senderId, sql`${userId}`),
+						eq(table.friendRequest.receiverId, table.user.id)
+					),
+					and(
+						eq(table.friendRequest.senderId, table.user.id),
+						eq(table.friendRequest.receiverId, sql`${userId}`)
+					)
+				)
+			)
 			.where(and(ilike(table.user.username, `%${query}%`), ne(table.user.id, userId)))
 			.limit(20);
 
-		// For each found user, check if there's already a friend request
-		const usersWithStatus = await Promise.all(
-			users.map(async (u: { id: string; username: string }) => {
-				const [existing] = await db
-					.select({
-						id: table.friendRequest.id,
-						senderId: table.friendRequest.senderId,
-						receiverId: table.friendRequest.receiverId,
-						status: table.friendRequest.status
-					})
-					.from(table.friendRequest)
-					.where(
-						or(
-							and(
-								eq(table.friendRequest.senderId, userId),
-								eq(table.friendRequest.receiverId, u.id)
-							),
-							and(
-								eq(table.friendRequest.senderId, u.id),
-								eq(table.friendRequest.receiverId, userId)
-							)
-						)
-					)
-					.limit(1);
-
-				let friendStatus: 'none' | 'pending_sent' | 'pending_received' | 'accepted' | 'rejected' =
-					'none';
-				if (existing) {
-					if (existing.status === 'accepted') {
-						friendStatus = 'accepted';
-					} else if (existing.status === 'pending') {
-						friendStatus = existing.senderId === userId ? 'pending_sent' : 'pending_received';
-					} else if (existing.status === 'rejected') {
-						friendStatus = 'rejected';
-					}
+		const usersWithStatus = results.map((row: (typeof results)[number]) => {
+			let friendStatus: 'none' | 'pending_sent' | 'pending_received' | 'accepted' | 'rejected' =
+				'none';
+			if (row.requestStatus) {
+				if (row.requestStatus === 'accepted') {
+					friendStatus = 'accepted';
+				} else if (row.requestStatus === 'pending') {
+					friendStatus = row.senderId === userId ? 'pending_sent' : 'pending_received';
+				} else if (row.requestStatus === 'rejected') {
+					friendStatus = 'rejected';
 				}
-
-				return { ...u, friendStatus };
-			})
-		);
+			}
+			return { id: row.id, username: row.username, friendStatus };
+		});
 
 		return json({ users: usersWithStatus });
 	}
 
 	if (action === 'requests') {
-		// Get pending requests received by this user
-		const incoming = await db
-			.select({
-				id: table.friendRequest.id,
-				senderId: table.friendRequest.senderId,
-				senderUsername: table.user.username,
-				createdAt: table.friendRequest.createdAt
-			})
-			.from(table.friendRequest)
-			.innerJoin(table.user, eq(table.friendRequest.senderId, table.user.id))
-			.where(
-				and(eq(table.friendRequest.receiverId, userId), eq(table.friendRequest.status, 'pending'))
-			)
-			.orderBy(table.friendRequest.createdAt);
-
-		// Get pending requests sent by this user
-		const outgoing = await db
-			.select({
-				id: table.friendRequest.id,
-				receiverId: table.friendRequest.receiverId,
-				receiverUsername: table.user.username,
-				createdAt: table.friendRequest.createdAt
-			})
-			.from(table.friendRequest)
-			.innerJoin(table.user, eq(table.friendRequest.receiverId, table.user.id))
-			.where(
-				and(eq(table.friendRequest.senderId, userId), eq(table.friendRequest.status, 'pending'))
-			)
-			.orderBy(table.friendRequest.createdAt);
+		// Run both queries in parallel
+		const [incoming, outgoing] = await Promise.all([
+			db
+				.select({
+					id: table.friendRequest.id,
+					senderId: table.friendRequest.senderId,
+					senderUsername: table.user.username,
+					createdAt: table.friendRequest.createdAt
+				})
+				.from(table.friendRequest)
+				.innerJoin(table.user, eq(table.friendRequest.senderId, table.user.id))
+				.where(
+					and(eq(table.friendRequest.receiverId, userId), eq(table.friendRequest.status, 'pending'))
+				)
+				.orderBy(table.friendRequest.createdAt),
+			db
+				.select({
+					id: table.friendRequest.id,
+					receiverId: table.friendRequest.receiverId,
+					receiverUsername: table.user.username,
+					createdAt: table.friendRequest.createdAt
+				})
+				.from(table.friendRequest)
+				.innerJoin(table.user, eq(table.friendRequest.receiverId, table.user.id))
+				.where(
+					and(eq(table.friendRequest.senderId, userId), eq(table.friendRequest.status, 'pending'))
+				)
+				.orderBy(table.friendRequest.createdAt)
+		]);
 
 		return json({ incoming, outgoing });
 	}
 
-	// Default: list accepted friends
-	const sentFriends = await db
-		.select({
-			requestId: table.friendRequest.id,
-			friendId: table.friendRequest.receiverId,
-			friendUsername: table.user.username,
-			since: table.friendRequest.updatedAt
-		})
-		.from(table.friendRequest)
-		.innerJoin(table.user, eq(table.friendRequest.receiverId, table.user.id))
-		.where(
-			and(eq(table.friendRequest.senderId, userId), eq(table.friendRequest.status, 'accepted'))
-		);
-
-	const receivedFriends = await db
-		.select({
-			requestId: table.friendRequest.id,
-			friendId: table.friendRequest.senderId,
-			friendUsername: table.user.username,
-			since: table.friendRequest.updatedAt
-		})
-		.from(table.friendRequest)
-		.innerJoin(table.user, eq(table.friendRequest.senderId, table.user.id))
-		.where(
-			and(eq(table.friendRequest.receiverId, userId), eq(table.friendRequest.status, 'accepted'))
-		);
+	// Default: list accepted friends — run both directions in parallel
+	const [sentFriends, receivedFriends] = await Promise.all([
+		db
+			.select({
+				requestId: table.friendRequest.id,
+				friendId: table.friendRequest.receiverId,
+				friendUsername: table.user.username,
+				since: table.friendRequest.updatedAt
+			})
+			.from(table.friendRequest)
+			.innerJoin(table.user, eq(table.friendRequest.receiverId, table.user.id))
+			.where(
+				and(eq(table.friendRequest.senderId, userId), eq(table.friendRequest.status, 'accepted'))
+			),
+		db
+			.select({
+				requestId: table.friendRequest.id,
+				friendId: table.friendRequest.senderId,
+				friendUsername: table.user.username,
+				since: table.friendRequest.updatedAt
+			})
+			.from(table.friendRequest)
+			.innerJoin(table.user, eq(table.friendRequest.senderId, table.user.id))
+			.where(
+				and(eq(table.friendRequest.receiverId, userId), eq(table.friendRequest.status, 'accepted'))
+			)
+	]);
 
 	const friends = [...sentFriends, ...receivedFriends].sort((a, b) =>
 		a.friendUsername.localeCompare(b.friendUsername)

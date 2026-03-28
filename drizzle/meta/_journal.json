@@ -169,6 +169,13 @@
       "when": 1773316718677,
       "tag": "0023_unique_gambit",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1774688193368,
+      "tag": "0024_friend_request_indexes",
+      "breakpoints": true
     }
   ]
 }

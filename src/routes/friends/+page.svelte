@@ -1,5 +1,7 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import type { PageData } from './$types.js';
+
+	let { data }: { data: PageData } = $props();
 
 	type SearchUser = {
 		id: string;
@@ -29,9 +31,9 @@
 	};
 
 	let tab: 'friends' | 'requests' | 'search' = $state('friends');
-	let friends: Friend[] = $state([]);
-	let incoming: IncomingRequest[] = $state([]);
-	let outgoing: OutgoingRequest[] = $state([]);
+	let friends: Friend[] = $state(data.friends);
+	let incoming: IncomingRequest[] = $state(data.incoming);
+	let outgoing: OutgoingRequest[] = $state(data.outgoing);
 	let searchQuery = $state('');
 	let searchResults: SearchUser[] = $state([]);
 	let loading = $state(false);
@@ -180,11 +182,6 @@
 			searchResults = [];
 		}
 	}
-
-	onMount(() => {
-		loadFriends();
-		loadRequests();
-	});
 
 	let pendingCount = $derived(incoming.length);
 </script>
