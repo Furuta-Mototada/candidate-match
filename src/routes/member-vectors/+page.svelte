@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { PageData } from './$types.js';
-	import { PageHero, ClusterCard, LoadingSpinner, EmptyState } from '$lib/components/index.js';
+	import { SvelteMap } from 'svelte/reactivity';
+	import { PageHero } from '$lib/components/index.js';
 	import {
 		TrendingUp,
 		BookOpen,
@@ -19,7 +20,7 @@
 		name: string;
 		algorithm: string;
 		parameters: string;
-		createdAt: string;
+		createdAt: string | Date;
 	}
 
 	interface ClusterLabel {
@@ -105,7 +106,7 @@
 
 	// Group saved vectors by name + clusterId
 	let groupedSavedVectors = $derived.by(() => {
-		const groups = new Map<string, GroupedSavedVector>();
+		const groups = new SvelteMap<string, GroupedSavedVector>();
 		for (const sv of savedVectors) {
 			const key = `${sv.name}|${sv.clusterId}`;
 			if (!groups.has(key)) {
@@ -469,7 +470,7 @@
 		}
 	}
 
-	function handleCanvasClick(event: MouseEvent) {
+	function handleCanvasClick() {
 		if (hoveredMember) {
 			// Select for visualization panel (not modal)
 			vizSelectedMember = hoveredMember;
@@ -504,10 +505,10 @@
 	$effect(() => {
 		if (canvasElement && members.length > 0) {
 			// Access reactive dependencies
-			xDimension;
-			yDimension;
-			vizSelectedMember;
-			vizSimilarMembers;
+			void xDimension;
+			void yDimension;
+			void vizSelectedMember;
+			void vizSimilarMembers;
 			drawVisualization();
 		}
 	});
@@ -948,7 +949,7 @@
 					onchange={() => selectedClusterId && loadClusterLabels(selectedClusterId)}
 				>
 					<option value={null}>-- 選択してください --</option>
-					{#each availableClusters as cluster}
+					{#each availableClusters as cluster (cluster.id)}
 						<option value={cluster.id}>{cluster.name}</option>
 					{/each}
 				</select>
@@ -988,7 +989,7 @@
 					</a>
 				</div>
 				<div class="preview-tags">
-					{#each clusterLabels as { label, billCount, name }}
+					{#each clusterLabels as { label, billCount, name } (label)}
 						<span class="preview-tag">
 							{name || 'クラスター ' + label}
 							<span class="tag-count">({billCount}法案)</span>
@@ -1059,7 +1060,7 @@
 
 			{#if Object.keys(calculationResult).length > 1}
 				<div class="result-cluster-switcher">
-					{#each Object.keys(calculationResult).sort((a, b) => parseInt(a) - parseInt(b)) as label}
+					{#each Object.keys(calculationResult).sort((a, b) => parseInt(a) - parseInt(b)) as label (label)}
 						<button
 							class="switcher-btn"
 							class:active={selectedClusterLabel === parseInt(label)}
@@ -1103,7 +1104,7 @@
 						<span class="legend-item"><span class="legend-dot pending"></span> 審議中</span>
 					</div>
 				</div>
-				{#each currentClusterData.representativeBills as bills, dimIndex}
+				{#each currentClusterData.representativeBills as bills, dimIndex (dimIndex)}
 					<div class="dimension-section">
 						<h4>
 							次元 {dimIndex + 1}
@@ -1112,7 +1113,7 @@
 							</span>
 						</h4>
 						<div class="bills-list">
-							{#each bills as bill}
+							{#each bills as bill (bill.billId)}
 								<div
 									class="bill-item"
 									class:passed={bill.result === '可決'}
@@ -1143,7 +1144,7 @@
 						<div class="dim-selector">
 							<label for="xDim">X軸:</label>
 							<select id="xDim" bind:value={xDimension} class="dim-select">
-								{#each availableDimensions as dim}
+								{#each availableDimensions as dim (dim)}
 									<option value={dim}>次元 {dim + 1}</option>
 								{/each}
 							</select>
@@ -1151,7 +1152,7 @@
 						<div class="dim-selector">
 							<label for="yDim">Y軸:</label>
 							<select id="yDim" bind:value={yDimension} class="dim-select">
-								{#each availableDimensions as dim}
+								{#each availableDimensions as dim (dim)}
 									<option value={dim}>次元 {dim + 1}</option>
 								{/each}
 							</select>
@@ -1202,7 +1203,7 @@
 								<div class="viz-panel-section">
 									<h5>潜在ベクトル</h5>
 									<div class="viz-latent-list">
-										{#each vizSelectedMember.latentVector as val, i}
+										{#each vizSelectedMember.latentVector as val, i (i)}
 											<div class="viz-latent-row">
 												<span class="viz-latent-label">次元 {i + 1}</span>
 												<span
@@ -1221,7 +1222,7 @@
 									<div class="viz-panel-section">
 										<h5>類似議員 Top 10</h5>
 										<div class="viz-similar-list">
-											{#each vizSimilarMembers as { member, similarity }}
+											{#each vizSimilarMembers as { member, similarity } (member.memberId)}
 												<button
 													class="viz-similar-item"
 													onclick={() => {
@@ -1292,7 +1293,7 @@
 						<button class="member-card" onclick={() => selectMember(member)}>
 							<h4>{member.memberName}</h4>
 							<div class="latent-values">
-								{#each member.latentVector as val, i}
+								{#each member.latentVector as val, i (i)}
 									<div class="latent-item">
 										<span class="latent-label">D{i + 1}</span>
 										<span class="latent-value" class:positive={val > 0} class:negative={val < 0}>
@@ -1309,9 +1310,15 @@
 	{/if}
 
 	{#if selectedMember}
-		<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions a11y_interactive_supports_focus -->
-		<div class="modal-overlay" role="dialog" tabindex="-1" onclick={closeModal}>
-			<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions a11y_no_static_element_interactions -->
+		<div
+			class="modal-overlay"
+			role="dialog"
+			tabindex="-1"
+			onclick={closeModal}
+			onkeydown={(e) => {
+				if (e.key === 'Escape') closeModal();
+			}}
+		>
 			<div class="modal" role="none" onclick={(e) => e.stopPropagation()}>
 				<div class="modal-header">
 					<h2>{selectedMember.memberName}</h2>
@@ -1322,7 +1329,7 @@
 					<section class="section">
 						<h3>潜在ベクトル</h3>
 						<div class="latent-detail">
-							{#each selectedMember.latentVector as val, i}
+							{#each selectedMember.latentVector as val, i (i)}
 								<div class="latent-detail-item">
 									<div class="latent-header">
 										<span class="latent-dim-label">{getDimensionLabel(i)}</span>
@@ -1346,7 +1353,7 @@
 							<div class="similar-members">
 								<h4>類似度上位20名</h4>
 								<div class="similar-list">
-									{#each similarMembers as { member, similarity }}
+									{#each similarMembers as { member, similarity } (member.memberId)}
 										<button
 											class="similar-item"
 											onclick={() => selectComparison(member)}
@@ -1369,7 +1376,7 @@
 								<div class="comparison-header">{selectedMember.memberName}</div>
 								<div class="comparison-header">{comparisonMember.memberName}</div>
 
-								{#each selectedMember.latentVector as val, i}
+								{#each selectedMember.latentVector as val, i (i)}
 									<div class="comparison-label">D{i + 1}</div>
 									<div class="comparison-value" class:positive={val > 0} class:negative={val < 0}>
 										{formatLatent(val)}

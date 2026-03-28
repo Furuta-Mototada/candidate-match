@@ -7,7 +7,7 @@
 		group?: string | null;
 		score: number;
 		// Optional extra data for custom rendering if needed
-		[key: string]: any;
+		[key: string]: unknown;
 	}
 
 	interface Props {
@@ -34,13 +34,6 @@
 
 	function formatSimilarity(sim: number): string {
 		return (sim * 100).toFixed(1) + '%';
-	}
-
-	function getSimilarityColor(sim: number): string {
-		if (sim >= 0.8) return 'high';
-		if (sim >= 0.6) return 'medium';
-		if (sim >= 0.4) return 'low'; // Adjusted to match QuestioningPhase logic (was < 0.5 is low)
-		return 'low';
 	}
 
 	// Helper to match the logic in QuestioningPhase/ClusterReviewPhase

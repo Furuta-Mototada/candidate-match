@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import type { PageData } from './$types.js';
-	import { PageHero, LoadingSpinner, EmptyState } from '$lib/components/index.js';
+	import { PageHero, LoadingSpinner } from '$lib/components/index.js';
 	import { Target, ChartColumn, FileText, Vote, Search, X, Mailbox, Wrench } from '@lucide/svelte';
 
 	interface MemberLegislationScore {
@@ -25,6 +25,7 @@
 	}
 
 	let { data }: { data: PageData } = $props();
+	void data;
 
 	let legislationScores: LegislationScore[] = $state([]);
 	let loadingScores: boolean = $state(true);
@@ -163,12 +164,17 @@
 		}
 	}
 
-	let chartInstance: any = null;
+	let chartInstance: { destroy: () => void } | null = null;
 	let chartCanvas: HTMLCanvasElement | undefined = $state(undefined);
 
 	// Create histogram when selected bill changes
 	$effect(() => {
-		if (selectedBill && chartCanvas && typeof window !== 'undefined' && (window as any).Chart) {
+		if (
+			selectedBill &&
+			chartCanvas &&
+			typeof window !== 'undefined' &&
+			(window as unknown as Record<string, unknown>).Chart
+		) {
 			// Destroy existing chart
 			if (chartInstance) {
 				chartInstance.destroy();
@@ -208,7 +214,11 @@
 			});
 
 			// Create chart
-			chartInstance = new (window as any).Chart(ctx, {
+			const ChartCtor = (window as unknown as Record<string, unknown>).Chart as new (
+				ctx: CanvasRenderingContext2D,
+				config: unknown
+			) => { destroy: () => void };
+			chartInstance = new ChartCtor(ctx, {
 				type: 'bar',
 				data: {
 					labels: bins.map((b) => b.label),
@@ -265,7 +275,7 @@
 						},
 						tooltip: {
 							callbacks: {
-								label: function (context: any) {
+								label: function (context: { parsed: { y: number } }) {
 									return `議員数: ${context.parsed.y}名`;
 								}
 							}
@@ -493,7 +503,7 @@
 						</tr>
 					</thead>
 					<tbody>
-						{#each sortedBills as bill}
+						{#each sortedBills as bill (bill.billId)}
 							<tr class="bill-row" onclick={() => selectBill(bill)}>
 								<td class="col-type">
 									<span class="bill-type-badge">{bill.billType}{bill.billNumber}</span>
@@ -616,7 +626,7 @@
 							</tr>
 						</thead>
 						<tbody>
-							{#each filteredMemberScores as member, index}
+							{#each filteredMemberScores as member, index (member.memberId)}
 								<tr>
 									<td>{index + 1}</td>
 									<td>{member.memberName}</td>
@@ -627,7 +637,7 @@
 										<details>
 											<summary>詳細を見る</summary>
 											<ul class="breakdown">
-												{#each member.breakdown as item}
+												{#each member.breakdown as item, idx (idx)}
 													<li>{item}</li>
 												{/each}
 											</ul>

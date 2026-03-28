@@ -4,10 +4,6 @@
 		ThumbsUp,
 		ThumbsDown,
 		ClipboardList,
-		CircleQuestionMark,
-		MessageSquare,
-		Check,
-		Hourglass,
 		BookOpen,
 		Book,
 		BookMarked,
@@ -32,8 +28,9 @@
 		onLoadEnrichment: () => void;
 	}
 
-	let { billId, title, description, passed, enrichmentData, isLoading, onLoadEnrichment }: Props =
+	let { title, description, passed, enrichmentData, isLoading, onLoadEnrichment, ...restProps }: Props =
 		$props();
+	void restProps;
 
 	// Detail level: 1 = basic, 2 = expanded, 3 = full
 	let detailLevel = $state(1);

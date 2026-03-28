@@ -67,7 +67,7 @@ def generate_enrichment(
         truncated_pdf = pdf_text[:MAX_PDF_CHARS]
         if len(pdf_text) > MAX_PDF_CHARS:
             context += (
-                f"法案本文 (抜粋、全{len(pdf_text):,}文字中):\n{truncated_pdf}\n\n"
+                f"法案本文 (抜粋、全{len(pdf_text):,}" f"文字中):\n{truncated_pdf}\n\n"
             )
         else:
             context += f"法案本文:\n{truncated_pdf}\n\n"
@@ -102,7 +102,8 @@ def generate_enrichment(
 
         context += "\n"
 
-    prompt = f"""あなたは日本の法律を一般市民にわかりやすく説明する専門家です。以下の法案情報を分析し、指定されたJSON形式で情報を生成してください。
+    prompt = f"""あなたは日本の法律を一般市民にわかりやすく説明する専門家です。\
+以下の法案情報を分析し、指定されたJSON形式で情報を生成してください。
 
 {context}
 
@@ -150,7 +151,10 @@ def generate_enrichment(
 
 
 def get_bills_to_enrich(
-    conn, limit: Optional[int], force_regenerate: bool, bill_id: Optional[int] = None
+    conn,
+    limit: Optional[int],
+    force_regenerate: bool,
+    bill_id: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """Get bills that need enrichment."""
     cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -163,10 +167,15 @@ def get_bills_to_enrich(
             b.title,
             bem.text_content as pdf_text,
             be.status,
-            (SELECT COUNT(*) FROM bill_debates db WHERE db.bill_id = b.id) as debate_count
+            (SELECT COUNT(*)
+             FROM bill_debates db
+             WHERE db.bill_id = b.id
+            ) as debate_count
         FROM bill b
-        LEFT JOIN bill_embeddings bem ON b.id = bem.bill_id
-        LEFT JOIN bill_enrichment be ON b.id = be.bill_id
+        LEFT JOIN bill_embeddings bem
+            ON b.id = bem.bill_id
+        LEFT JOIN bill_enrichment be
+            ON b.id = be.bill_id
         WHERE b.id = %s
         """
         cursor.execute(query, (bill_id,))
@@ -191,13 +200,19 @@ def get_bills_to_enrich(
         b.title,
         bem.text_content as pdf_text,
         be.status,
-        (SELECT COUNT(*) FROM bill_debates db WHERE db.bill_id = b.id) as debate_count
+        (SELECT COUNT(*)
+         FROM bill_debates db
+         WHERE db.bill_id = b.id) as debate_count
     FROM bill b
-    LEFT JOIN bill_embeddings bem ON b.id = bem.bill_id
-    LEFT JOIN bill_enrichment be ON b.id = be.bill_id
+    LEFT JOIN bill_embeddings bem
+        ON b.id = bem.bill_id
+    LEFT JOIN bill_enrichment be
+        ON b.id = be.bill_id
     WHERE {where_clause}
     ORDER BY
-        (SELECT COUNT(*) FROM bill_debates db WHERE db.bill_id = b.id) DESC,
+        (SELECT COUNT(*)
+         FROM bill_debates db
+         WHERE db.bill_id = b.id) DESC,
         bem.text_content IS NOT NULL DESC,
         b.submission_session DESC
     {limit_clause}
@@ -210,8 +225,12 @@ def get_bills_to_enrich(
     return bills
 
 
-def get_debate_summary_for_bill(conn, bill_id: int) -> Optional[Dict[str, Any]]:
-    """Get debate summary for a specific bill from bill_debate_summary table."""
+def get_debate_summary_for_bill(
+    conn,
+    bill_id: int,
+) -> Optional[Dict[str, Any]]:
+    """Get debate summary for a specific bill
+    from bill_debate_summary table."""
     cursor = conn.cursor(cursor_factory=RealDictCursor)
 
     query = """
@@ -222,7 +241,8 @@ def get_debate_summary_for_bill(conn, bill_id: int) -> Optional[Dict[str, Any]]:
         government_explanations,
         debate_count
     FROM bill_debate_summary
-    WHERE bill_id = %s AND status = 'completed'
+    WHERE bill_id = %s
+        AND status = 'completed'
     """
 
     cursor.execute(query, (bill_id,))
@@ -234,11 +254,15 @@ def get_debate_summary_for_bill(conn, bill_id: int) -> Optional[Dict[str, Any]]:
 
     # Parse JSON fields
     try:
+        pro_args = json.loads(result["pro_arguments_summary"] or "[]")
+        con_args = json.loads(result["con_arguments_summary"] or "[]")
+        key_q = json.loads(result["key_questions"] or "[]")
+        gov_exp = json.loads(result["government_explanations"] or "[]")
         return {
-            "pro_arguments": json.loads(result["pro_arguments_summary"] or "[]"),
-            "con_arguments": json.loads(result["con_arguments_summary"] or "[]"),
-            "key_questions": json.loads(result["key_questions"] or "[]"),
-            "gov_explanations": json.loads(result["government_explanations"] or "[]"),
+            "pro_arguments": pro_args,
+            "con_arguments": con_args,
+            "key_questions": key_q,
+            "gov_explanations": gov_exp,
             "debate_count": result["debate_count"],
         }
     except json.JSONDecodeError:
@@ -258,9 +282,12 @@ def upsert_enrichment(
     if result:
         query = """
         INSERT INTO bill_enrichment (
-            bill_id, summary_short, summary_detailed, key_points,
-            impact_tags, pros_and_cons, example_scenario,
-            status, llm_model, source_text_hash, error_message,
+            bill_id, summary_short,
+            summary_detailed, key_points,
+            impact_tags, pros_and_cons,
+            example_scenario,
+            status, llm_model,
+            source_text_hash, error_message,
             created_at, updated_at
         ) VALUES (
             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW()
@@ -284,9 +311,18 @@ def upsert_enrichment(
                 bill_id,
                 result.get("summaryShort"),
                 result.get("summaryDetailed"),
-                json.dumps(result.get("keyPoints", []), ensure_ascii=False),
-                json.dumps(result.get("impactTags", []), ensure_ascii=False),
-                json.dumps(result.get("prosAndCons", {}), ensure_ascii=False),
+                json.dumps(
+                    result.get("keyPoints", []),
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    result.get("impactTags", []),
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    result.get("prosAndCons", {}),
+                    ensure_ascii=False,
+                ),
                 result.get("exampleScenario"),
                 status,
                 LLM_MODEL,
@@ -296,7 +332,9 @@ def upsert_enrichment(
         )
     else:
         query = """
-        INSERT INTO bill_enrichment (bill_id, status, error_message, created_at, updated_at)
+        INSERT INTO bill_enrichment
+            (bill_id, status, error_message,
+             created_at, updated_at)
         VALUES (%s, %s, %s, NOW(), NOW())
         ON CONFLICT (bill_id) DO UPDATE SET
             status = EXCLUDED.status,
@@ -314,25 +352,29 @@ def main():
     import time
 
     parser = argparse.ArgumentParser(
-        description="Enrich bills with LLM-generated content"
+        description=("Enrich bills with LLM-generated content")
     )
     parser.add_argument(
         "--limit",
         type=int,
         default=None,
-        help="Number of bills to process (default: all)",
+        help="Number of bills to process" " (default: all)",
     )
-    parser.add_argument("--bill-id", type=int, help="Process a specific bill by ID")
+    parser.add_argument(
+        "--bill-id",
+        type=int,
+        help="Process a specific bill by ID",
+    )
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Force regeneration of existing enrichments",
+        help="Force regeneration of" " existing enrichments",
     )
     parser.add_argument(
         "--concurrency",
         type=int,
         default=3,
-        help="Number of parallel workers (default: 3)",
+        help="Number of parallel workers" " (default: 3)",
     )
     args = parser.parse_args()
 
@@ -362,7 +404,12 @@ def main():
     print("")
 
     # Get bills to process
-    bills = get_bills_to_enrich(conn, args.limit, args.force, bill_id=args.bill_id)
+    bills = get_bills_to_enrich(
+        conn,
+        args.limit,
+        args.force,
+        bill_id=args.bill_id,
+    )
     print(f"Found {len(bills)} bills to process")
     print("")
 
@@ -395,9 +442,13 @@ def main():
             if debate_summary:
                 pro_count = len(debate_summary.get("pro_arguments", []))
                 con_count = len(debate_summary.get("con_arguments", []))
-                print(f"{prefix}   Debate summary: {pro_count} pro, {con_count} con")
+                print(
+                    f"{prefix}   Debate summary:"
+                    f" {pro_count} pro,"
+                    f" {con_count} con"
+                )
             else:
-                print(f"{prefix}   No debate summary available")
+                print(f"{prefix}   No debate" " summary available")
 
             # Generate enrichment content
             result = generate_enrichment(
@@ -453,7 +504,7 @@ def main():
 
     print("")
     print("=" * 60)
-    print(f"Completed: {results['success']} success, {results['error']} errors")
+    print("Completed:" f" {results['success']} success," f" {results['error']} errors")
     print("=" * 60)
 
     conn.close()

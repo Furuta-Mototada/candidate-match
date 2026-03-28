@@ -8,8 +8,6 @@ import sys
 import json
 import numpy as np
 import psycopg2
-from datetime import datetime
-from typing import List, Dict, Tuple
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -29,7 +27,7 @@ def reduce_embeddings_to_2d(database_url: str, cluster_id: int = None):
     # Get all embeddings with bill details
     cursor.execute(
         """
-        SELECT 
+        SELECT
             be.bill_id,
             be.embedding,
             b.type,
@@ -71,7 +69,9 @@ def reduce_embeddings_to_2d(database_url: str, cluster_id: int = None):
     embeddings_matrix = np.array(embeddings)
 
     print(
-        f"Reducing {len(bill_ids)} embeddings from {embeddings_matrix.shape[1]}D to 2D using PCA..."
+        f"Reducing {len(bill_ids)} embeddings"
+        f" from {embeddings_matrix.shape[1]}D"
+        " to 2D using PCA..."
     )
 
     # Apply PCA
@@ -79,7 +79,7 @@ def reduce_embeddings_to_2d(database_url: str, cluster_id: int = None):
     reduced = pca.fit_transform(embeddings_matrix)
 
     print(f"Explained variance: {pca.explained_variance_ratio_}")
-    print(f"Total variance explained: {sum(pca.explained_variance_ratio_):.2%}")
+    print("Total variance explained:" f" {sum(pca.explained_variance_ratio_):.2%}")
 
     # Get cluster assignments
     cluster_assignments = {}
@@ -149,7 +149,7 @@ def reduce_embeddings_to_2d(database_url: str, cluster_id: int = None):
     if db_updates:
         cursor.executemany(
             """
-            UPDATE bill_cluster_assignments 
+            UPDATE bill_cluster_assignments
             SET x = %s, y = %s
             WHERE cluster_id = %s AND bill_id = %s
             """,
@@ -157,12 +157,16 @@ def reduce_embeddings_to_2d(database_url: str, cluster_id: int = None):
         )
         conn.commit()
         print(
-            f"\n✓ Updated {len(db_updates)} bill_cluster_assignments with x, y coordinates"
+            "\n\u2713 Updated"
+            f" {len(db_updates)}"
+            " bill_cluster_assignments"
+            " with x, y coordinates"
         )
 
-    # Save to cluster-specific file if cluster_id is provided, otherwise use default
+    # Save to cluster-specific file if cluster_id is provided,
+    # otherwise use default
     if cluster_id is not None:
-        output_file = f"static/data/bill_embeddings_2d_cluster_{cluster_id}.json"
+        output_file = "static/data/" f"bill_embeddings_2d_cluster_{cluster_id}.json"
     else:
         output_file = "static/data/bill_embeddings_2d.json"
 

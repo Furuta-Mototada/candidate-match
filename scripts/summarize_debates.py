@@ -139,7 +139,10 @@ def format_speech(debate: Dict[str, Any]) -> str:
 
 
 def summarize_chunk(
-    client: openai.OpenAI, bill_title: str, chunk_texts: List[str], chunk_num: int
+    client: openai.OpenAI,
+    bill_title: str,
+    chunk_texts: List[str],
+    chunk_num: int,
 ) -> Dict[str, Any]:
     """Summarize a chunk of debates."""
     debates_context = "\n".join(chunk_texts)
@@ -179,7 +182,9 @@ def summarize_chunk(
 
 
 def merge_chunk_summaries(
-    client: openai.OpenAI, bill_title: str, chunk_summaries: List[Dict[str, Any]]
+    client: openai.OpenAI,
+    bill_title: str,
+    chunk_summaries: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     """Merge multiple chunk summaries into a final summary."""
     # Combine all points from chunks
@@ -417,7 +422,8 @@ def upsert_debate_summary(
                 json.dumps(result.get("conArguments", []), ensure_ascii=False),
                 json.dumps(result.get("keyQuestions", []), ensure_ascii=False),
                 json.dumps(
-                    result.get("governmentExplanations", []), ensure_ascii=False
+                    result.get("governmentExplanations", []),
+                    ensure_ascii=False,
                 ),
                 debate_count,
                 status,
@@ -427,7 +433,9 @@ def upsert_debate_summary(
         )
     else:
         query = """
-        INSERT INTO bill_debate_summary (bill_id, debate_count, status, error_message, created_at, updated_at)
+        INSERT INTO bill_debate_summary
+            (bill_id, debate_count, status,
+             error_message, created_at, updated_at)
         VALUES (%s, %s, %s, %s, NOW(), NOW())
         ON CONFLICT (bill_id) DO UPDATE SET
             debate_count = EXCLUDED.debate_count,
@@ -449,7 +457,11 @@ def main():
         default=None,
         help="Number of bills to process (default: all)",
     )
-    parser.add_argument("--force", action="store_true", help="Force regeneration")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force regeneration",
+    )
     parser.add_argument("--bill-id", type=int, help="Process specific bill")
     parser.add_argument(
         "--concurrency",
@@ -511,16 +523,29 @@ def main():
             print(f"{prefix}   Loaded {len(debates)} speeches")
 
             # Summarize using LLM
-            result = summarize_debates(thread_client, bill["title"], debates, prefix)
+            result = summarize_debates(
+                thread_client,
+                bill["title"],
+                debates,
+                prefix,
+            )
 
             # Save to database
             upsert_debate_summary(
-                thread_conn, bill["id"], bill["debate_count"], "completed", result
+                thread_conn,
+                bill["id"],
+                bill["debate_count"],
+                "completed",
+                result,
             )
 
             print(f"{prefix}   ✓ Summary completed")
-            print(f"{prefix}     Pro: {len(result.get('proArguments', []))} points")
-            print(f"{prefix}     Con: {len(result.get('conArguments', []))} points")
+            print(
+                f"{prefix}     Pro:" f" {len(result.get('proArguments', []))}" " points"
+            )
+            print(
+                f"{prefix}     Con:" f" {len(result.get('conArguments', []))}" " points"
+            )
 
             with lock:
                 results["success"] += 1
@@ -530,7 +555,11 @@ def main():
         except Exception as e:
             print(f"{prefix}   ✗ Error: {e}")
             upsert_debate_summary(
-                thread_conn, bill["id"], bill["debate_count"], "failed", error=str(e)
+                thread_conn,
+                bill["id"],
+                bill["debate_count"],
+                "failed",
+                error=str(e),
             )
             with lock:
                 results["error"] += 1
@@ -558,7 +587,7 @@ def main():
 
     print()
     print("=" * 60)
-    print(f"Completed: {results['success']} success, {results['error']} errors")
+    print(f"Completed: {results['success']} success," f" {results['error']} errors")
     print("=" * 60)
 
     conn.close()

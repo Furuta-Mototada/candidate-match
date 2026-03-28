@@ -477,15 +477,15 @@
 	$effect(() => {
 		if (canvasElement) {
 			// Access reactive dependencies
-			members;
-			xDimension;
-			yDimension;
-			userVector;
-			userVectorHistory;
-			highlightedMembers;
-			hoveredMember;
-			width;
-			height;
+			void members;
+			void xDimension;
+			void yDimension;
+			void userVector;
+			void userVectorHistory;
+			void highlightedMembers;
+			void hoveredMember;
+			void width;
+			void height;
 			drawVisualization();
 		}
 	});
@@ -510,12 +510,12 @@
 					{#if showDimensionSelectors && availableDimensions.length >= 2}
 						<div class="dimension-selectors">
 							<select bind:value={xDimension} class="dim-select">
-								{#each availableDimensions as dim}
+								{#each availableDimensions as dim (dim)}
 									<option value={dim}>X: 次元{dim + 1}</option>
 								{/each}
 							</select>
 							<select bind:value={yDimension} class="dim-select">
-								{#each availableDimensions as dim}
+								{#each availableDimensions as dim (dim)}
 									<option value={dim}>Y: 次元{dim + 1}</option>
 								{/each}
 							</select>

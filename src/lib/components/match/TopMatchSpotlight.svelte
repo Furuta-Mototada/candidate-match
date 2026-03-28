@@ -16,12 +16,6 @@
 		return `${(sim * 100).toFixed(1)}%`;
 	}
 
-	function getSimilarityColor(sim: number): string {
-		if (sim >= 0.7) return 'text-emerald-600 bg-emerald-50';
-		if (sim >= 0.5) return 'text-blue-600 bg-blue-50';
-		return 'text-red-600 bg-red-50';
-	}
-
 	function getBarColor(sim: number): string {
 		if (sim >= 0.7) return 'bg-emerald-500';
 		if (sim >= 0.5) return 'bg-blue-500';
@@ -65,7 +59,7 @@
 			<div class="spotlight-body">
 				<h3 class="breakdown-title">分野別マッチ度</h3>
 				<div class="cluster-breakdown">
-					{#each clusterResults as result}
+					{#each clusterResults as result (result.clusterLabel)}
 						{@const score = member.clusterScores[result.clusterLabel] || 0}
 						<div class="cluster-row">
 							<div class="cluster-info">

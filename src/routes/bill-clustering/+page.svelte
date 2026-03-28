@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { SvelteMap } from 'svelte/reactivity';
 	import type { PageData } from './$types.js';
-	import { PageHero, ClusterCard, LoadingSpinner, EmptyState } from '$lib/components/index.js';
+	import { PageHero, ClusterCard, EmptyState } from '$lib/components/index.js';
 	import { ChartColumn, RotateCcw, X, BookOpen, ThumbsUp, ThumbsDown } from '@lucide/svelte';
 
 	interface CommitteeInfo {
@@ -329,7 +329,7 @@
 
 	// Group committees by session for display
 	function groupCommitteesBySession(committees: CommitteeInfo[]): Map<number, CommitteeInfo[]> {
-		const grouped = new Map<number, CommitteeInfo[]>();
+		const grouped = new SvelteMap<number, CommitteeInfo[]>();
 		for (const c of committees) {
 			const session = c.session ?? 0;
 			if (!grouped.has(session)) {
@@ -441,7 +441,7 @@
 			</EmptyState>
 		{:else}
 			<div class="cluster-list">
-				{#each data.clusters as cluster}
+				{#each data.clusters as cluster (cluster.id)}
 					<ClusterCard
 						name={cluster.name}
 						algorithm={cluster.algorithm}
@@ -523,7 +523,7 @@
 								/>
 
 								<!-- Data points (using pre-normalized coordinates) -->
-								{#each normalizedVizData as point}
+								{#each normalizedVizData as point (point.billId)}
 									{@const color = getClusterColor(point.cluster)}
 
 									<circle
@@ -565,7 +565,7 @@
 							<!-- Legend (using pre-computed unique clusters) -->
 							<div class="legend">
 								<div class="legend-title">クラスタ:</div>
-								{#each uniqueClusters as { cluster, count }}
+								{#each uniqueClusters as { cluster, count } (cluster)}
 									{@const labelName = labelNames[cluster]?.name}
 									<div class="legend-item" title={labelNames[cluster]?.description || ''}>
 										<div
@@ -584,7 +584,7 @@
 
 				<!-- Clusters Grid -->
 				<div class="clusters-grid">
-					{#each Object.entries(billsByCluster) as [label, bills]}
+					{#each Object.entries(billsByCluster) as [label, bills] (label)}
 						{@const labelNum = Number(label)}
 						{@const labelName = labelNames[labelNum]?.name}
 						{@const labelDesc = labelNames[labelNum]?.description}
@@ -598,7 +598,7 @@
 							{/if}
 
 							<div class="bills-list">
-								{#each bills as bill}
+								{#each bills as bill (bill.billId)}
 									<button
 										class="bill-item"
 										class:selected={selectedBillId === bill.billId}
@@ -672,11 +672,11 @@
 					<div class="detail-row full-width">
 						<span class="label">委員会</span>
 						<div class="committees-grouped">
-							{#each [...groupCommitteesBySession(selectedBill.committees)] as [session, sessionCommittees]}
+							{#each [...groupCommitteesBySession(selectedBill.committees)] as [session, sessionCommittees] (session)}
 								<div class="session-group">
 									<div class="session-label">第{session}回国会</div>
 									<div class="committees">
-										{#each sessionCommittees as committee}
+										{#each sessionCommittees as committee (committee.name)}
 											<div class="committee-tag">
 												{committee.chamber} - {committee.name}
 											</div>
@@ -737,7 +737,7 @@
 								<div class="enrichment-row">
 									<span class="enrichment-label">影響タグ</span>
 									<div class="impact-tags">
-										{#each enrichmentData.impactTags as tag}
+										{#each enrichmentData.impactTags as tag (tag)}
 											<span class="impact-tag">{tag}</span>
 										{/each}
 									</div>
@@ -748,7 +748,7 @@
 								<div class="enrichment-row">
 									<span class="enrichment-label">主要ポイント</span>
 									<div class="key-points">
-										{#each enrichmentData.keyPoints as point}
+										{#each enrichmentData.keyPoints as point, idx (idx)}
 											<div class="key-point">
 												<span class="key-point-who">{point.who}</span>
 												<span class="key-point-what">{point.what}</span>
@@ -771,7 +771,7 @@
 													><ThumbsUp size={14} class="inline-icon" /> 賛成意見</span
 												>
 												<ul>
-													{#each enrichmentData.prosAndCons.pros as pro}
+													{#each enrichmentData.prosAndCons.pros as pro, idx (idx)}
 														<li>{pro}</li>
 													{/each}
 												</ul>
@@ -783,7 +783,7 @@
 													><ThumbsDown size={14} class="inline-icon" /> 反対意見</span
 												>
 												<ul>
-													{#each enrichmentData.prosAndCons.cons as con}
+													{#each enrichmentData.prosAndCons.cons as con, idx (idx)}
 														<li>{con}</li>
 													{/each}
 												</ul>

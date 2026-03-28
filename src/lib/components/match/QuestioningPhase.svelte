@@ -11,8 +11,7 @@
 		X,
 		CircleCheck,
 		Hourglass,
-		Handshake,
-		MapPin
+		Handshake
 	} from '@lucide/svelte';
 	import type {
 		Bill,
@@ -53,9 +52,7 @@
 	}
 
 	let {
-		currentClusterDisplayName,
 		answeredCount,
-		currentClusterBillCount,
 		currentQuestion,
 		isLoading,
 		isEditingAnswer = false,
@@ -74,8 +71,10 @@
 		isLoggedIn = false,
 		onFinishCluster,
 		onSelectBillToEdit,
-		onCancelEditing
+		onCancelEditing,
+		...rest
 	}: Props = $props();
+	void rest; // Consume unused props (currentClusterDisplayName, currentClusterBillCount)
 
 	// Enrichment data cache
 	let enrichmentCache = $state<Record<number, EnrichedBillData>>({});
@@ -138,10 +137,6 @@
 
 	function toggleAnsweredBills() {
 		userToggledAnsweredBills = !userToggledAnsweredBills;
-	}
-
-	function formatSimilarity(sim: number): string {
-		return `${(sim * 100).toFixed(1)}%`;
 	}
 
 	function getAnswerLabel(answer: number): string {
@@ -258,7 +253,7 @@
 			</button>
 			{#if showAnsweredBills}
 				<div class="answered-bills-list">
-					{#each currentClusterAnsweredBills as bill}
+					{#each currentClusterAnsweredBills as bill (bill.billId)}
 						<button
 							class="answered-bill-item"
 							onclick={() => onSelectBillToEdit(bill)}

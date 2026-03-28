@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { SvelteMap } from 'svelte/reactivity';
 	import { goto } from '$app/navigation';
-	import { page } from '$app/stores';
 	import type { PageData } from './$types.js';
 	import type { SnapshotListItem, AnsweredBill, BillListItem } from '$lib/types/index.js';
 	import DelegationModal from '$lib/components/match/DelegationModal.svelte';
@@ -23,8 +23,6 @@
 		Upload,
 		CircleCheck,
 		Undo2,
-		Hourglass,
-		CircleX,
 		ThumbsUp,
 		ThumbsDown,
 		CircleQuestionMark,
@@ -222,7 +220,7 @@
 
 	// Group delegations by bill for unified view
 	let delegationGroups: DelegationGroup[] = $derived.by(() => {
-		const groupMap = new Map<number, DelegationGroup>();
+		const groupMap = new SvelteMap<number, DelegationGroup>();
 
 		for (const d of incomingDelegations) {
 			if (!groupMap.has(d.billId)) {
@@ -1197,7 +1195,6 @@
 
 	<!-- Voting Modal for accepting a delegation -->
 	{#if votingDelegation}
-		<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 		<!-- svelte-ignore a11y_interactive_supports_focus -->
 		<div
 			class="vote-modal-backdrop"
@@ -1255,7 +1252,6 @@
 
 	<!-- Redelegate Modal for choosing a friend to forward delegation to -->
 	{#if redelegatingDelegation}
-		<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 		<!-- svelte-ignore a11y_interactive_supports_focus -->
 		<div
 			class="vote-modal-backdrop"

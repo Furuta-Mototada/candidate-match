@@ -1,7 +1,7 @@
 <script lang="ts">
 	import LatentSpaceVisualization from '$lib/components/match/LatentSpaceVisualization.svelte';
 	import MemberRankingList from '$lib/components/match/MemberRankingList.svelte';
-	import type { MemberMatch, ClusterResult, MemberVectorForViz } from '$lib/types/index.js';
+	import type { MemberMatch, MemberVectorForViz } from '$lib/types/index.js';
 	import { CircleCheck, Hourglass, PartyPopper } from '@lucide/svelte';
 
 	interface Props {
@@ -30,8 +30,6 @@
 		currentClusterDisplayName,
 		currentClusterMatches,
 		pendingImportance = $bindable(),
-		currentClusterIndex,
-		totalClusters,
 		isLastClusterInSession,
 		isLoading,
 		memberVectorsForViz,
@@ -41,12 +39,10 @@
 		userVector,
 		userVectorHistory,
 		onSetImportance,
-		onSaveAndContinue
+		onSaveAndContinue,
+		...restProps
 	}: Props = $props();
-
-	function formatSimilarity(sim: number) {
-		return `${(sim * 100).toFixed(1)}%`;
-	}
+	void restProps;
 
 	function getImportanceLabel(importance: number): string {
 		const labels = ['', 'あまり重要ではない', '少し重要', '普通に重要', 'かなり重要', '最も重要'];

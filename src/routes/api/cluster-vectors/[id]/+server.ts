@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import type { RequestHandler } from './$types';
+import type { RequestHandler } from './$types.js';
 import { db } from '$lib/server/db';
 import { clusterVectorResults } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';

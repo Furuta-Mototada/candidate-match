@@ -237,7 +237,7 @@
 					</div>
 				{:else}
 					<ul class="user-list">
-						{#each friends as friend}
+						{#each friends as friend (friend.friendId)}
 							<li class="user-item">
 								<div class="user-info">
 									<span class="avatar">
@@ -269,7 +269,7 @@
 					{#if incoming.length > 0}
 						<h3 class="section-heading">受信リクエスト</h3>
 						<ul class="user-list">
-							{#each incoming as req}
+							{#each incoming as req (req.id)}
 								<li class="user-item">
 									<div class="user-info">
 										<span class="avatar">
@@ -304,7 +304,7 @@
 					{#if outgoing.length > 0}
 						<h3 class="section-heading" class:mt={incoming.length > 0}>送信リクエスト</h3>
 						<ul class="user-list">
-							{#each outgoing as req}
+							{#each outgoing as req (req.id)}
 								<li class="user-item">
 									<div class="user-info">
 										<span class="avatar">
@@ -353,7 +353,7 @@
 
 				{#if searchResults.length > 0}
 					<ul class="user-list">
-						{#each searchResults as user}
+						{#each searchResults as user (user.id)}
 							<li class="user-item">
 								<div class="user-info">
 									<span class="avatar">

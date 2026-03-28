@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { eq, and, or, inArray, sql } from 'drizzle-orm';
+import { eq, and, inArray, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import type { RequestHandler } from './$types.js';
@@ -563,7 +563,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						eq(table.voteDelegation.billId, delegation.billId)
 					)
 				)
-				.then((r) => r[0]?.id));
+				.then((r: { id: number }[]) => r[0]?.id));
 		if (outDelegationId) {
 			await notifyDelegationReceived(
 				newDelegateId,

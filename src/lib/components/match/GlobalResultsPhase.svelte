@@ -1,6 +1,5 @@
 <script lang="ts">
 	import LatentSpaceVisualization from '$lib/components/match/LatentSpaceVisualization.svelte';
-	import MemberRankingList from '$lib/components/match/MemberRankingList.svelte';
 	import TopMatchSpotlight from '$lib/components/match/TopMatchSpotlight.svelte';
 	import ClusterInsightCard from '$lib/components/match/ClusterInsightCard.svelte';
 	import type { ClusterResult, BaseClusterResult, GlobalMemberScore } from '$lib/types/index.js';
@@ -291,7 +290,7 @@
 									<h4 class="subsection-title">回答した法案</h4>
 									{#if result.answeredBills && result.answeredBills.length > 0}
 										<ul class="answers-list">
-											{#each result.answeredBills as bill}
+											{#each result.answeredBills as bill (bill.billId)}
 												<li class="answer-item">
 													<span class="answer-badge {getAnswerColor(bill.answer)}">
 														{getAnswerText(bill.answer)}
@@ -345,7 +344,7 @@
 										総合 {sortField === 'score' ? (sortDirection === 'asc' ? '↑' : '↓') : ''}
 									</th>
 									<!-- Cluster Columns -->
-									{#each clusterResults as result}
+									{#each clusterResults as result (result.clusterLabel)}
 										<th
 											onclick={() => toggleSort(`cluster_${result.clusterLabel}`)}
 											class="sortable cluster-col text-right"
@@ -385,16 +384,16 @@
 											{formatSimilarity(member.globalScore)}
 										</td>
 										<!-- Cluster Scores -->
-										{#each clusterResults as result}
-											{@const score = member.clusterScores[result.clusterLabel] || 0}
-											<td class="score-cell cluster-cell {getSimilarityColor(score)}">
-												{(score * 100).toFixed(0)}%
-											</td>
-										{/each}
-									</tr>
-								{/each}
+									{#each clusterResults as result (result.clusterLabel)}
+										{@const score = member.clusterScores[result.clusterLabel] || 0}
+										<td class="score-cell cluster-cell {getSimilarityColor(score)}">
+											{(score * 100).toFixed(0)}%
+										</td>
+									{/each}
+								</tr>
+							{/each}
 
-								{#if filteredMembers.length === 0}
+							{#if filteredMembers.length === 0}
 									<tr>
 										<td colspan={4 + clusterResults.length} class="empty-state">
 											該当する議員が見つかりませんでした
@@ -440,9 +439,7 @@
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div class="modal-overlay" onclick={() => (showSaveModal = false)}>
 			<!-- svelte-ignore a11y_click_events_have_key_events -->
-			<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-			<!-- svelte-ignore a11y_interactive_supports_focus -->
-			<div class="modal-container" onclick={(e) => e.stopPropagation()} role="dialog">
+			<div class="modal-container" onclick={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
 				<button class="modal-close-btn" onclick={() => (showSaveModal = false)}>×</button>
 
 				<h2 class="modal-title">� スナップショットを保存</h2>
@@ -1134,8 +1131,7 @@
 		font-size: 0.9rem;
 	}
 
-	.form-group input,
-	.form-group textarea {
+	.form-group input {
 		width: 100%;
 		padding: 0.75rem;
 		border: 1px solid #e5e7eb;
@@ -1144,16 +1140,10 @@
 		font-family: inherit;
 	}
 
-	.form-group input:focus,
-	.form-group textarea:focus {
+	.form-group input:focus {
 		outline: none;
 		border-color: #6366f1;
 		box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
-	}
-
-	.form-group textarea {
-		resize: vertical;
-		min-height: 80px;
 	}
 
 	.modal-actions {

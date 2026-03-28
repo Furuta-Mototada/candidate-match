@@ -4,7 +4,8 @@ Calculate cluster-specific member vectors using weighted PCA/SVD.
 
 This script implements the following algorithm:
 1. For each cluster k, build a member x bill voting matrix M_k
-2. Apply importance weights to bills (passed=1.0, failed=0.6, important=1.5-2.0)
+2. Apply importance weights to bills
+   (passed=1.0, failed=0.6, important=1.5-2.0)
 3. Apply weighted PCA/SVD to get latent vectors for each cluster
 4. Output member positions in the latent space for each cluster
 """
@@ -123,7 +124,8 @@ def build_voting_matrix(
         - bill_details: List of bill detail dicts for representative bills
     """
     # Get all members who participated in any of the cluster bills
-    member_scores_map: Dict[int, Dict[int, float]] = {}  # member_id -> bill_id -> score
+    # member_id -> bill_id -> score
+    member_scores_map: Dict[int, Dict[int, float]] = {}
     member_names: Dict[int, str] = {}
 
     for leg_score in legislation_scores:
@@ -186,7 +188,10 @@ def impute_missing_values(matrix: np.ndarray) -> np.ndarray:
     for j in range(result.shape[1]):
         mask = np.isnan(result[:, j])
         if np.any(mask):
-            result[mask, j] = col_means[j] if not np.isnan(col_means[j]) else 0.0
+            fill = col_means[j]
+            if np.isnan(fill):
+                fill = 0.0
+            result[mask, j] = fill
 
     return result
 
@@ -206,7 +211,8 @@ def calculate_cluster_latent_vectors(
         - member_latent_vectors: M x n_components matrix (U * Sigma)
         - bill_loadings: n_bills x n_components matrix (V)
         - singular_values: n_components singular values
-        - explained_variance_ratio: Proportion of variance explained by each component
+        - explained_variance_ratio: Proportion of variance
+          explained by each component
     """
     if voting_matrix.size == 0:
         return np.array([]), np.array([]), np.array([]), []
@@ -308,7 +314,7 @@ def calculate_vectors_for_cluster(
     - explained_variance: Variance explained by each component
     """
     # Build voting matrix
-    voting_matrix, member_ids, bill_ids, weights, bill_details = build_voting_matrix(
+    (voting_matrix, member_ids, bill_ids, weights, bill_details) = build_voting_matrix(
         legislation_scores, cluster_bills, bill_info
     )
 
@@ -351,7 +357,7 @@ def calculate_vectors_for_cluster(
 
     return {
         "memberVectors": member_vectors,
-        "billLoadings": bill_loadings.tolist() if bill_loadings.size > 0 else [],
+        "billLoadings": (bill_loadings.tolist() if bill_loadings.size > 0 else []),
         "representativeBills": representative_bills,
         "explainedVariance": explained_variance,
         "dimensions": member_latent.shape[1] if member_latent.ndim > 1 else 0,
@@ -420,11 +426,13 @@ def main():
         results[str(label)] = result
 
         print(
-            f"    Members: {result['memberCount']}, Dimensions: {result['dimensions']}"
+            f"    Members: {result['memberCount']}, "
+            f"Dimensions: {result['dimensions']}"
         )
         if result["explainedVariance"]:
             print(
-                f"    Explained variance: {[f'{v:.2%}' for v in result['explainedVariance']]}"
+                f"    Explained variance: "
+                f"{[f'{v:.2%}' for v in result['explainedVariance']]}"
             )
 
     conn.close()

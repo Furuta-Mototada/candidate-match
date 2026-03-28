@@ -15,7 +15,6 @@ from typing import List, Dict, Optional
 import requests
 from io import BytesIO
 import psycopg2
-from psycopg2.extras import execute_values
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -31,7 +30,9 @@ except ImportError:
 try:
     from sentence_transformers import SentenceTransformer
 except ImportError:
-    print("sentence-transformers not installed. Run: pip install sentence-transformers")
+    print(
+        "sentence-transformers not installed." " Run: pip install sentence-transformers"
+    )
     sys.exit(1)
 
 
@@ -39,39 +40,49 @@ class BillEmbeddingGenerator:
     def __init__(
         self,
         database_url: str,
-        model_name: str = "paraphrase-multilingual-mpnet-base-v2",
+        model_name: str = ("paraphrase-multilingual-mpnet-base-v2"),
     ):
         """
-        Initialize the generator with database connection and embedding model.
+        Initialize the generator with database
+        connection and embedding model.
 
         Args:
             database_url: PostgreSQL connection string
-            model_name: Sentence-transformers model name (default: multilingual model for Japanese)
+            model_name: Sentence-transformers model name
+                (default: multilingual model for Japanese)
         """
         self.conn = psycopg2.connect(database_url)
         self.model_name = model_name
         print(f"Loading embedding model: {model_name}...")
         self.model = SentenceTransformer(model_name)
         print(
-            f"Model loaded successfully. Embedding dimension: {self.model.get_sentence_embedding_dimension()}"
+            "Model loaded successfully."
+            " Embedding dimension:"
+            f" {self.model.get_sentence_embedding_dimension()}"
         )
 
-    def get_bills_without_embeddings(self, limit: Optional[int] = None) -> List[Dict]:
+    def get_bills_without_embeddings(
+        self,
+        limit: Optional[int] = None,
+    ) -> List[Dict]:
         """Fetch bills that don't have embeddings yet."""
         cursor = self.conn.cursor()
 
         query = """
-        SELECT 
+        SELECT
             b.id,
             b.type,
             b.submission_session,
             b.number,
             b.title
         FROM bill b
-        LEFT JOIN bill_embeddings be ON b.id = be.bill_id
+        LEFT JOIN bill_embeddings be
+            ON b.id = be.bill_id
         WHERE be.bill_id IS NULL
             AND b.title IS NOT NULL
-        ORDER BY b.submission_session DESC, b.number
+        ORDER BY
+            b.submission_session DESC,
+            b.number
         """
 
         if limit:
@@ -85,7 +96,10 @@ class BillEmbeddingGenerator:
         return bills
 
     def scrape_pdf_url(
-        self, bill_type: str, session: int, number: int
+        self,
+        bill_type: str,
+        session: int,
+        number: int,
     ) -> Optional[str]:
         """
         Scrape the actual PDF URL from the sangiin.go.jp gian page.
@@ -95,13 +109,17 @@ class BillEmbeddingGenerator:
             from bs4 import BeautifulSoup
         except ImportError:
             print(
-                "  Warning: BeautifulSoup not installed. Install with: pip install beautifulsoup4"
+                "  Warning: BeautifulSoup not"
+                " installed. Install with:"
+                " pip install beautifulsoup4"
             )
             return None
 
         # Fetch the main gian page for this session
         gian_url = (
-            f"https://www.sangiin.go.jp/japanese/joho1/kousei/gian/{session}/gian.htm"
+            "https://www.sangiin.go.jp/japanese"
+            "/joho1/kousei/gian/"
+            f"{session}/gian.htm"
         )
 
         try:
@@ -122,7 +140,8 @@ class BillEmbeddingGenerator:
 
             # Find the h2 header for this bill type
             h2 = soup.find(
-                "h2", string=lambda text: text and type_headers[bill_type] in text
+                "h2",
+                string=lambda text: (text and type_headers[bill_type] in text),
             )
             if not h2:
                 return None
@@ -142,13 +161,21 @@ class BillEmbeddingGenerator:
                         if row_number == number:
                             # Look for the PDF link in this row (提出法律案)
                             for cell in cells:
-                                link = cell.find("a", href=lambda h: h and "pdf/t" in h)
+                                link = cell.find(
+                                    "a",
+                                    href=lambda h: (h and "pdf/t" in h),
+                                )
                                 if link:
                                     pdf_path = link.get("href")
                                     # Resolve relative URL
                                     if pdf_path.startswith("./"):
                                         pdf_path = pdf_path[2:]
-                                    full_url = f"https://www.sangiin.go.jp/japanese/joho1/kousei/gian/{session}/{pdf_path}"
+                                    full_url = (
+                                        "https://www.sangiin.go.jp"
+                                        "/japanese/joho1/kousei"
+                                        f"/gian/{session}/"
+                                        f"{pdf_path}"
+                                    )
                                     return full_url
                     except (ValueError, AttributeError):
                         continue
@@ -189,7 +216,11 @@ class BillEmbeddingGenerator:
             print(f"  Error extracting text from PDF: {e}")
             return None
 
-    def create_bill_document(self, bill: Dict, pdf_text: Optional[str]) -> str:
+    def create_bill_document(
+        self,
+        bill: Dict,
+        pdf_text: Optional[str],
+    ) -> str:
         """
         Create a document string for embedding from bill information.
         Combines: title and PDF text content.
@@ -198,7 +229,9 @@ class BillEmbeddingGenerator:
 
         # Add bill type and number as context
         parts.append(f"法案種別: {bill['type']}")
-        parts.append(f"提出回次: {bill['submission_session']} 番号: {bill['number']}")
+        parts.append(
+            f"提出回次: {bill['submission_session']}" f" 番号: {bill['number']}"
+        )
 
         # Add title
         if bill.get("title"):
@@ -257,7 +290,10 @@ class BillEmbeddingGenerator:
         try:
             cursor.execute(
                 """
-                INSERT INTO bill_embeddings (bill_id, pdf_url, text_content, embedding, embedding_model, created_at)
+                INSERT INTO bill_embeddings
+                    (bill_id, pdf_url, text_content,
+                     embedding, embedding_model,
+                     created_at)
                 VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT (bill_id) DO UPDATE
                 SET pdf_url = EXCLUDED.pdf_url,
@@ -277,7 +313,7 @@ class BillEmbeddingGenerator:
             )
 
             self.conn.commit()
-            print(f"  ✓ Embedding stored successfully")
+            print("  ✓ Embedding stored successfully")
             return True
 
         except Exception as e:
@@ -303,7 +339,7 @@ class BillEmbeddingGenerator:
             if self.generate_and_store_embedding(bill):
                 success_count += 1
 
-        print(f"\n\n=== Summary ===")
+        print("\n\n=== Summary ===")
         print(f"Total bills processed: {len(bills)}")
         print(f"Successfully generated embeddings: {success_count}")
         print(f"Failed: {len(bills) - success_count}")

@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { SvelteMap } from 'svelte/reactivity';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { goto } from '$app/navigation';
 	import type { PageData } from './$types.js';
 	import { Vote, CircleCheck, TriangleAlert } from '@lucide/svelte';
@@ -79,7 +81,7 @@
 
 	// Group saved vectors by name + clusterId
 	let groupedSavedVectors = $derived.by(() => {
-		const groups = new Map<string, GroupedSavedVector>();
+		const groups = new SvelteMap<string, GroupedSavedVector>();
 		for (const sv of savedVectors) {
 			const key = `${sv.name}|${sv.clusterId}`;
 			if (!groups.has(key)) {
@@ -713,7 +715,8 @@
 	/**
 	 * Handle delegation: after a bill is delegated, skip to the next question
 	 */
-	async function handleDelegateBill(_billId: number) {
+	async function handleDelegateBill(billId: number) {
+		void billId;
 		// After delegating, move to next question (same as skip behavior)
 		await skipQuestion();
 	}
@@ -982,7 +985,7 @@
 	 */
 	function calculateGlobalScores() {
 		// Collect all member IDs
-		const allMemberIds = new Set<number>();
+		const allMemberIds = new SvelteSet<number>();
 		for (const result of clusterResults) {
 			for (const match of result.matches) {
 				allMemberIds.add(match.memberId);

@@ -4,7 +4,8 @@
 	import NotificationDropdown from '$lib/components/NotificationDropdown.svelte';
 	import { ChevronDown, Users, Settings, LogOut } from '@lucide/svelte';
 
-	let { data, children }: { data: LayoutData; children: any } = $props();
+	import type { Snippet } from 'svelte';
+	let { data, children }: { data: LayoutData; children: Snippet } = $props();
 
 	let dropdownOpen = $state(false);
 
@@ -269,21 +270,12 @@
 		background: #f1f5f9;
 	}
 
-	.dropdown-item svg {
-		color: #94a3b8;
-		flex-shrink: 0;
-	}
-
-	.dropdown-item:hover svg {
-		color: #64748b;
-	}
-
 	.dropdown-item-danger:hover {
 		background: #fef2f2;
 		color: #ef4444;
 	}
 
-	.dropdown-item-danger:hover svg {
+	.dropdown-item-danger:hover :global(svg) {
 		color: #ef4444;
 	}
 

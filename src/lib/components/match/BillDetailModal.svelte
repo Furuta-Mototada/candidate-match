@@ -5,7 +5,6 @@
 		ThumbsDown,
 		ClipboardList,
 		CircleQuestionMark,
-		MessageSquare,
 		FileText,
 		Target,
 		User,
@@ -98,13 +97,6 @@
 	function getResultLabel(result: string | null): string {
 		if (!result) return '審議中';
 		return result;
-	}
-
-	function getAnswerEmoji(score: number | null): string {
-		if (score === 1) return '';
-		if (score === -1) return '';
-		if (score === 0) return '';
-		return '';
 	}
 
 	function getAnswerLabel(score: number | null): string {

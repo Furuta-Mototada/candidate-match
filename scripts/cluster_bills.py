@@ -30,7 +30,7 @@ except ImportError:
 try:
     import hdbscan
 except ImportError:
-    print("Note: hdbscan not installed. HDBSCAN clustering will not be available.")
+    print("Note: hdbscan not installed." " HDBSCAN clustering will not be available.")
     print("To install: pip install hdbscan")
     hdbscan = None
 
@@ -93,7 +93,10 @@ class BillClusterer:
         return bill_ids, embeddings_matrix, model_name
 
     def cluster_kmeans(
-        self, embeddings: np.ndarray, n_clusters: int = 8, random_state: int = 42
+        self,
+        embeddings: np.ndarray,
+        n_clusters: int = 8,
+        random_state: int = 42,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Perform K-Means clustering.
@@ -101,9 +104,13 @@ class BillClusterer:
         Returns:
             Tuple of (cluster_labels, distances_to_centers)
         """
-        print(f"\nPerforming K-Means clustering with {n_clusters} clusters...")
+        print(f"\nPerforming K-Means clustering" f" with {n_clusters} clusters...")
 
-        kmeans = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10)
+        kmeans = KMeans(
+            n_clusters=n_clusters,
+            random_state=random_state,
+            n_init=10,
+        )
         cluster_labels = kmeans.fit_predict(embeddings)
 
         # Calculate distances to cluster centers
@@ -118,7 +125,10 @@ class BillClusterer:
         return cluster_labels, distances
 
     def cluster_hdbscan(
-        self, embeddings: np.ndarray, min_cluster_size: int = 5, min_samples: int = 3
+        self,
+        embeddings: np.ndarray,
+        min_cluster_size: int = 5,
+        min_samples: int = 3,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Perform HDBSCAN clustering (density-based).
@@ -131,7 +141,9 @@ class BillClusterer:
             raise ImportError("hdbscan package is not installed")
 
         print(
-            f"\nPerforming HDBSCAN clustering (min_cluster_size={min_cluster_size}, min_samples={min_samples})..."
+            f"\nPerforming HDBSCAN clustering"
+            f" (min_cluster_size={min_cluster_size},"
+            f" min_samples={min_samples})..."
         )
 
         clusterer = hdbscan.HDBSCAN(
@@ -152,21 +164,30 @@ class BillClusterer:
         return cluster_labels, probabilities
 
     def reduce_dimensions_pca(
-        self, embeddings: np.ndarray, n_components: int = 2
+        self,
+        embeddings: np.ndarray,
+        n_components: int = 2,
     ) -> np.ndarray:
         """Reduce dimensionality using PCA for visualization."""
         print(f"\nReducing dimensions to {n_components}D using PCA...")
         pca = PCA(n_components=n_components)
         reduced = pca.fit_transform(embeddings)
-        print(f"Explained variance ratio: {pca.explained_variance_ratio_}")
+        print("Explained variance ratio:" f" {pca.explained_variance_ratio_}")
         return reduced
 
     def reduce_dimensions_tsne(
-        self, embeddings: np.ndarray, n_components: int = 2, perplexity: int = 30
+        self,
+        embeddings: np.ndarray,
+        n_components: int = 2,
+        perplexity: int = 30,
     ) -> np.ndarray:
         """Reduce dimensionality using t-SNE for visualization."""
-        print(f"\nReducing dimensions to {n_components}D using t-SNE...")
-        tsne = TSNE(n_components=n_components, perplexity=perplexity, random_state=42)
+        print(f"\nReducing dimensions to {n_components}D" " using t-SNE...")
+        tsne = TSNE(
+            n_components=n_components,
+            perplexity=perplexity,
+            random_state=42,
+        )
         reduced = tsne.fit_transform(embeddings)
         return reduced
 
@@ -192,7 +213,9 @@ class BillClusterer:
             # Insert clustering metadata
             cursor.execute(
                 """
-                INSERT INTO bill_clusters (name, algorithm, parameters, embedding_model, created_at)
+                INSERT INTO bill_clusters
+                    (name, algorithm, parameters,
+                     embedding_model, created_at)
                 VALUES (%s, %s, %s, %s, %s)
                 RETURNING id
             """,
@@ -215,14 +238,16 @@ class BillClusterer:
             execute_values(
                 cursor,
                 """
-                INSERT INTO bill_cluster_assignments (cluster_id, bill_id, cluster_label, distance)
+                INSERT INTO bill_cluster_assignments
+                    (cluster_id, bill_id,
+                     cluster_label, distance)
                 VALUES %s
             """,
                 assignments,
             )
 
             self.conn.commit()
-            print(f"\n✓ Clustering result stored with ID: {cluster_id}")
+            print("\n✓ Clustering result" f" stored with ID: {cluster_id}")
 
             return cluster_id
 
@@ -253,8 +278,8 @@ def main():
         print("  kmeans <name> <n_clusters>")
         print("  hdbscan <name> <min_cluster_size> [min_samples]")
         print("\nExamples:")
-        print("  python cluster_bills.py kmeans 'Policy Topics - 10 clusters' 10")
-        print("  python cluster_bills.py hdbscan 'Auto-clustered Topics' 5 3")
+        print("  python cluster_bills.py kmeans" " 'Policy Topics - 10 clusters' 10")
+        print("  python cluster_bills.py hdbscan" " 'Auto-clustered Topics' 5 3")
         sys.exit(1)
 
     algorithm = sys.argv[1].lower()
@@ -288,9 +313,11 @@ def main():
             }
 
             cluster_labels, probabilities = clusterer.cluster_hdbscan(
-                embeddings, min_cluster_size, min_samples
+                embeddings,
+                min_cluster_size,
+                min_samples,
             )
-            distances = 1.0 - probabilities  # Use inverse probability as "distance"
+            distances = 1.0 - probabilities  # Inverse probability as "distance"
 
         else:
             print(f"Error: Unknown algorithm '{algorithm}'")
@@ -308,7 +335,7 @@ def main():
             distances,
         )
 
-        print(f"\n=== Clustering Complete ===")
+        print("\n=== Clustering Complete ===")
         print(f"Cluster ID: {cluster_id}")
         print(f"Name: {name}")
         print(f"Algorithm: {algorithm}")
@@ -331,13 +358,14 @@ def main():
                 if result.stderr:
                     print(result.stderr)
             except Exception as e:
-                print(f"Warning: Failed to auto-generate cluster names: {e}")
+                print("Warning: Failed to" f" auto-generate cluster names: {e}")
                 print(
-                    "You can run manually: python scripts/name_clusters.py", cluster_id
+                    "You can run manually:" " python scripts/name_clusters.py",
+                    cluster_id,
                 )
         else:
             print("\nNote: Set OPENAI_API_KEY to auto-generate cluster names")
-            print(f"Run manually: python scripts/name_clusters.py {cluster_id}")
+            print("Run manually: python" f" scripts/name_clusters.py {cluster_id}")
 
     finally:
         clusterer.close()

@@ -30,11 +30,8 @@
 	let notifications = $state<Notification[]>([]);
 	let loading = $state(false);
 	let hasMore = $state(false);
-	let localUnread = $state(unreadCount);
-
-	$effect(() => {
-		localUnread = unreadCount;
-	});
+	let localAdjust = $state(0);
+	let localUnread = $derived(Math.max(0, unreadCount + localAdjust));
 
 	async function fetchNotifications() {
 		loading = true;
@@ -66,7 +63,7 @@
 		const notif = notifications.find((n) => n.id === id);
 		if (notif && !notif.read) {
 			notif.read = true;
-			localUnread = Math.max(0, localUnread - 1);
+			localAdjust -= 1;
 			await fetch('/api/notifications', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
@@ -77,7 +74,7 @@
 
 	async function markAllRead() {
 		notifications = notifications.map((n) => ({ ...n, read: true }));
-		localUnread = 0;
+		localAdjust = -unreadCount;
 		await fetch('/api/notifications', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },

@@ -27,7 +27,7 @@ def get_cluster_bills(conn, cluster_id: int) -> Dict[int, List[str]]:
 
     cursor.execute(
         """
-        SELECT 
+        SELECT
             bca.cluster_label,
             b.title
         FROM bill_cluster_assignments bca
@@ -64,7 +64,10 @@ def get_existing_names(conn, cluster_id: int) -> set:
     return existing
 
 
-def generate_cluster_name(client: openai.OpenAI, titles: List[str]) -> Tuple[str, str]:
+def generate_cluster_name(
+    client: openai.OpenAI,
+    titles: List[str],
+) -> Tuple[str, str]:
     """Use LLM to generate a name for a cluster based on bill titles."""
 
     # Send all titles
@@ -85,7 +88,11 @@ def generate_cluster_name(client: openai.OpenAI, titles: List[str]) -> Tuple[str
 ## 回答形式 (JSON):
 {{
     "name": "具体的で識別しやすいクラスター名（8文字以内）",
-    "description": "共通テーマの説明文。「このクラスター」や「これらの法案」で始めず、内容を直接説明してください。例: 「地方自治体の財政基盤強化と交付税制度の改正に関する法案群。○○や△△などの施策を含む。」"
+    "description": "共通テーマの説明文。\
+「このクラスター」や「これらの法案」で始めず、\
+内容を直接説明してください。\
+例: 「地方自治体の財政基盤強化と交付税制度の改正\
+に関する法案群。○○や△△などの施策を含む。」"
 }}"""
 
     response = client.chat.completions.create(
@@ -99,18 +106,25 @@ def generate_cluster_name(client: openai.OpenAI, titles: List[str]) -> Tuple[str
     return result["name"], result.get("description", "")
 
 
-def save_cluster_name(conn, cluster_id: int, label: int, name: str, description: str):
+def save_cluster_name(
+    conn,
+    cluster_id: int,
+    label: int,
+    name: str,
+    description: str,
+):
     """Save the generated cluster name to the database."""
     cursor = conn.cursor()
 
     cursor.execute(
         """
-        INSERT INTO bill_cluster_label_names 
-            (cluster_id, cluster_label, name, description, generated_at)
+        INSERT INTO bill_cluster_label_names
+            (cluster_id, cluster_label,
+             name, description, generated_at)
         VALUES (%s, %s, %s, %s, %s)
-        ON CONFLICT (cluster_id, cluster_label) 
+        ON CONFLICT (cluster_id, cluster_label)
         DO UPDATE SET name = EXCLUDED.name,
-                      description = EXCLUDED.description, 
+                      description = EXCLUDED.description,
                       generated_at = EXCLUDED.generated_at
     """,
         (cluster_id, label, name, description, datetime.now()),
@@ -156,14 +170,18 @@ def main():
         sys.exit(1)
 
     print(
-        f"Found {len(clusters)} cluster labels with {sum(len(b) for b in clusters.values())} total bills"
+        f"Found {len(clusters)} cluster labels"
+        f" with {sum(len(b) for b in clusters.values())}"
+        " total bills"
     )
 
     # Get existing names (unless force mode)
     existing = set() if force else get_existing_names(conn, cluster_id)
     if existing:
         print(
-            f"Skipping {len(existing)} clusters that already have names (use --force to regenerate)"
+            f"Skipping {len(existing)} clusters"
+            " that already have names"
+            " (use --force to regenerate)"
         )
 
     # Initialize OpenAI client
@@ -183,7 +201,7 @@ def main():
             print(f"  Description: {description}")
 
             save_cluster_name(conn, cluster_id, label, name, description)
-            print(f"  ✓ Saved to database")
+            print("  ✓ Saved to database")
 
         except Exception as e:
             print(f"  ✗ Error generating name: {e}")

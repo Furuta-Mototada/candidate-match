@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { Save, ClipboardList, Hourglass, Rocket, ChartColumn } from '@lucide/svelte';
-	import type { SavedVectorInfo, GroupedSavedVector } from '$lib/types/index.js';
+	import type { GroupedSavedVector } from '$lib/types/index.js';
 
 	interface Props {
 		groupedSavedVectors: GroupedSavedVector[];
