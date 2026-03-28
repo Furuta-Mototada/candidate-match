@@ -109,6 +109,9 @@ export const POST: RequestHandler = async ({ request, locals }): Promise<Respons
 			case 'retract-answer':
 				return await handleRetractAnswer(billId, userId);
 
+			case 'direct-vote':
+				return await handleDirectVote(billId, score, userId);
+
 			default:
 				return json({ error: 'Invalid action' }, { status: 400 });
 		}
@@ -776,6 +779,59 @@ async function handleRetractAnswer(billId: number, userId: string | null) {
 	}
 
 	return json({ success: true, message: '回答を取り消しました' });
+}
+
+/**
+ * Directly vote on a bill from outside a matching session (e.g. from answer history).
+ * Persists to user_bill_answer. Respects active delegations.
+ */
+async function handleDirectVote(billId: number, score: number, userId: string | null) {
+	if (!userId) {
+		return json({ error: 'ログインが必要です' }, { status: 401 });
+	}
+
+	if (!billId || score === undefined || score === null) {
+		return json({ error: '法案IDとスコアが必要です' }, { status: 400 });
+	}
+
+	const normalizedScore = Math.max(-1, Math.min(1, score));
+
+	// Check for active outgoing delegation — delegate decides, not the user
+	const [activeDelegation] = await db
+		.select({ id: voteDelegation.id })
+		.from(voteDelegation)
+		.where(
+			and(
+				eq(voteDelegation.delegatorId, userId),
+				eq(voteDelegation.billId, billId),
+				sql`${voteDelegation.status} != 'rejected'`
+			)
+		)
+		.limit(1);
+
+	if (activeDelegation) {
+		return json(
+			{ error: 'この法案は委任中のため、直接投票できません。先に委任を取り消してください。' },
+			{ status: 400 }
+		);
+	}
+
+	await db
+		.insert(userBillAnswer)
+		.values({
+			userId,
+			billId,
+			score: normalizedScore
+		})
+		.onConflictDoUpdate({
+			target: [userBillAnswer.userId, userBillAnswer.billId],
+			set: {
+				score: normalizedScore,
+				updatedAt: sql`now()`
+			}
+		});
+
+	return json({ success: true, score: normalizedScore });
 }
 
 /**

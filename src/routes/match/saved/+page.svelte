@@ -4,6 +4,7 @@
 	import type { PageData } from './$types.js';
 	import type { SnapshotListItem, AnsweredBill, BillListItem } from '$lib/types/index.js';
 	import DelegationModal from '$lib/components/match/DelegationModal.svelte';
+	import BillDetailModal from '$lib/components/match/BillDetailModal.svelte';
 
 	type IncomingDelegation = {
 		id: number;
@@ -191,8 +192,8 @@
 	let redelegateConfirmingFriend: { friendId: string; friendUsername: string } | null =
 		$state(null);
 
-	// Retract confirmation
-	let retractAnswerConfirmId: number | null = $state(null);
+	// Bill detail modal
+	let selectedBill: BillListItem | null = $state(null);
 
 	// Group delegations by bill for unified view
 	let delegationGroups: DelegationGroup[] = $derived.by(() => {
@@ -564,35 +565,42 @@
 		}
 	}
 
-	async function retractAnswer(billId: number) {
-		isLoading = true;
-		error = null;
+	function openDelegateFromBill(b: BillListItem) {
+		delegatingBill = { billId: b.id, title: b.title, hasExistingVote: b.answerScore !== null };
+	}
 
-		try {
-			const res = await fetch('/api/match', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ action: 'retract-answer', billId })
-			});
-
-			const data = await res.json();
-			if (!res.ok || !data.success) {
-				throw new Error(data.error || '回答の取り消しに失敗しました');
-			}
-
-			answers = answers.filter((a) => a.billId !== billId);
-			// Also update allBills to clear the answer
-			allBills = allBills.map((b) => (b.id === billId ? { ...b, answerScore: null } : b));
-			retractAnswerConfirmId = null;
-		} catch (e) {
-			error = e instanceof Error ? e.message : '不明なエラーが発生しました';
-		} finally {
-			isLoading = false;
+	async function handleModalVote(billId: number, score: number) {
+		const res = await fetch('/api/match', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ action: 'direct-vote', billId, score })
+		});
+		const data = await res.json();
+		if (!res.ok || !data.success) {
+			throw new Error(data.error || '投票に失敗しました');
+		}
+		const normalizedScore = data.score as number;
+		allBills = allBills.map((b) => (b.id === billId ? { ...b, answerScore: normalizedScore } : b));
+		if (selectedBill && selectedBill.id === billId) {
+			selectedBill = { ...selectedBill, answerScore: normalizedScore };
 		}
 	}
 
-	function openDelegateFromBill(b: BillListItem) {
-		delegatingBill = { billId: b.id, title: b.title, hasExistingVote: b.answerScore !== null };
+	async function handleModalRetract(billId: number) {
+		const res = await fetch('/api/match', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ action: 'retract-answer', billId })
+		});
+		const data = await res.json();
+		if (!res.ok || !data.success) {
+			throw new Error(data.error || '回答の取り消しに失敗しました');
+		}
+		answers = answers.filter((a) => a.billId !== billId);
+		allBills = allBills.map((b) => (b.id === billId ? { ...b, answerScore: null } : b));
+		if (selectedBill && selectedBill.id === billId) {
+			selectedBill = { ...selectedBill, answerScore: null };
+		}
 	}
 
 	// Delegate-from-bill-list modal
@@ -601,29 +609,28 @@
 
 	async function onDelegatedFromBill() {
 		if (delegatingBill) {
-			if (delegatingBill.hasExistingVote) {
+			const bill = delegatingBill;
+			if (bill.hasExistingVote) {
 				// Retract existing answer since user is delegating instead
 				try {
 					await fetch('/api/match', {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({ action: 'retract-answer', billId: delegatingBill.billId })
+						body: JSON.stringify({ action: 'retract-answer', billId: bill.billId })
 					});
 				} catch {
 					// Best-effort retract
 				}
-				answers = answers.filter((a) => a.billId !== delegatingBill!.billId);
-				allBills = allBills.map((b) =>
-					b.id === delegatingBill!.billId ? { ...b, answerScore: null } : b
-				);
+				answers = answers.filter((a) => a.billId !== bill.billId);
+				allBills = allBills.map((b) => (b.id === bill.billId ? { ...b, answerScore: null } : b));
 			}
 			// Refresh delegation status for this bill
 			try {
-				const res = await fetch(`/api/delegations?action=for-bill&billId=${delegatingBill.billId}`);
+				const res = await fetch(`/api/delegations?action=for-bill&billId=${bill.billId}`);
 				const data = await res.json();
 				if (data.success && data.delegation) {
 					allBills = allBills.map((b) =>
-						b.id === delegatingBill!.billId
+						b.id === bill.billId
 							? {
 									...b,
 									delegation: {
@@ -796,195 +803,160 @@
 					<p>法案データを読み込み中...</p>
 				</div>
 			{:else}
-			<div class="bills-section animate-in" style="--delay: 1">
-				<!-- Search bar -->
-				<div class="bills-search-bar">
-					<span class="search-icon">🔍</span>
-					<input
-						type="text"
-						class="bills-search-input"
-						placeholder="法案名で検索..."
-						bind:value={billSearchQuery}
-					/>
-					{#if billSearchQuery}
-						<button class="search-clear-btn" onclick={() => (billSearchQuery = '')}>✕</button>
-					{/if}
-				</div>
-
-				<!-- Filters -->
-				<div class="bills-filters">
-					<div class="filter-group">
-						<label class="filter-label" for="filter-status">ステータス</label>
-						<select id="filter-status" class="filter-select" bind:value={billStatusFilter}>
-							<option value="all">すべて</option>
-							<option value="answered">回答済み ({answeredCount})</option>
-							<option value="unanswered">未回答</option>
-							<option value="delegated">委任済み ({delegatedCount})</option>
-						</select>
+				<div class="bills-section animate-in" style="--delay: 1">
+					<!-- Search bar -->
+					<div class="bills-search-bar">
+						<span class="search-icon">🔍</span>
+						<input
+							type="text"
+							class="bills-search-input"
+							placeholder="法案名で検索..."
+							bind:value={billSearchQuery}
+						/>
+						{#if billSearchQuery}
+							<button class="search-clear-btn" onclick={() => (billSearchQuery = '')}>✕</button>
+						{/if}
 					</div>
 
-					{#if billStatusFilter === 'answered' || billStatusFilter === 'all'}
+					<!-- Filters -->
+					<div class="bills-filters">
 						<div class="filter-group">
-							<label class="filter-label" for="filter-answer">回答</label>
-							<select id="filter-answer" class="filter-select" bind:value={billAnswerFilter}>
+							<label class="filter-label" for="filter-status">ステータス</label>
+							<select id="filter-status" class="filter-select" bind:value={billStatusFilter}>
 								<option value="all">すべて</option>
-								<option value="agree">賛成</option>
-								<option value="disagree">反対</option>
-								<option value="skip">スキップ</option>
+								<option value="answered">回答済み ({answeredCount})</option>
+								<option value="unanswered">未回答</option>
+								<option value="delegated">委任済み ({delegatedCount})</option>
 							</select>
 						</div>
-					{/if}
 
-					<div class="filter-group">
-						<label class="filter-label" for="filter-type">種類</label>
-						<select id="filter-type" class="filter-select" bind:value={billTypeFilter}>
-							<option value="all">すべて</option>
-							{#each availableTypes as type (type)}
-								<option value={type}>{type}</option>
-							{/each}
-						</select>
-					</div>
-
-					<div class="filter-group">
-						<label class="filter-label" for="filter-session">回次</label>
-						<select id="filter-session" class="filter-select" bind:value={billSessionFilter}>
-							<option value="all">すべて</option>
-							{#each availableSessions as session (session)}
-								<option value={session.toString()}>第{session}回</option>
-							{/each}
-						</select>
-					</div>
-
-					<div class="filter-group">
-						<label class="filter-label" for="filter-result">結果</label>
-						<select id="filter-result" class="filter-select" bind:value={billResultFilter}>
-							<option value="all">すべて</option>
-							<option value="可決">可決</option>
-							<option value="否決">否決</option>
-							<option value="撤回">撤回</option>
-							<option value="未了">未了</option>
-							<option value="none">審議中</option>
-						</select>
-					</div>
-				</div>
-
-				<!-- Results summary -->
-				<p class="bills-summary">
-					{filteredBills.length} 件表示 / 全 {allBills.length} 件（回答済み {answeredCount} 件、委任
-					{delegatedCount} 件）
-				</p>
-
-				<!-- Bill list -->
-				{#if filteredBills.length === 0}
-					<div class="empty-state-inline">
-						<p>該当する法案がありません</p>
-					</div>
-				{:else}
-					<div class="bills-list">
-						{#each filteredBills as b (b.id)}
-							<div
-								class="bill-item"
-								class:bill-item-answered={b.answerScore !== null}
-								class:bill-item-delegated={b.delegation !== null && b.answerScore === null}
-							>
-								<div class="bill-item-header">
-									<span class="bill-item-id">
-										第{b.submissionSession}回 {b.type} 第{b.number}号
-									</span>
-									{#if b.result}
-										<span
-											class="bill-result-badge"
-											class:result-passed={b.result === '可決'}
-											class:result-rejected={b.result === '否決'}
-											class:result-withdrawn={b.result === '撤回'}
-											class:result-expired={b.result === '未了'}
-										>
-											{b.result}
-										</span>
-									{:else}
-										<span class="bill-result-badge result-pending">審議中</span>
-									{/if}
-								</div>
-
-								<div class="bill-item-main">
-									<span class="bill-item-title">{b.title || `法案 #${b.id}`}</span>
-								</div>
-
-								<div class="bill-item-status-row">
-									<!-- Answer status -->
-									{#if b.answerScore !== null}
-										<span class="answer-badge {getAnswerClass(b.answerScore)}">
-											{getAnswerLabel(b.answerScore)}
-										</span>
-									{:else if b.delegation}
-										<!-- Delegation status with no direct answer -->
-										<span class="delegation-badge {getDelegationStatusClass(b.delegation.status)}">
-											🤝 {b.delegation.delegateUsername}に委任 ({getDelegationStatusLabel(
-												b.delegation.status
-											)})
-										</span>
-									{:else}
-										<span class="answer-badge answer-none">未回答</span>
-									{/if}
-
-									<!-- If answered AND also delegated, show delegation info too -->
-									{#if b.answerScore !== null && b.delegation}
-										<span class="delegation-badge {getDelegationStatusClass(b.delegation.status)}">
-											🤝 {b.delegation.delegateUsername}に委任 ({getDelegationStatusLabel(
-												b.delegation.status
-											)})
-										</span>
-									{/if}
-								</div>
-
-								<!-- Actions -->
-								<div class="bill-item-actions">
-									{#if b.answerScore !== null}
-										{#if retractAnswerConfirmId === b.id}
-											<div class="delete-confirm">
-												<span>取り消しますか？</span>
-												<button
-													class="btn-confirm-delete"
-													onclick={() => retractAnswer(b.id)}
-													disabled={isLoading}
-												>
-													取り消す
-												</button>
-												<button
-													class="btn-cancel"
-													onclick={() => (retractAnswerConfirmId = null)}
-													disabled={isLoading}
-												>
-													キャンセル
-												</button>
-											</div>
-										{:else}
-											<button
-												class="btn-answer-action btn-retract-answer"
-												onclick={() => (retractAnswerConfirmId = b.id)}
-												disabled={isLoading}
-												title="回答を取り消す"
-											>
-												↩️ 取り消す
-											</button>
-										{/if}
-									{/if}
-									{#if !b.delegation}
-										<button
-											class="btn-answer-action btn-delegate-answer"
-											onclick={() => openDelegateFromBill(b)}
-											disabled={isLoading}
-											title="フレンドに委任する"
-										>
-											🤝 委任する
-										</button>
-									{/if}
-								</div>
+						{#if billStatusFilter === 'answered' || billStatusFilter === 'all'}
+							<div class="filter-group">
+								<label class="filter-label" for="filter-answer">回答</label>
+								<select id="filter-answer" class="filter-select" bind:value={billAnswerFilter}>
+									<option value="all">すべて</option>
+									<option value="agree">賛成</option>
+									<option value="disagree">反対</option>
+									<option value="skip">スキップ</option>
+								</select>
 							</div>
-						{/each}
+						{/if}
+
+						<div class="filter-group">
+							<label class="filter-label" for="filter-type">種類</label>
+							<select id="filter-type" class="filter-select" bind:value={billTypeFilter}>
+								<option value="all">すべて</option>
+								{#each availableTypes as type (type)}
+									<option value={type}>{type}</option>
+								{/each}
+							</select>
+						</div>
+
+						<div class="filter-group">
+							<label class="filter-label" for="filter-session">回次</label>
+							<select id="filter-session" class="filter-select" bind:value={billSessionFilter}>
+								<option value="all">すべて</option>
+								{#each availableSessions as session (session)}
+									<option value={session.toString()}>第{session}回</option>
+								{/each}
+							</select>
+						</div>
+
+						<div class="filter-group">
+							<label class="filter-label" for="filter-result">結果</label>
+							<select id="filter-result" class="filter-select" bind:value={billResultFilter}>
+								<option value="all">すべて</option>
+								<option value="可決">可決</option>
+								<option value="否決">否決</option>
+								<option value="撤回">撤回</option>
+								<option value="未了">未了</option>
+								<option value="none">審議中</option>
+							</select>
+						</div>
 					</div>
-				{/if}
-			</div>
+
+					<!-- Results summary -->
+					<p class="bills-summary">
+						{filteredBills.length} 件表示 / 全 {allBills.length} 件（回答済み {answeredCount} 件、委任
+						{delegatedCount} 件）
+					</p>
+
+					<!-- Bill list -->
+					{#if filteredBills.length === 0}
+						<div class="empty-state-inline">
+							<p>該当する法案がありません</p>
+						</div>
+					{:else}
+						<div class="bills-list">
+							{#each filteredBills as b (b.id)}
+								<!-- svelte-ignore a11y_click_events_have_key_events -->
+								<!-- svelte-ignore a11y_no_static_element_interactions -->
+								<div
+									class="bill-item bill-item-clickable"
+									class:bill-item-answered={b.answerScore !== null}
+									class:bill-item-delegated={b.delegation !== null && b.answerScore === null}
+									onclick={() => (selectedBill = b)}
+								>
+									<div class="bill-item-header">
+										<span class="bill-item-id">
+											第{b.submissionSession}回 {b.type} 第{b.number}号
+										</span>
+										{#if b.result}
+											<span
+												class="bill-result-badge"
+												class:result-passed={b.result === '可決'}
+												class:result-rejected={b.result === '否決'}
+												class:result-withdrawn={b.result === '撤回'}
+												class:result-expired={b.result === '未了'}
+											>
+												{b.result}
+											</span>
+										{:else}
+											<span class="bill-result-badge result-pending">審議中</span>
+										{/if}
+									</div>
+
+									<div class="bill-item-main">
+										<span class="bill-item-title">{b.title || `法案 #${b.id}`}</span>
+									</div>
+
+									<div class="bill-item-status-row">
+										<!-- Answer status -->
+										{#if b.answerScore !== null}
+											<span class="answer-badge {getAnswerClass(b.answerScore)}">
+												{getAnswerLabel(b.answerScore)}
+											</span>
+										{:else if b.delegation}
+											<!-- Delegation status with no direct answer -->
+											<span
+												class="delegation-badge {getDelegationStatusClass(b.delegation.status)}"
+											>
+												🤝 {b.delegation.delegateUsername}に委任 ({getDelegationStatusLabel(
+													b.delegation.status
+												)})
+											</span>
+										{:else}
+											<span class="answer-badge answer-none">未回答</span>
+										{/if}
+
+										<!-- If answered AND also delegated, show delegation info too -->
+										{#if b.answerScore !== null && b.delegation}
+											<span
+												class="delegation-badge {getDelegationStatusClass(b.delegation.status)}"
+											>
+												🤝 {b.delegation.delegateUsername}に委任 ({getDelegationStatusLabel(
+													b.delegation.status
+												)})
+											</span>
+										{/if}
+
+										<span class="bill-item-chevron">›</span>
+									</div>
+								</div>
+							{/each}
+						</div>
+					{/if}
+				</div>
 			{/if}
 		{/if}
 
@@ -996,234 +968,235 @@
 					<p>委任データを読み込み中...</p>
 				</div>
 			{:else}
-			<div class="delegations-container animate-in" style="--delay: 1">
-				{#if delegationGroups.length === 0}
-					<div class="empty-state">
-						<div class="empty-icon">🤝</div>
-						<h2 class="empty-title">委任はありません</h2>
-						<p class="empty-desc">マッチングで法案をフレンドに委任すると、ここに表示されます。</p>
-						<a href="/match" class="btn-primary">マッチングへ</a>
-					</div>
-				{:else}
-					<div class="delegation-list">
-						{#each delegationGroups as group (group.billId)}
-							{@const incomingList = group.incomingList}
-							{@const outgoing = group.outgoing}
-							{@const hasIncoming = incomingList.length > 0}
-							{@const isMiddleman = hasIncoming && outgoing !== null}
-							{@const hasPendingIncoming = incomingList.some((d) => d.status === 'pending')}
-							{@const primaryStatus = hasPendingIncoming
-								? 'pending'
-								: (outgoing?.status ?? incomingList[0]?.status ?? '')}
-							<div
-								class="delegation-card"
-								class:delegation-card-pending={primaryStatus === 'pending'}
-							>
-								<!-- Bill info -->
-								<div class="delegation-bill-header">
-									<span class="delegation-bill-id">
-										第{group.billSubmissionSession}回 {group.billType} 第{group.billNumber}号
-									</span>
-									<span class="delegation-bill-title">
-										{group.billTitle || `法案 #${group.billId}`}
-									</span>
-									{#if isMiddleman}
-										<span class="delegation-role role-middleman">🔄 転送</span>
-									{:else if hasIncoming}
-										<span class="delegation-role role-incoming">📥 受信</span>
-									{:else}
-										<span class="delegation-role role-outgoing">📤 送信</span>
-									{/if}
-								</div>
-
-								<!-- Chain visualization for outgoing-only -->
-								{#if !hasIncoming && outgoing}
-									<div class="delegation-chain">
-										<span class="chain-label">委任経路:</span>
-										<span class="chain-path">
-											<span class="chain-node chain-node-me">あなた</span>
-											<span class="chain-arrow">→</span>
-											<span class="chain-node">{outgoing.delegateUsername}</span>
-											{#if outgoing.chain && outgoing.chain.length > 0}
-												{#each outgoing.chain as link, i (i)}
-													<span class="chain-arrow">→</span>
-													<span class="chain-node">{link.username}</span>
-												{/each}
-											{/if}
+				<div class="delegations-container animate-in" style="--delay: 1">
+					{#if delegationGroups.length === 0}
+						<div class="empty-state">
+							<div class="empty-icon">🤝</div>
+							<h2 class="empty-title">委任はありません</h2>
+							<p class="empty-desc">マッチングで法案をフレンドに委任すると、ここに表示されます。</p>
+							<a href="/match" class="btn-primary">マッチングへ</a>
+						</div>
+					{:else}
+						<div class="delegation-list">
+							{#each delegationGroups as group (group.billId)}
+								{@const incomingList = group.incomingList}
+								{@const outgoing = group.outgoing}
+								{@const hasIncoming = incomingList.length > 0}
+								{@const isMiddleman = hasIncoming && outgoing !== null}
+								{@const hasPendingIncoming = incomingList.some((d) => d.status === 'pending')}
+								{@const primaryStatus = hasPendingIncoming
+									? 'pending'
+									: (outgoing?.status ?? incomingList[0]?.status ?? '')}
+								<div
+									class="delegation-card"
+									class:delegation-card-pending={primaryStatus === 'pending'}
+								>
+									<!-- Bill info -->
+									<div class="delegation-bill-header">
+										<span class="delegation-bill-id">
+											第{group.billSubmissionSession}回 {group.billType} 第{group.billNumber}号
 										</span>
-									</div>
-									<div class="delegation-status-row">
-										<span class="delegation-status {getDelegationStatusClass(outgoing.status)}">
-											{getDelegationStatusLabel(outgoing.status)}
+										<span class="delegation-bill-title">
+											{group.billTitle || `法案 #${group.billId}`}
 										</span>
+										{#if isMiddleman}
+											<span class="delegation-role role-middleman">🔄 転送</span>
+										{:else if hasIncoming}
+											<span class="delegation-role role-incoming">📥 受信</span>
+										{:else}
+											<span class="delegation-role role-outgoing">📤 送信</span>
+										{/if}
 									</div>
-									{#if outgoing.status === 'voted' && outgoing.myVoteScore !== null}
-										<div class="delegation-vote-result">
-											投票結果: {getVoteScoreLabel(outgoing.myVoteScore)}
-										</div>
-									{/if}
-								{/if}
 
-								<!-- Combined chain visualization for incoming -->
-								{#if hasIncoming}
-									<div class="delegation-chain-combined">
-										<span class="chain-label">委任経路:</span>
-										<div class="chain-combined-layout">
-											<!-- Source branches (incoming delegators + own vote if redelegated) -->
-											<div class="chain-sources">
-												{#if outgoing}
-													<div class="chain-source-row">
-														<span class="chain-node chain-node-me">あなたの投票</span>
+									<!-- Chain visualization for outgoing-only -->
+									{#if !hasIncoming && outgoing}
+										<div class="delegation-chain">
+											<span class="chain-label">委任経路:</span>
+											<span class="chain-path">
+												<span class="chain-node chain-node-me">あなた</span>
+												<span class="chain-arrow">→</span>
+												<span class="chain-node">{outgoing.delegateUsername}</span>
+												{#if outgoing.chain && outgoing.chain.length > 0}
+													{#each outgoing.chain as link, i (i)}
 														<span class="chain-arrow">→</span>
-													</div>
+														<span class="chain-node">{link.username}</span>
+													{/each}
 												{/if}
-												{#each incomingList as incoming (incoming.id)}
-													<div class="chain-source-row">
-														{#if incoming.upstreamChain && incoming.upstreamChain.length > 0}
-															{#each incoming.upstreamChain as link, i (i)}
-																<span class="chain-node chain-node-upstream">{link.username}</span>
+											</span>
+										</div>
+										<div class="delegation-status-row">
+											<span class="delegation-status {getDelegationStatusClass(outgoing.status)}">
+												{getDelegationStatusLabel(outgoing.status)}
+											</span>
+										</div>
+										{#if outgoing.status === 'voted' && outgoing.myVoteScore !== null}
+											<div class="delegation-vote-result">
+												投票結果: {getVoteScoreLabel(outgoing.myVoteScore)}
+											</div>
+										{/if}
+									{/if}
+
+									<!-- Combined chain visualization for incoming -->
+									{#if hasIncoming}
+										<div class="delegation-chain-combined">
+											<span class="chain-label">委任経路:</span>
+											<div class="chain-combined-layout">
+												<!-- Source branches (incoming delegators + own vote if redelegated) -->
+												<div class="chain-sources">
+													{#if outgoing}
+														<div class="chain-source-row">
+															<span class="chain-node chain-node-me">あなたの投票</span>
+															<span class="chain-arrow">→</span>
+														</div>
+													{/if}
+													{#each incomingList as incoming (incoming.id)}
+														<div class="chain-source-row">
+															{#if incoming.upstreamChain && incoming.upstreamChain.length > 0}
+																{#each incoming.upstreamChain as link, i (i)}
+																	<span class="chain-node chain-node-upstream">{link.username}</span
+																	>
+																	<span class="chain-arrow">→</span>
+																{/each}
+															{/if}
+															<span class="chain-node">{incoming.delegatorUsername}</span>
+															<span class="chain-arrow">→</span>
+														</div>
+													{/each}
+												</div>
+
+												<!-- Convergence point: あなた -->
+												<div class="chain-convergence">
+													<span class="chain-node chain-node-me">あなた</span>
+													{#if outgoing}
+														<span class="chain-arrow">→</span>
+														<span class="chain-node">{outgoing.delegateUsername}</span>
+														{#if outgoing.chain && outgoing.chain.length > 0}
+															{#each outgoing.chain as link, i (i)}
 																<span class="chain-arrow">→</span>
+																<span class="chain-node">{link.username}</span>
 															{/each}
 														{/if}
-														<span class="chain-node">{incoming.delegatorUsername}</span>
-														<span class="chain-arrow">→</span>
-													</div>
-												{/each}
-											</div>
-
-											<!-- Convergence point: あなた -->
-											<div class="chain-convergence">
-												<span class="chain-node chain-node-me">あなた</span>
-												{#if outgoing}
-													<span class="chain-arrow">→</span>
-													<span class="chain-node">{outgoing.delegateUsername}</span>
-													{#if outgoing.chain && outgoing.chain.length > 0}
-														{#each outgoing.chain as link, i (i)}
-															<span class="chain-arrow">→</span>
-															<span class="chain-node">{link.username}</span>
-														{/each}
 													{/if}
-												{/if}
+												</div>
 											</div>
 										</div>
-									</div>
 
-									<!-- Combined status row -->
-									<div class="delegation-status-row">
-										{#each incomingList as incoming (incoming.id)}
-											<span class="delegation-status {getDelegationStatusClass(incoming.status)}">
-												{incoming.delegatorUsername}: {getDelegationStatusLabel(incoming.status)}
-											</span>
-										{/each}
-										{#if outgoing}
-											<span class="delegation-status {getDelegationStatusClass(outgoing.status)}">
-												転送先: {getDelegationStatusLabel(outgoing.status)}
-											</span>
-										{/if}
-									</div>
-
-									{#if incomingList.some((d) => d.status === 'voted' && d.myExistingScore !== null)}
-										{@const votedIncoming = incomingList.find(
-											(d) => d.status === 'voted' && d.myExistingScore !== null
-										)}
-										{#if votedIncoming}
-											<div class="delegation-vote-result">
-												投票結果: {getVoteScoreLabel(votedIncoming.myExistingScore)}
-											</div>
-										{/if}
-									{/if}
-								{/if}
-
-								<!-- Bill-level incoming actions (apply to ALL incoming for this bill) -->
-								{#if hasPendingIncoming}
-									{@const firstPending = incomingList.find((d) => d.status === 'pending')}
-									{#if firstPending}
-										<div class="delegation-actions">
-											{#if firstPending.myExistingScore !== null}
-												<button
-													class="btn-vote-for"
-													onclick={() => acceptDelegation(firstPending.id)}
-													disabled={isLoading}
-												>
-													✅ 既存の投票で承認（{getVoteScoreLabel(firstPending.myExistingScore)}）
-												</button>
-											{:else}
-												<button
-													class="btn-vote-for"
-													onclick={() => (votingDelegation = firstPending)}
-													disabled={isLoading}
-												>
-													🗳️ 代理投票する
-												</button>
+										<!-- Combined status row -->
+										<div class="delegation-status-row">
+											{#each incomingList as incoming (incoming.id)}
+												<span class="delegation-status {getDelegationStatusClass(incoming.status)}">
+													{incoming.delegatorUsername}: {getDelegationStatusLabel(incoming.status)}
+												</span>
+											{/each}
+											{#if outgoing}
+												<span class="delegation-status {getDelegationStatusClass(outgoing.status)}">
+													転送先: {getDelegationStatusLabel(outgoing.status)}
+												</span>
 											{/if}
+										</div>
+
+										{#if incomingList.some((d) => d.status === 'voted' && d.myExistingScore !== null)}
+											{@const votedIncoming = incomingList.find(
+												(d) => d.status === 'voted' && d.myExistingScore !== null
+											)}
+											{#if votedIncoming}
+												<div class="delegation-vote-result">
+													投票結果: {getVoteScoreLabel(votedIncoming.myExistingScore)}
+												</div>
+											{/if}
+										{/if}
+									{/if}
+
+									<!-- Bill-level incoming actions (apply to ALL incoming for this bill) -->
+									{#if hasPendingIncoming}
+										{@const firstPending = incomingList.find((d) => d.status === 'pending')}
+										{#if firstPending}
+											<div class="delegation-actions">
+												{#if firstPending.myExistingScore !== null}
+													<button
+														class="btn-vote-for"
+														onclick={() => acceptDelegation(firstPending.id)}
+														disabled={isLoading}
+													>
+														✅ 既存の投票で承認（{getVoteScoreLabel(firstPending.myExistingScore)}）
+													</button>
+												{:else}
+													<button
+														class="btn-vote-for"
+														onclick={() => (votingDelegation = firstPending)}
+														disabled={isLoading}
+													>
+														🗳️ 代理投票する
+													</button>
+												{/if}
+												<button
+													class="btn-redelegate"
+													onclick={() => openRedelegateModal(firstPending)}
+													disabled={isLoading}
+												>
+													🔄 別のフレンドに転送
+												</button>
+												<button
+													class="btn-reject-delegation"
+													onclick={() => rejectDelegation(firstPending.id)}
+													disabled={isLoading}
+												>
+													拒否する
+												</button>
+											</div>
+										{/if}
+									{/if}
+									{#if hasIncoming && incomingList.every((d) => d.status === 'voted')}
+										<div class="delegation-actions">
 											<button
-												class="btn-redelegate"
-												onclick={() => openRedelegateModal(firstPending)}
+												class="btn-undo"
+												onclick={() => undoVoteDelegation(incomingList[0].id)}
 												disabled={isLoading}
 											>
-												🔄 別のフレンドに転送
-											</button>
-											<button
-												class="btn-reject-delegation"
-												onclick={() => rejectDelegation(firstPending.id)}
-												disabled={isLoading}
-											>
-												拒否する
+												↩️ 投票を取り消す
 											</button>
 										</div>
 									{/if}
-								{/if}
-								{#if hasIncoming && incomingList.every((d) => d.status === 'voted')}
-									<div class="delegation-actions">
-										<button
-											class="btn-undo"
-											onclick={() => undoVoteDelegation(incomingList[0].id)}
-											disabled={isLoading}
-										>
-											↩️ 投票を取り消す
-										</button>
-									</div>
-								{/if}
-								{#if hasIncoming && incomingList.every((d) => d.status === 'rejected')}
-									<div class="delegation-actions">
-										<button
-											class="btn-undo"
-											onclick={() => undoRejectDelegation(incomingList[0].id)}
-											disabled={isLoading}
-										>
-											↩️ 拒否を取り消す
-										</button>
-									</div>
-								{/if}
+									{#if hasIncoming && incomingList.every((d) => d.status === 'rejected')}
+										<div class="delegation-actions">
+											<button
+												class="btn-undo"
+												onclick={() => undoRejectDelegation(incomingList[0].id)}
+												disabled={isLoading}
+											>
+												↩️ 拒否を取り消す
+											</button>
+										</div>
+									{/if}
 
-								<!-- Outgoing actions -->
-								{#if outgoing && (outgoing.status === 'pending' || outgoing.status === 'accepted')}
-									<div class="delegation-actions">
-										<button
-											class="btn-retract"
-											onclick={() => retractDelegation(outgoing.id)}
-											disabled={isLoading}
-										>
-											↩️ {isMiddleman ? '転送を取り消す' : '取り消して自分で投票する'}
-										</button>
-									</div>
-								{/if}
-								{#if outgoing && outgoing.status === 'voted'}
-									<div class="delegation-actions">
-										<button
-											class="btn-retract"
-											onclick={() => retractDelegation(outgoing.id)}
-											disabled={isLoading}
-										>
-											↩️ 委任を取り消す
-										</button>
-									</div>
-								{/if}
-							</div>
-						{/each}
-					</div>
-				{/if}
-			</div>
+									<!-- Outgoing actions -->
+									{#if outgoing && (outgoing.status === 'pending' || outgoing.status === 'accepted')}
+										<div class="delegation-actions">
+											<button
+												class="btn-retract"
+												onclick={() => retractDelegation(outgoing.id)}
+												disabled={isLoading}
+											>
+												↩️ {isMiddleman ? '転送を取り消す' : '取り消して自分で投票する'}
+											</button>
+										</div>
+									{/if}
+									{#if outgoing && outgoing.status === 'voted'}
+										<div class="delegation-actions">
+											<button
+												class="btn-retract"
+												onclick={() => retractDelegation(outgoing.id)}
+												disabled={isLoading}
+											>
+												↩️ 委任を取り消す
+											</button>
+										</div>
+									{/if}
+								</div>
+							{/each}
+						</div>
+					{/if}
+				</div>
 			{/if}
 		{/if}
 	</main>
@@ -1369,6 +1342,32 @@
 				</div>
 			</div>
 		</div>
+	{/if}
+
+	<!-- Bill detail modal -->
+	{#if selectedBill}
+		<BillDetailModal
+			billId={selectedBill.id}
+			billTitle={selectedBill.title || `法案 #${selectedBill.id}`}
+			billType={selectedBill.type}
+			billSubmissionSession={selectedBill.submissionSession}
+			billNumber={selectedBill.number}
+			billResult={selectedBill.result}
+			answerScore={selectedBill.answerScore}
+			hasDelegation={selectedBill.delegation !== null && selectedBill.answerScore === null}
+			delegateUsername={selectedBill.delegation?.delegateUsername ?? null}
+			onClose={() => (selectedBill = null)}
+			onVote={handleModalVote}
+			onRetract={handleModalRetract}
+			onDelegate={(billId) => {
+				selectedBill = null;
+				openDelegateFromBill(allBills.find((bb) => bb.id === billId)!);
+			}}
+			onGoToDelegations={() => {
+				selectedBill = null;
+				switchTab('delegations');
+			}}
+		/>
 	{/if}
 
 	<!-- Delegate from bill list modal -->
@@ -1763,28 +1762,6 @@
 		display: flex;
 		gap: 0.5rem;
 		padding-left: 0.25rem;
-	}
-
-	.btn-answer-action {
-		padding: 0.25rem 0.6rem;
-		border: 1px solid #e5e7eb;
-		border-radius: 6px;
-		background: white;
-		font-size: 0.75rem;
-		cursor: pointer;
-		transition: all 0.2s ease;
-	}
-
-	.btn-retract-answer:hover {
-		background: #fef2f2;
-		border-color: #fca5a5;
-		color: #991b1b;
-	}
-
-	.btn-delegate-answer:hover {
-		background: #eef2ff;
-		border-color: #a5b4fc;
-		color: #4338ca;
 	}
 
 	.answer-badge {
@@ -2482,9 +2459,13 @@
 		transition: all 0.2s ease;
 	}
 
+	.bill-item-clickable {
+		cursor: pointer;
+	}
+
 	.bill-item:hover {
-		background: #fafbfc;
-		border-color: #e5e7eb;
+		background: #f3f4ff;
+		border-color: #c7d2fe;
 	}
 
 	.bill-item-answered {
@@ -2555,7 +2536,19 @@
 		flex-wrap: wrap;
 		gap: 0.4rem;
 		align-items: center;
-		margin-bottom: 0.4rem;
+	}
+
+	.bill-item-chevron {
+		margin-left: auto;
+		font-size: 1.25rem;
+		color: #9ca3af;
+		font-weight: 300;
+		transition: transform 0.15s;
+	}
+
+	.bill-item-clickable:hover .bill-item-chevron {
+		transform: translateX(2px);
+		color: #6b7280;
 	}
 
 	.answer-none {
@@ -2572,12 +2565,6 @@
 		border-radius: 100px;
 		font-size: 0.75rem;
 		font-weight: 600;
-	}
-
-	.bill-item-actions {
-		display: flex;
-		gap: 0.5rem;
-		flex-wrap: wrap;
 	}
 
 	@media (max-width: 640px) {
