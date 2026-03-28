@@ -342,6 +342,12 @@
 		return '';
 	}
 
+	/** Force-reload delegations from server to keep client state consistent */
+	async function reloadDelegations() {
+		delegationsLoaded = false;
+		await loadDelegations();
+	}
+
 	async function acceptDelegation(delegationId: number, score?: number) {
 		isLoading = true;
 		error = null;
@@ -363,17 +369,8 @@
 				throw new Error(data.error || '承認に失敗しました');
 			}
 
-			// Update local state — ALL incoming for this bill become voted
-			const targetBillId = incomingDelegations.find((d) => d.id === delegationId)?.billId;
-			const voteScore = score ?? null;
-			if (targetBillId !== undefined) {
-				incomingDelegations = incomingDelegations.map((d) =>
-					d.billId === targetBillId && d.status === 'pending'
-						? { ...d, status: 'voted', myExistingScore: voteScore ?? d.myExistingScore }
-						: d
-				);
-			}
 			votingDelegation = null;
+			await reloadDelegations();
 		} catch (e) {
 			error = e instanceof Error ? e.message : '不明なエラーが発生しました';
 		} finally {
@@ -397,13 +394,7 @@
 				throw new Error(data.error || '拒否に失敗しました');
 			}
 
-			// Update local state — ALL pending incoming for this bill become rejected
-			const targetBillId = incomingDelegations.find((d) => d.id === delegationId)?.billId;
-			if (targetBillId !== undefined) {
-				incomingDelegations = incomingDelegations.map((d) =>
-					d.billId === targetBillId && d.status === 'pending' ? { ...d, status: 'rejected' } : d
-				);
-			}
+			await reloadDelegations();
 		} catch (e) {
 			error = e instanceof Error ? e.message : '不明なエラーが発生しました';
 		} finally {
@@ -427,14 +418,8 @@
 				throw new Error(data.error || '転送に失敗しました');
 			}
 
-			// Update local state: mark ALL pending incoming for this bill as redelegated
-			const targetBillId = incomingDelegations.find((d) => d.id === delegationId)?.billId;
-			if (targetBillId !== undefined) {
-				incomingDelegations = incomingDelegations.map((d) =>
-					d.billId === targetBillId && d.status === 'pending' ? { ...d, status: 'redelegated' } : d
-				);
-			}
 			redelegatingDelegation = null;
+			await reloadDelegations();
 		} catch (e) {
 			error = e instanceof Error ? e.message : '不明なエラーが発生しました';
 		} finally {
@@ -486,16 +471,7 @@
 				throw new Error(data.error || '取り消しに失敗しました');
 			}
 
-			const outgoing = outgoingDelegations.find((d) => d.id === delegationId);
-			outgoingDelegations = outgoingDelegations.filter((d) => d.id !== delegationId);
-			// Restore any redelegated incoming delegations for this bill
-			if (outgoing) {
-				incomingDelegations = incomingDelegations.map((d) =>
-					d.billId === outgoing.billId && d.status === 'redelegated'
-						? { ...d, status: 'pending' }
-						: d
-				);
-			}
+			await reloadDelegations();
 		} catch (e) {
 			error = e instanceof Error ? e.message : '不明なエラーが発生しました';
 		} finally {
@@ -519,15 +495,7 @@
 				throw new Error(data.error || '取り消しに失敗しました');
 			}
 
-			// Update local state — ALL voted incoming for this bill revert to pending
-			const targetBillId = incomingDelegations.find((d) => d.id === delegationId)?.billId;
-			if (targetBillId !== undefined) {
-				incomingDelegations = incomingDelegations.map((d) =>
-					d.billId === targetBillId && d.status === 'voted'
-						? { ...d, status: 'pending', myExistingScore: null }
-						: d
-				);
-			}
+			await reloadDelegations();
 		} catch (e) {
 			error = e instanceof Error ? e.message : '不明なエラーが発生しました';
 		} finally {
@@ -551,13 +519,7 @@
 				throw new Error(data.error || '取り消しに失敗しました');
 			}
 
-			// Update local state — ALL rejected incoming for this bill revert to pending
-			const targetBillId = incomingDelegations.find((d) => d.id === delegationId)?.billId;
-			if (targetBillId !== undefined) {
-				incomingDelegations = incomingDelegations.map((d) =>
-					d.billId === targetBillId && d.status === 'rejected' ? { ...d, status: 'pending' } : d
-				);
-			}
+			await reloadDelegations();
 		} catch (e) {
 			error = e instanceof Error ? e.message : '不明なエラーが発生しました';
 		} finally {
@@ -1041,14 +1003,8 @@
 										<div class="delegation-chain-combined">
 											<span class="chain-label">委任経路:</span>
 											<div class="chain-combined-layout">
-												<!-- Source branches (incoming delegators + own vote if redelegated) -->
+												<!-- Source branches (incoming delegators) -->
 												<div class="chain-sources">
-													{#if outgoing}
-														<div class="chain-source-row">
-															<span class="chain-node chain-node-me">あなたの投票</span>
-															<span class="chain-arrow">→</span>
-														</div>
-													{/if}
 													{#each incomingList as incoming (incoming.id)}
 														<div class="chain-source-row">
 															{#if incoming.upstreamChain && incoming.upstreamChain.length > 0}
@@ -1169,26 +1125,15 @@
 										</div>
 									{/if}
 
-									<!-- Outgoing actions -->
-									{#if outgoing && (outgoing.status === 'pending' || outgoing.status === 'accepted')}
+									<!-- Outgoing actions (retract available for ALL statuses) -->
+									{#if outgoing}
 										<div class="delegation-actions">
 											<button
 												class="btn-retract"
 												onclick={() => retractDelegation(outgoing.id)}
 												disabled={isLoading}
 											>
-												↩️ {isMiddleman ? '転送を取り消す' : '取り消して自分で投票する'}
-											</button>
-										</div>
-									{/if}
-									{#if outgoing && outgoing.status === 'voted'}
-										<div class="delegation-actions">
-											<button
-												class="btn-retract"
-												onclick={() => retractDelegation(outgoing.id)}
-												disabled={isLoading}
-											>
-												↩️ 委任を取り消す
+												↩️ {isMiddleman ? '転送を取り消す' : outgoing.status === 'voted' ? '委任を取り消す' : outgoing.status === 'rejected' ? '拒否された委任を削除する' : '取り消して自分で投票する'}
 											</button>
 										</div>
 									{/if}

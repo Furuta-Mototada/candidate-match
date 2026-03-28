@@ -3,6 +3,12 @@ import { eq, and, or, inArray, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import type { RequestHandler } from './$types.js';
+import {
+	getDelegationChainDownstream,
+	getDelegationChainUpstream,
+	checkFriendship,
+	detectDelegationCycle
+} from '$lib/server/delegation-helpers';
 
 /**
  * GET /api/delegations?action=incoming|outgoing|for-bill&billId=N
@@ -248,8 +254,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			);
 
 		if (existing) {
-			if (existing.status === 'pending' || existing.status === 'accepted') {
-				return json({ error: 'この法案には既に委任があります' }, { status: 400 });
+			if (existing.status === 'pending' || existing.status === 'accepted' || existing.status === 'redelegated') {
+				return json({ error: 'この法案には既にアクティブな委任があります。先に取り消してから再委任してください。' }, { status: 400 });
 			}
 			// If rejected or voted — allow re-delegation by updating
 			await db
@@ -654,166 +660,3 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 	return json({ error: '無効なアクションです' }, { status: 400 });
 };
-
-// ════════════════════════════════════════════════════════════════════════════
-// Helper functions
-// ════════════════════════════════════════════════════════════════════════════
-
-/**
- * Get the downstream delegation chain: who did the delegate forward this to?
- * Returns an array of { username, status } representing the chain after the delegate.
- */
-async function getDelegationChainDownstream(
-	startUserId: string,
-	billId: number
-): Promise<{ username: string; status: string }[]> {
-	const chain: { username: string; status: string }[] = [];
-	const visited = new Set<string>();
-	let current = startUserId;
-
-	while (current && !visited.has(current)) {
-		visited.add(current);
-
-		// Did `current` redelegate or actively delegate this bill?
-		const [delegation] = await db
-			.select({
-				delegateId: table.voteDelegation.delegateId,
-				delegateUsername: table.user.username,
-				status: table.voteDelegation.status
-			})
-			.from(table.voteDelegation)
-			.innerJoin(table.user, eq(table.voteDelegation.delegateId, table.user.id))
-			.where(
-				and(eq(table.voteDelegation.delegatorId, current), eq(table.voteDelegation.billId, billId))
-			)
-			.limit(1);
-
-		if (!delegation) break;
-
-		chain.push({ username: delegation.delegateUsername, status: delegation.status });
-		if (delegation.status !== 'redelegated' && delegation.status !== 'pending') break;
-		current = delegation.delegateId;
-	}
-
-	return chain;
-}
-
-/**
- * Get the upstream delegation chain: who originally delegated this bill?
- * Returns an array of { username, status } from the original delegator down to the current one.
- */
-async function getDelegationChainUpstream(
-	startDelegatorId: string,
-	billId: number
-): Promise<{ username: string; status: string }[]> {
-	const chain: { username: string; status: string }[] = [];
-	const visited = new Set<string>();
-	let current = startDelegatorId;
-
-	while (current && !visited.has(current)) {
-		visited.add(current);
-
-		// Was someone delegating to `current` for this bill with 'redelegated' status?
-		const [upstream] = await db
-			.select({
-				delegatorId: table.voteDelegation.delegatorId,
-				delegatorUsername: table.user.username,
-				status: table.voteDelegation.status
-			})
-			.from(table.voteDelegation)
-			.innerJoin(table.user, eq(table.voteDelegation.delegatorId, table.user.id))
-			.where(
-				and(
-					eq(table.voteDelegation.delegateId, current),
-					eq(table.voteDelegation.billId, billId),
-					eq(table.voteDelegation.status, 'redelegated')
-				)
-			)
-			.limit(1);
-
-		if (!upstream) break;
-
-		chain.unshift({ username: upstream.delegatorUsername, status: upstream.status });
-		current = upstream.delegatorId;
-	}
-
-	return chain;
-}
-
-/**
- * Check if two users are friends (accepted friend request in either direction)
- */
-async function checkFriendship(userA: string, userB: string): Promise<boolean> {
-	const [friendship] = await db
-		.select({ id: table.friendRequest.id })
-		.from(table.friendRequest)
-		.where(
-			and(
-				eq(table.friendRequest.status, 'accepted'),
-				or(
-					and(eq(table.friendRequest.senderId, userA), eq(table.friendRequest.receiverId, userB)),
-					and(eq(table.friendRequest.senderId, userB), eq(table.friendRequest.receiverId, userA))
-				)
-			)
-		)
-		.limit(1);
-
-	return !!friendship;
-}
-
-/**
- * Detect if creating a delegation from delegatorId -> delegateId for billId
- * would create a cycle.
- *
- * A cycle occurs if following the chain of active delegations from delegateId
- * eventually leads back to delegatorId.
- *
- * Example: A -> B -> C -> A would be a cycle if A tries to delegate to C
- * (because C already delegates to A via the chain).
- *
- * We also check if delegateId has themselves delegated this bill to someone,
- * and follow that chain.
- */
-async function detectDelegationCycle(
-	delegatorId: string,
-	delegateId: string,
-	billId: number
-): Promise<boolean> {
-	const visited = new Set<string>();
-	visited.add(delegatorId);
-
-	let current = delegateId;
-
-	// Follow the chain: who has `current` delegated this bill to?
-	while (current) {
-		if (visited.has(current)) {
-			return true; // Cycle detected!
-		}
-		visited.add(current);
-
-		// Check if `current` has an active delegation for this bill
-		const [nextDelegation] = await db
-			.select({ delegateId: table.voteDelegation.delegateId })
-			.from(table.voteDelegation)
-			.where(
-				and(
-					eq(table.voteDelegation.delegatorId, current),
-					eq(table.voteDelegation.billId, billId),
-					or(
-						eq(table.voteDelegation.status, 'pending'),
-						eq(table.voteDelegation.status, 'accepted'),
-						eq(table.voteDelegation.status, 'redelegated')
-					)
-				)
-			)
-			.limit(1);
-
-		if (!nextDelegation) {
-			break; // End of chain, no cycle
-		}
-
-		current = nextDelegation.delegateId;
-	}
-
-	return false;
-}
