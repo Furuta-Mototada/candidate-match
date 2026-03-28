@@ -816,7 +816,8 @@
 
 				<!-- Results summary -->
 				<p class="bills-summary">
-					{filteredBills.length} 件表示 / 全 {allBills.length} 件（回答済み {answeredCount} 件、委任 {delegatedCount} 件）
+					{filteredBills.length} 件表示 / 全 {allBills.length} 件（回答済み {answeredCount} 件、委任
+					{delegatedCount} 件）
 				</p>
 
 				<!-- Bill list -->
@@ -863,11 +864,10 @@
 										</span>
 									{:else if b.delegation}
 										<!-- Delegation status with no direct answer -->
-										<span
-											class="delegation-badge {getDelegationStatusClass(b.delegation.status)}"
-										>
-											🤝 {b.delegation.delegateUsername}に委任
-											({getDelegationStatusLabel(b.delegation.status)})
+										<span class="delegation-badge {getDelegationStatusClass(b.delegation.status)}">
+											🤝 {b.delegation.delegateUsername}に委任 ({getDelegationStatusLabel(
+												b.delegation.status
+											)})
 										</span>
 									{:else}
 										<span class="answer-badge answer-none">未回答</span>
@@ -875,11 +875,10 @@
 
 									<!-- If answered AND also delegated, show delegation info too -->
 									{#if b.answerScore !== null && b.delegation}
-										<span
-											class="delegation-badge {getDelegationStatusClass(b.delegation.status)}"
-										>
-											🤝 {b.delegation.delegateUsername}に委任
-											({getDelegationStatusLabel(b.delegation.status)})
+										<span class="delegation-badge {getDelegationStatusClass(b.delegation.status)}">
+											🤝 {b.delegation.delegateUsername}に委任 ({getDelegationStatusLabel(
+												b.delegation.status
+											)})
 										</span>
 									{/if}
 								</div>
