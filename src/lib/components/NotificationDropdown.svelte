@@ -1,4 +1,17 @@
 <script lang="ts">
+	import {
+		Bell,
+		User,
+		Handshake,
+		Frown,
+		MailOpen,
+		CircleX,
+		ArrowUpRight,
+		Vote,
+		Undo2,
+		PartyPopper
+	} from '@lucide/svelte';
+
 	interface Notification {
 		id: number;
 		type: string;
@@ -89,32 +102,6 @@
 		return null;
 	}
 
-	function getNotifIcon(type: string): string {
-		switch (type) {
-			case 'friend_request_received':
-				return '👤';
-			case 'friend_request_accepted':
-				return '🤝';
-			case 'friend_request_rejected':
-				return '😞';
-			case 'delegation_received':
-				return '📩';
-
-			case 'delegation_rejected':
-				return '❌';
-			case 'delegation_redelegated':
-				return '↗️';
-			case 'delegation_voted':
-				return '🗳️';
-			case 'delegation_retracted':
-				return '↩️';
-			case 'welcome':
-				return '🎉';
-			default:
-				return '🔔';
-		}
-	}
-
 	function timeAgo(dateStr: string): string {
 		const now = Date.now();
 		const then = new Date(dateStr).getTime();
@@ -139,21 +126,33 @@
 
 <svelte:document onclick={handleClickOutside} />
 
+{#snippet notifIcon(type: string)}
+	{#if type === 'friend_request_received'}
+		<User size={16} />
+	{:else if type === 'friend_request_accepted'}
+		<Handshake size={16} />
+	{:else if type === 'friend_request_rejected'}
+		<Frown size={16} />
+	{:else if type === 'delegation_received'}
+		<MailOpen size={16} />
+	{:else if type === 'delegation_rejected'}
+		<CircleX size={16} />
+	{:else if type === 'delegation_redelegated'}
+		<ArrowUpRight size={16} />
+	{:else if type === 'delegation_voted'}
+		<Vote size={16} />
+	{:else if type === 'delegation_retracted'}
+		<Undo2 size={16} />
+	{:else if type === 'welcome'}
+		<PartyPopper size={16} />
+	{:else}
+		<Bell size={16} />
+	{/if}
+{/snippet}
+
 <div class="notif-wrapper">
 	<button class="notif-bell" onclick={toggle} aria-label="通知">
-		<svg
-			width="18"
-			height="18"
-			viewBox="0 0 24 24"
-			fill="none"
-			stroke="currentColor"
-			stroke-width="2"
-			stroke-linecap="round"
-			stroke-linejoin="round"
-		>
-			<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-			<path d="M13.73 21a2 2 0 0 1-3.46 0" />
-		</svg>
+		<Bell size={18} />
 		{#if localUnread > 0}
 			<span class="notif-badge">{localUnread > 99 ? '99+' : localUnread}</span>
 		{/if}
@@ -187,7 +186,7 @@
 									close();
 								}}
 							>
-								<span class="notif-icon">{getNotifIcon(notif.type)}</span>
+								<span class="notif-icon">{@render notifIcon(notif.type)}</span>
 								<div class="notif-content">
 									<span class="notif-message">{notif.message}</span>
 									<span class="notif-time">{timeAgo(notif.createdAt)}</span>
@@ -203,7 +202,7 @@
 								role="menuitem"
 								onclick={() => markRead(notif.id)}
 							>
-								<span class="notif-icon">{getNotifIcon(notif.type)}</span>
+								<span class="notif-icon">{@render notifIcon(notif.type)}</span>
 								<div class="notif-content">
 									<span class="notif-message">{notif.message}</span>
 									<span class="notif-time">{timeAgo(notif.createdAt)}</span>

@@ -6,6 +6,30 @@
 	import type { SnapshotListItem, AnsweredBill, BillListItem } from '$lib/types/index.js';
 	import DelegationModal from '$lib/components/match/DelegationModal.svelte';
 	import BillDetailModal from '$lib/components/match/BillDetailModal.svelte';
+	import {
+		ClipboardList,
+		Vote,
+		TriangleAlert,
+		Camera,
+		FileText,
+		Handshake,
+		Mailbox,
+		Eye,
+		Trash2,
+		Search,
+		X,
+		RefreshCw,
+		Inbox,
+		Upload,
+		CircleCheck,
+		Undo2,
+		Hourglass,
+		CircleX,
+		ThumbsUp,
+		ThumbsDown,
+		CircleQuestionMark,
+		User
+	} from '@lucide/svelte';
 
 	type IncomingDelegation = {
 		id: number;
@@ -306,13 +330,13 @@
 	function getDelegationStatusLabel(status: string): string {
 		switch (status) {
 			case 'pending':
-				return '⏳ 保留中';
+				return '保留中';
 			case 'rejected':
-				return '❌ 拒否';
+				return '拒否';
 			case 'redelegated':
-				return '🔄 転送済み';
+				return '転送済み';
 			case 'voted':
-				return '🗳️ 投票済み';
+				return '投票済み';
 			default:
 				return status;
 		}
@@ -334,9 +358,9 @@
 	}
 
 	function getVoteScoreLabel(score: number | null): string {
-		if (score === 1) return '👍 賛成';
-		if (score === -1) return '👎 反対';
-		if (score === 0) return '🤔 わからない';
+		if (score === 1) return '賛成';
+		if (score === -1) return '反対';
+		if (score === 0) return 'わからない';
 		return '';
 	}
 
@@ -629,11 +653,11 @@
 		<div class="container">
 			<div class="header-content">
 				<div>
-					<h1 class="page-title">📋 保存済みデータ</h1>
+					<h1 class="page-title"><ClipboardList size={20} class="inline-icon" /> 保存済みデータ</h1>
 					<p class="page-subtitle">スナップショットや回答履歴を確認できます</p>
 				</div>
 				<a href="/match" class="btn-primary">
-					<span>🗳️</span>
+					<span><Vote size={16} /></span>
 					マッチングへ
 				</a>
 			</div>
@@ -643,7 +667,7 @@
 	<main class="main-container">
 		{#if error}
 			<div class="error-alert animate-in">
-				<div class="error-icon">⚠️</div>
+				<div class="error-icon"><TriangleAlert size={20} color="#f59e0b" /></div>
 				<div>
 					<span class="error-title">エラー</span>
 					<p class="error-message">{error}</p>
@@ -658,21 +682,25 @@
 				class:active={activeTab === 'snapshots'}
 				onclick={() => switchTab('snapshots')}
 			>
-				📸 スナップショット ({snapshots.length})
+				<Camera size={16} class="inline-icon" /> スナップショット ({snapshots.length})
 			</button>
 			<button
 				class="tab-btn"
 				class:active={activeTab === 'answers'}
 				onclick={() => switchTab('answers')}
 			>
-				📝 回答履歴 ({allBillsLoaded ? `${answeredCount}/${allBills.length}` : '...'})
+				<FileText size={16} class="inline-icon" /> 回答履歴 ({allBillsLoaded
+					? `${answeredCount}/${allBills.length}`
+					: '...'})
 			</button>
 			<button
 				class="tab-btn"
 				class:active={activeTab === 'delegations'}
 				onclick={() => switchTab('delegations')}
 			>
-				🤝 委任 ({delegationsLoaded ? totalDelegationCount : '...'})
+				<Handshake size={16} class="inline-icon" /> 委任 ({delegationsLoaded
+					? totalDelegationCount
+					: '...'})
 				{#if pendingIncomingCount > 0}
 					<span class="tab-badge">{pendingIncomingCount}</span>
 				{/if}
@@ -683,7 +711,7 @@
 		{#if activeTab === 'snapshots'}
 			{#if snapshots.length === 0}
 				<div class="empty-state animate-in" style="--delay: 1">
-					<div class="empty-icon">📭</div>
+					<div class="empty-icon"><Mailbox size={32} /></div>
 					<h2 class="empty-title">スナップショットがありません</h2>
 					<p class="empty-desc">マッチングでスナップショットを保存すると、ここに表示されます。</p>
 					<a href="/match" class="btn-primary"> マッチングへ </a>
@@ -720,7 +748,7 @@
 									onclick={() => navigateToSnapshot(snapshot.id)}
 									disabled={isLoading}
 								>
-									<span>👁️</span>
+									<span><Eye size={16} /></span>
 									詳細を見る
 								</button>
 
@@ -748,7 +776,7 @@
 										onclick={() => (deleteConfirmId = snapshot.id)}
 										disabled={isLoading}
 									>
-										<span>🗑️</span>
+										<span><Trash2 size={16} /></span>
 										削除
 									</button>
 								{/if}
@@ -770,7 +798,7 @@
 				<div class="bills-section animate-in" style="--delay: 1">
 					<!-- Search bar -->
 					<div class="bills-search-bar">
-						<span class="search-icon">🔍</span>
+						<span class="search-icon"><Search size={16} /></span>
 						<input
 							type="text"
 							class="bills-search-input"
@@ -778,7 +806,9 @@
 							bind:value={billSearchQuery}
 						/>
 						{#if billSearchQuery}
-							<button class="search-clear-btn" onclick={() => (billSearchQuery = '')}>✕</button>
+							<button class="search-clear-btn" onclick={() => (billSearchQuery = '')}
+								><X size={14} /></button
+							>
 						{/if}
 					</div>
 
@@ -895,7 +925,8 @@
 											<span
 												class="delegation-badge {getDelegationStatusClass(b.delegation.status)}"
 											>
-												🤝 {b.delegation.delegateUsername}に委任 ({getDelegationStatusLabel(
+												<Handshake size={14} class="inline-icon" />
+												{b.delegation.delegateUsername}に委任 ({getDelegationStatusLabel(
 													b.delegation.status
 												)})
 											</span>
@@ -908,7 +939,8 @@
 											<span
 												class="delegation-badge {getDelegationStatusClass(b.delegation.status)}"
 											>
-												🤝 {b.delegation.delegateUsername}に委任 ({getDelegationStatusLabel(
+												<Handshake size={14} class="inline-icon" />
+												{b.delegation.delegateUsername}に委任 ({getDelegationStatusLabel(
 													b.delegation.status
 												)})
 											</span>
@@ -935,7 +967,7 @@
 				<div class="delegations-container animate-in" style="--delay: 1">
 					{#if delegationGroups.length === 0}
 						<div class="empty-state">
-							<div class="empty-icon">🤝</div>
+							<div class="empty-icon"><Handshake size={32} /></div>
 							<h2 class="empty-title">委任はありません</h2>
 							<p class="empty-desc">マッチングで法案をフレンドに委任すると、ここに表示されます。</p>
 							<a href="/match" class="btn-primary">マッチングへ</a>
@@ -964,11 +996,17 @@
 											{group.billTitle || `法案 #${group.billId}`}
 										</span>
 										{#if isMiddleman}
-											<span class="delegation-role role-middleman">🔄 転送</span>
+											<span class="delegation-role role-middleman"
+												><RefreshCw size={14} class="inline-icon" /> 転送</span
+											>
 										{:else if hasIncoming}
-											<span class="delegation-role role-incoming">📥 受信</span>
+											<span class="delegation-role role-incoming"
+												><Inbox size={14} class="inline-icon" /> 受信</span
+											>
 										{:else}
-											<span class="delegation-role role-outgoing">📤 送信</span>
+											<span class="delegation-role role-outgoing"
+												><Upload size={14} class="inline-icon" /> 送信</span
+											>
 										{/if}
 									</div>
 
@@ -1076,7 +1114,9 @@
 														onclick={() => acceptDelegation(firstPending.id)}
 														disabled={isLoading}
 													>
-														✅ 既存の投票で承認（{getVoteScoreLabel(firstPending.myExistingScore)}）
+														<CircleCheck size={16} class="inline-icon" color="#22c55e" /> 既存の投票で承認（{getVoteScoreLabel(
+															firstPending.myExistingScore
+														)}）
 													</button>
 												{:else}
 													<button
@@ -1084,7 +1124,7 @@
 														onclick={() => (votingDelegation = firstPending)}
 														disabled={isLoading}
 													>
-														🗳️ 代理投票する
+														<Vote size={16} class="inline-icon" /> 代理投票する
 													</button>
 												{/if}
 												<button
@@ -1092,7 +1132,7 @@
 													onclick={() => openRedelegateModal(firstPending)}
 													disabled={isLoading}
 												>
-													🔄 別のフレンドに転送
+													<RefreshCw size={16} class="inline-icon" /> 別のフレンドに転送
 												</button>
 												<button
 													class="btn-reject-delegation"
@@ -1111,7 +1151,7 @@
 												onclick={() => undoVoteDelegation(incomingList[0].id)}
 												disabled={isLoading}
 											>
-												↩️ 投票を取り消す
+												<Undo2 size={16} class="inline-icon" /> 投票を取り消す
 											</button>
 										</div>
 									{/if}
@@ -1122,7 +1162,7 @@
 												onclick={() => undoRejectDelegation(incomingList[0].id)}
 												disabled={isLoading}
 											>
-												↩️ 拒否を取り消す
+												<Undo2 size={16} class="inline-icon" /> 拒否を取り消す
 											</button>
 										</div>
 									{/if}
@@ -1135,7 +1175,8 @@
 												onclick={() => retractDelegation(outgoing.id)}
 												disabled={isLoading}
 											>
-												↩️ {isMiddleman
+												<Undo2 size={16} class="inline-icon" />
+												{isMiddleman
 													? '転送を取り消す'
 													: outgoing.status === 'voted'
 														? '委任を取り消す'
@@ -1172,8 +1213,10 @@
 		>
 			<div class="vote-modal">
 				<div class="vote-modal-header">
-					<h3>🗳️ 代理投票</h3>
-					<button class="modal-close-btn" onclick={() => (votingDelegation = null)}>✕</button>
+					<h3><Vote size={18} class="inline-icon" /> 代理投票</h3>
+					<button class="modal-close-btn" onclick={() => (votingDelegation = null)}
+						><X size={16} /></button
+					>
 				</div>
 				<div class="vote-modal-body">
 					<p class="vote-modal-delegator">
@@ -1188,21 +1231,21 @@
 							onclick={() => acceptDelegation(votingDelegation!.id, 1)}
 							disabled={isLoading}
 						>
-							👍 賛成
+							<ThumbsUp size={16} class="inline-icon" /> 賛成
 						</button>
 						<button
 							class="vote-modal-btn vote-neutral"
 							onclick={() => acceptDelegation(votingDelegation!.id, 0)}
 							disabled={isLoading}
 						>
-							🤔 わからない
+							<CircleQuestionMark size={16} class="inline-icon" /> わからない
 						</button>
 						<button
 							class="vote-modal-btn vote-disagree"
 							onclick={() => acceptDelegation(votingDelegation!.id, -1)}
 							disabled={isLoading}
 						>
-							👎 反対
+							<ThumbsDown size={16} class="inline-icon" /> 反対
 						</button>
 					</div>
 				</div>
@@ -1228,8 +1271,10 @@
 		>
 			<div class="vote-modal">
 				<div class="vote-modal-header">
-					<h3>🔄 委任を転送</h3>
-					<button class="modal-close-btn" onclick={() => (redelegatingDelegation = null)}>✕</button>
+					<h3><RefreshCw size={16} class="inline-icon" /> 委任を転送</h3>
+					<button class="modal-close-btn" onclick={() => (redelegatingDelegation = null)}
+						><X size={16} /></button
+					>
 				</div>
 				<div class="vote-modal-body">
 					<p class="vote-modal-delegator">
@@ -1247,7 +1292,7 @@
 					{:else if redelegateConfirmingFriend}
 						<div class="redelegate-confirm">
 							<p class="redelegate-confirm-warning">
-								⚠️ この法案にはすでに投票があります。転送すると投票が削除されます。
+								<TriangleAlert size={14} class="inline-icon" color="#f59e0b" /> この法案にはすでに投票があります。転送すると投票が削除されます。
 							</p>
 							<p>転送先: <strong>{redelegateConfirmingFriend.friendUsername}</strong></p>
 							<div class="redelegate-confirm-actions">
@@ -1287,7 +1332,8 @@
 									}}
 									disabled={isLoading}
 								>
-									👤 {friend.friendUsername}
+									<User size={14} class="inline-icon" />
+									{friend.friendUsername}
 								</button>
 							{/each}
 						</div>
@@ -2314,7 +2360,8 @@
 	}
 
 	.search-icon {
-		font-size: 1rem;
+		display: flex;
+		align-items: center;
 		flex-shrink: 0;
 	}
 

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { Target, Brain, Lightbulb, Ruler, Scale, Search, Palette } from '@lucide/svelte';
+
 	interface Props {
 		show: boolean;
 		onClose: () => void;
@@ -26,7 +28,7 @@
 
 			<div class="explanation-content-modal">
 				<div class="explanation-intro">
-					<h3>🎯 どうやってマッチングしているの？</h3>
+					<h3><Target size={16} class="inline-icon" /> どうやってマッチングしているの？</h3>
 					<p>
 						このマッチングシステムは、<strong>適応型質問選択</strong>と<strong>ベイズ推定</strong>
 						を組み合わせた手法で、あなたの政治的立場を効率的に推定します。
@@ -139,7 +141,7 @@
 
 				<div class="explanation-details">
 					<div class="detail-card">
-						<h4>🧠 適応型質問選択とは？</h4>
+						<h4><Brain size={16} class="inline-icon" /> 適応型質問選択とは？</h4>
 						<p>
 							あなたの立場を最も効率的に推定するため、<strong>不確実性が高い次元</strong
 							>に関連する法案を優先的に質問します。
@@ -157,12 +159,12 @@
 							</li>
 						</ul>
 						<p class="detail-note">
-							💡 これにより、ランダムな質問よりも少ない回答数で正確な推定が可能になります。
+							<Lightbulb size={14} class="inline-icon" color="#f59e0b" /> これにより、ランダムな質問よりも少ない回答数で正確な推定が可能になります。
 						</p>
 					</div>
 
 					<div class="detail-card">
-						<h4>📐 コサイン類似度によるマッチング</h4>
+						<h4><Ruler size={16} class="inline-icon" /> コサイン類似度によるマッチング</h4>
 						<p>
 							推定されたあなたのベクトルと各議員のベクトルの<strong>コサイン類似度</strong
 							>を計算してマッチ度を算出します。
@@ -175,13 +177,13 @@
 							<li><span class="value-negative">-1.0</span>：完全に対立</li>
 						</ul>
 						<p class="detail-note">
-							💡
+							<Lightbulb size={14} class="inline-icon" color="#f59e0b" />
 							ベクトルの「方向」が似ているかを見るため、投票パターンの傾向が一致するかを測れます。
 						</p>
 					</div>
 
 					<div class="detail-card">
-						<h4>⚖️ 分野別重要度の反映</h4>
+						<h4><Scale size={16} class="inline-icon" /> 分野別重要度の反映</h4>
 						<p>
 							各分野でのマッチ度を、あなたが設定した<strong>重要度</strong
 							>で重み付けして総合スコアを計算します。
@@ -190,12 +192,12 @@
 							<code> 総合スコア = Σ (分野iのマッチ度 × 重要度i) / Σ 重要度i </code>
 						</div>
 						<p class="detail-note">
-							💡 あなたが重視する分野でのマッチ度が、総合スコアに大きく影響します。
+							<Lightbulb size={14} class="inline-icon" color="#f59e0b" /> あなたが重視する分野でのマッチ度が、総合スコアに大きく影響します。
 						</p>
 					</div>
 
 					<div class="detail-card">
-						<h4>🔍 なぜ分野別に質問するの？</h4>
+						<h4><Search size={16} class="inline-icon" /> なぜ分野別に質問するの？</h4>
 						<p>政治的立場は一つの軸では表現できないため、複数の分野に分けて評価します。</p>
 						<ul>
 							<li>
@@ -213,7 +215,7 @@
 					</div>
 
 					<div class="detail-card">
-						<h4>🎨 2D可視化について</h4>
+						<h4><Palette size={16} class="inline-icon" /> 2D可視化について</h4>
 						<p>質問中に表示される散布図は、多次元空間を2次元に圧縮して表示しています。</p>
 						<ul>
 							<li>
@@ -227,7 +229,7 @@
 							</li>
 						</ul>
 						<p class="detail-note">
-							💡 2次元表示は簡略化されたものです。実際のマッチング計算は全次元を使用しています。
+							<Lightbulb size={14} class="inline-icon" color="#f59e0b" /> 2次元表示は簡略化されたものです。実際のマッチング計算は全次元を使用しています。
 						</p>
 					</div>
 				</div>

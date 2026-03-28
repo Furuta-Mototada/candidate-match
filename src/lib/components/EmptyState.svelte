@@ -3,15 +3,17 @@
 
 	interface Props {
 		message: string;
-		icon?: string;
+		icon?: Snippet;
 		children?: Snippet;
 	}
 
-	let { message, icon = '📭', children }: Props = $props();
+	let { message, icon, children }: Props = $props();
 </script>
 
 <div class="empty-state">
-	<span class="empty-icon">{icon}</span>
+	{#if icon}
+		<span class="empty-icon">{@render icon()}</span>
+	{/if}
 	<p class="empty-message">{message}</p>
 	{#if children}
 		{@render children()}

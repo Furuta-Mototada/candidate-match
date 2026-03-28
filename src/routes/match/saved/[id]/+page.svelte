@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import type { PageData } from './$types.js';
 	import type { ResultSnapshotData } from '$lib/types/index.js';
+	import { ClipboardList } from '@lucide/svelte';
 	import GlobalResultsPhase from '$lib/components/match/GlobalResultsPhase.svelte';
 
 	let { data }: { data: PageData } = $props();
@@ -35,7 +36,9 @@
 	<header class="page-header">
 		<div class="container">
 			<div class="breadcrumb">
-				<a href="/match/saved" class="breadcrumb-link">📋 保存済みデータ</a>
+				<a href="/match/saved" class="breadcrumb-link"
+					><ClipboardList size={14} class="inline-icon" /> 保存済みデータ</a
+				>
 				<span class="breadcrumb-sep">/</span>
 				<span class="breadcrumb-current">{snapshot.name}</span>
 			</div>

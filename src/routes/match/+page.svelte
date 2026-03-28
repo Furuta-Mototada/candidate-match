@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import type { PageData } from './$types.js';
+	import { Vote, CircleCheck, TriangleAlert } from '@lucide/svelte';
 	import {
 		SetupPhase,
 		QuestioningPhase,
@@ -1130,7 +1131,9 @@
 	<!-- Hero Section (shown only in setup) -->
 	{#if phase === 'setup'}
 		<section class="hero">
-			<div class="hero-badge animate-in" style="--delay: 0">🗳️ AI議員マッチング</div>
+			<div class="hero-badge animate-in" style="--delay: 0">
+				<Vote size={16} class="inline-icon" /> AI議員マッチング
+			</div>
 			<h1 class="hero-title animate-in" style="--delay: 1">
 				<span class="gradient-text">マッチング診断</span>
 			</h1>
@@ -1142,7 +1145,7 @@
 		<!-- Compact Header for other phases -->
 		<header class="compact-header">
 			<div class="container">
-				<h1 class="compact-title">🗳️ 議員マッチング</h1>
+				<h1 class="compact-title"><Vote size={20} class="inline-icon" /> 議員マッチング</h1>
 			</div>
 		</header>
 	{/if}
@@ -1151,7 +1154,7 @@
 		{#if showPendingSavePrompt}
 			<div class="success-alert animate-in" style="margin-bottom: 1rem;">
 				<div style="display: flex; align-items: center; gap: 0.5rem;">
-					<span>✅</span>
+					<span><CircleCheck size={16} color="#22c55e" /></span>
 					<span>ログインしました。マッチング結果を保存できます。</span>
 				</div>
 			</div>
@@ -1159,7 +1162,7 @@
 
 		{#if error}
 			<div class="error-alert animate-in">
-				<div class="error-icon">⚠️</div>
+				<div class="error-icon"><TriangleAlert size={20} color="#f59e0b" /></div>
 				<div>
 					<span class="error-title">エラー</span>
 					<p class="error-message">{error}</p>

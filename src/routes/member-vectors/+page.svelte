@@ -1,6 +1,18 @@
 <script lang="ts">
 	import type { PageData } from './$types.js';
 	import { PageHero, ClusterCard, LoadingSpinner, EmptyState } from '$lib/components/index.js';
+	import {
+		TrendingUp,
+		BookOpen,
+		Target,
+		Ruler,
+		Lightbulb,
+		Hash,
+		ChartColumn,
+		ClipboardList,
+		TriangleAlert,
+		X
+	} from '@lucide/svelte';
 
 	interface ClusterInfo {
 		id: number;
@@ -787,23 +799,24 @@
 <div class="page">
 	<!-- Hero Section -->
 	<PageHero
-		badge="📈 ベクトル分析"
 		title="クラスター別メンバーベクトル分析"
 		description="法案クラスターごとに議員の投票パターンを潜在空間で分析"
-	/>
+	>
+		{#snippet badge()}<TrendingUp size={16} class="inline-icon" /> ベクトル分析{/snippet}
+	</PageHero>
 
 	<!-- Explanation Section (Collapsible) -->
 	<section class="explanation-section">
 		<details class="explanation-details-wrapper">
 			<summary class="explanation-summary">
-				<span class="summary-icon">📖</span>
+				<span class="summary-icon"><BookOpen size={16} /></span>
 				<span>この分析について</span>
 				<span class="expand-icon">▼</span>
 			</summary>
 
 			<div class="explanation-content">
 				<div class="explanation-intro">
-					<h3>🎯 何をしているの？</h3>
+					<h3><Target size={16} class="inline-icon" /> 何をしているの？</h3>
 					<p>
 						この分析では、<strong>主成分分析（PCA）</strong
 						>という手法を使って、各議員の投票パターンを
@@ -866,7 +879,7 @@
 
 				<div class="explanation-details">
 					<div class="detail-card">
-						<h4>📐 「次元」とは？</h4>
+						<h4><Ruler size={16} class="inline-icon" /> 「次元」とは？</h4>
 						<p>
 							各次元は、投票パターンの中で最も<strong>重要な違い</strong>を表します。
 						</p>
@@ -876,12 +889,12 @@
 							<li><strong>次元3以降</strong>：さらに細かい違いのパターン</li>
 						</ul>
 						<p class="detail-note">
-							💡 「説明分散」の値が高いほど、その次元が投票パターンの違いをよく説明しています。
+							<Lightbulb size={14} class="inline-icon" color="#f59e0b" /> 「説明分散」の値が高いほど、その次元が投票パターンの違いをよく説明しています。
 						</p>
 					</div>
 
 					<div class="detail-card">
-						<h4>🔢 ベクトルの値の意味</h4>
+						<h4><Hash size={16} class="inline-icon" /> ベクトルの値の意味</h4>
 						<p>各議員のベクトル値は、その次元での「立ち位置」を示します。</p>
 						<ul>
 							<li><span class="value-positive">+の値</span>：その次元の「正」方向に位置</li>
@@ -889,12 +902,12 @@
 							<li><strong>0に近い</strong>：その次元ではどちらでもない</li>
 						</ul>
 						<p class="detail-note">
-							💡 ベクトルが似ている議員は、投票パターンが似ていることを意味します。
+							<Lightbulb size={14} class="inline-icon" color="#f59e0b" /> ベクトルが似ている議員は、投票パターンが似ていることを意味します。
 						</p>
 					</div>
 
 					<div class="detail-card">
-						<h4>📊 2D可視化の見方</h4>
+						<h4><ChartColumn size={16} class="inline-icon" /> 2D可視化の見方</h4>
 						<p>下の散布図では、議員を2つの次元で平面上に配置しています。</p>
 						<ul>
 							<li><strong>近い点</strong>：投票パターンが似ている議員</li>
@@ -904,7 +917,7 @@
 					</div>
 
 					<div class="detail-card">
-						<h4>📋 代表法案とは？</h4>
+						<h4><ClipboardList size={16} class="inline-icon" /> 代表法案とは？</h4>
 						<p>
 							各次元で<strong>「因子負荷量」</strong>が高い法案です。
 							この法案への投票が、その次元での立ち位置を最も決定づけます。
@@ -1038,7 +1051,9 @@
 			<div class="section-header">
 				<h2>分析結果: {loadedVectorizationName || vectorizationName}</h2>
 				{#if loadedVectorizationName}
-					<button class="btn-secondary" onclick={clearLoadedVectorization}>✕ クリア</button>
+					<button class="btn-secondary" onclick={clearLoadedVectorization}
+						><X size={14} class="inline-icon" /> クリア</button
+					>
 				{/if}
 			</div>
 
@@ -1120,7 +1135,7 @@
 			<!-- Visualization Section -->
 			<div class="visualization-section">
 				<div class="visualization-header">
-					<h3>📊 2D可視化</h3>
+					<h3><ChartColumn size={16} class="inline-icon" /> 2D可視化</h3>
 				</div>
 
 				{#if availableDimensions.length >= 2}
@@ -1179,7 +1194,9 @@
 							<div class="viz-detail-panel">
 								<div class="viz-panel-header">
 									<h4>{vizSelectedMember.memberName}</h4>
-									<button class="viz-panel-close" onclick={clearVizSelection}>✕</button>
+									<button class="viz-panel-close" onclick={clearVizSelection}
+										><X size={14} /></button
+									>
 								</div>
 
 								<div class="viz-panel-section">
@@ -1232,11 +1249,11 @@
 					</div>
 
 					<p class="viz-hint">
-						💡 ポイントをクリックして議員を選択すると、詳細と類似議員が右側に表示されます。
+						<Lightbulb size={14} class="inline-icon" color="#f59e0b" /> ポイントをクリックして議員を選択すると、詳細と類似議員が右側に表示されます。
 					</p>
 				{:else}
 					<p class="viz-warning">
-						⚠️
+						<TriangleAlert size={14} class="inline-icon" color="#f59e0b" />
 						2D可視化には2次元以上の潜在ベクトルが必要です。次元数を2以上に設定して再計算してください。
 					</p>
 				{/if}
@@ -1678,7 +1695,8 @@
 	}
 
 	.summary-icon {
-		font-size: 1.2rem;
+		display: flex;
+		align-items: center;
 	}
 
 	.expand-icon {

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import type { PageData } from './$types.js';
+	import { Vote, Target, Microscope, Compass, Trophy } from '@lucide/svelte';
 
 	let { data: pageData }: { data: PageData } = $props();
 
@@ -131,7 +132,7 @@
 	<section class="cta-section">
 		<div class="cta-card floating">
 			<div class="cta-content">
-				<span class="cta-badge sparkle">🗳️ メイン機能</span>
+				<span class="cta-badge sparkle"><Vote size={14} class="inline-icon" /> メイン機能</span>
 				<h2 class="cta-title">議員マッチング</h2>
 				<p class="cta-description">
 					あなたの回答パターンと国会議員の投票パターンをAIが比較分析。
@@ -150,7 +151,7 @@
 			</div>
 			<div class="cta-visual">
 				<div class="visual-card">
-					<div class="visual-header">🏆 マッチ結果</div>
+					<div class="visual-header"><Trophy size={16} class="inline-icon" /> マッチ結果</div>
 					<div class="visual-item top slide-in" style="--slide-delay: 0">
 						<span class="rank pulse">1</span>
 						<span class="name">山田 太郎</span>
@@ -178,21 +179,21 @@
 
 		<div class="features-grid">
 			<a href="/legislation-scores" class="feature-card hover-lift" style="--card-delay: 0">
-				<div class="feature-icon bounce-in">🎯</div>
+				<div class="feature-icon bounce-in"><Target size={32} color="#6366f1" /></div>
 				<h3>議案別スコア分析</h3>
 				<p>各議案に対する議員の賛成・反対パターンを分析し、政治的立場を数値化</p>
 				<span class="feature-link">詳しく見る →</span>
 			</a>
 
 			<a href="/bill-clustering" class="feature-card hover-lift" style="--card-delay: 1">
-				<div class="feature-icon bounce-in">🔬</div>
+				<div class="feature-icon bounce-in"><Microscope size={32} color="#10b981" /></div>
 				<h3>法案クラスタリング</h3>
 				<p>機械学習で法案をベクトル化し、類似する法案をグループ化して可視化</p>
 				<span class="feature-link">詳しく見る →</span>
 			</a>
 
 			<a href="/member-vectors" class="feature-card hover-lift" style="--card-delay: 2">
-				<div class="feature-icon bounce-in">🧭</div>
+				<div class="feature-icon bounce-in"><Compass size={32} color="#3b82f6" /></div>
 				<h3>議員ベクトル分析</h3>
 				<p>投票履歴から議員の政治的方向性をベクトル化し、類似性を分析</p>
 				<span class="feature-link">詳しく見る →</span>
@@ -880,9 +881,10 @@
 	}
 
 	.feature-icon {
-		font-size: 2.5rem;
+		display: flex;
+		align-items: center;
+		justify-content: center;
 		margin-bottom: 1rem;
-		display: inline-block;
 		transition: transform 0.3s ease;
 	}
 

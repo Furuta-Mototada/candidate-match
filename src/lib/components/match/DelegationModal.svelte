@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { Handshake, Hourglass, TriangleAlert, X, User } from '@lucide/svelte';
+
 	type Friend = {
 		requestId: number;
 		friendId: string;
@@ -114,8 +116,8 @@
 	>
 		<div class="modal-content">
 			<div class="modal-header">
-				<h3 class="modal-title">🤝 投票を委任する</h3>
-				<button class="modal-close" onclick={onClose} aria-label="閉じる">✕</button>
+				<h3 class="modal-title"><Handshake size={16} class="inline-icon" /> 投票を委任する</h3>
+				<button class="modal-close" onclick={onClose} aria-label="閉じる"><X size={16} /></button>
 			</div>
 
 			<div class="modal-bill-info">
@@ -133,7 +135,9 @@
 
 			<div class="modal-body">
 				{#if loading}
-					<div class="modal-loading">⏳ フレンドを読み込み中...</div>
+					<div class="modal-loading">
+						<Hourglass size={14} class="inline-icon" /> フレンドを読み込み中...
+					</div>
 				{:else if friends.length === 0}
 					<div class="modal-empty">
 						<p>フレンドがいません</p>
@@ -143,7 +147,9 @@
 					</div>
 				{:else if confirmingFriend}
 					<div class="confirm-message">
-						<p>⚠️ この法案にはすでに投票があります。委任すると投票が削除されます。</p>
+						<p>
+							<TriangleAlert size={14} class="inline-icon" color="#f59e0b" /> この法案にはすでに投票があります。委任すると投票が削除されます。
+						</p>
 						<p class="confirm-target">委任先: <strong>{confirmingFriend.friendUsername}</strong></p>
 						<div class="confirm-actions">
 							<button
@@ -173,7 +179,7 @@
 								onclick={() => handleFriendClick(friend)}
 								disabled={submitting}
 							>
-								<span class="friend-avatar">👤</span>
+								<span class="friend-avatar"><User size={16} /></span>
 								<span class="friend-name">{friend.friendUsername}</span>
 								<span class="delegate-action">委任 →</span>
 							</button>

@@ -2,7 +2,7 @@
 	import type { Snippet } from 'svelte';
 
 	interface Props {
-		badge?: string;
+		badge?: Snippet;
 		title: string;
 		description?: string;
 		children?: Snippet;
@@ -13,7 +13,7 @@
 
 <section class="hero">
 	{#if badge}
-		<span class="hero-badge">{badge}</span>
+		<span class="hero-badge">{@render badge()}</span>
 	{/if}
 	<h1>{title}</h1>
 	{#if description}

@@ -3,6 +3,17 @@
 	import MemberRankingList from '$lib/components/match/MemberRankingList.svelte';
 	import EnrichedBillCard from '$lib/components/match/EnrichedBillCard.svelte';
 	import DelegationModal from '$lib/components/match/DelegationModal.svelte';
+	import {
+		ThumbsUp,
+		ThumbsDown,
+		CircleQuestionMark,
+		Pencil,
+		X,
+		CircleCheck,
+		Hourglass,
+		Handshake,
+		MapPin
+	} from '@lucide/svelte';
 	import type {
 		Bill,
 		MemberMatch,
@@ -134,9 +145,9 @@
 	}
 
 	function getAnswerLabel(answer: number): string {
-		if (answer === 1) return '👍 賛成';
-		if (answer === -1) return '👎 反対';
-		return '🤔 わからない';
+		if (answer === 1) return '賛成';
+		if (answer === -1) return '反対';
+		return 'わからない';
 	}
 
 	function getAnswerClass(answer: number): string {
@@ -152,9 +163,11 @@
 		<div class="question-card fade-in-up" class:editing-mode={isEditingAnswer}>
 			{#if isEditingAnswer}
 				<div class="editing-banner">
-					<span class="editing-banner-text">✏️ 回答を変更中</span>
+					<span class="editing-banner-text"
+						><Pencil size={14} class="inline-icon" /> 回答を変更中</span
+					>
 					<button class="cancel-edit-btn" onclick={onCancelEditing} disabled={isLoading}>
-						✕ キャンセル
+						<X size={14} class="inline-icon" /> キャンセル
 					</button>
 				</div>
 			{/if}
@@ -173,7 +186,7 @@
 			<!-- Vote Buttons -->
 			<div class="vote-buttons">
 				<button onclick={() => onSubmitAnswer(1)} disabled={isLoading} class="vote-btn vote-agree">
-					<span class="vote-emoji">👍</span>
+					<span class="vote-emoji"><ThumbsUp size={36} color="#22c55e" /></span>
 					<span class="vote-label">賛成</span>
 				</button>
 				<button
@@ -181,7 +194,7 @@
 					disabled={isLoading}
 					class="vote-btn vote-neutral"
 				>
-					<span class="vote-emoji">🤔</span>
+					<span class="vote-emoji"><CircleQuestionMark size={36} color="#3b82f6" /></span>
 					<span class="vote-label">わからない</span>
 				</button>
 				<button
@@ -189,7 +202,7 @@
 					disabled={isLoading}
 					class="vote-btn vote-disagree"
 				>
-					<span class="vote-emoji">👎</span>
+					<span class="vote-emoji"><ThumbsDown size={36} color="#ef4444" /></span>
 					<span class="vote-label">反対</span>
 				</button>
 			</div>
@@ -199,7 +212,7 @@
 				<div class="question-actions">
 					{#if isLoggedIn}
 						<button onclick={openDelegationModal} disabled={isLoading} class="action-btn-delegate">
-							🤝 フレンドに委任
+							<Handshake size={14} class="inline-icon" /> フレンドに委任
 						</button>
 					{:else}
 						<button onclick={onSkipQuestion} disabled={isLoading} class="action-btn-secondary">
@@ -220,12 +233,14 @@
 		</div>
 	{:else if !isEditingAnswer}
 		<div class="empty-question">
-			<p>✅ このクラスターの質問が完了しました</p>
+			<p>
+				<CircleCheck size={16} class="inline-icon" color="#22c55e" /> このクラスターの質問が完了しました
+			</p>
 			<p class="empty-question-hint">下の回答済みリストから回答を変更できます</p>
 			<div class="empty-question-actions">
 				<button onclick={onFinishCluster} disabled={isLoading} class="action-btn-primary">
 					{#if isLoading}
-						⏳ 読み込み中...
+						<Hourglass size={14} class="inline-icon" /> 読み込み中...
 					{:else}
 						このクラスターを終了 →
 					{/if}
@@ -255,7 +270,7 @@
 									{getAnswerLabel(bill.answer)}
 								</span>
 							</div>
-							<span class="edit-hint">✏️ 変更</span>
+							<span class="edit-hint"><Pencil size={12} class="inline-icon" /> 変更</span>
 						</button>
 					{/each}
 				</div>
@@ -477,7 +492,9 @@
 	}
 
 	.vote-emoji {
-		font-size: 2.5rem;
+		display: flex;
+		align-items: center;
+		justify-content: center;
 	}
 
 	.vote-label {

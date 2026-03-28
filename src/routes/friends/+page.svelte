@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { Users, Mailbox, Search } from '@lucide/svelte';
 	import type { PageData } from './$types.js';
 
 	let { data }: { data: PageData } = $props();
@@ -228,7 +229,7 @@
 					<div class="empty-state">読み込み中...</div>
 				{:else if friends.length === 0}
 					<div class="empty-state">
-						<div class="empty-icon">👥</div>
+						<div class="empty-icon"><Users size={32} /></div>
 						<p>まだフレンドがいません</p>
 						<button class="btn-primary" onclick={() => switchTab('search')}>
 							ユーザーを検索する
@@ -326,7 +327,7 @@
 
 					{#if incoming.length === 0 && outgoing.length === 0}
 						<div class="empty-state">
-							<div class="empty-icon">📭</div>
+							<div class="empty-icon"><Mailbox size={32} /></div>
 							<p>リクエストはありません</p>
 						</div>
 					{/if}
@@ -385,7 +386,7 @@
 					</div>
 				{:else if !searchQuery.trim()}
 					<div class="empty-state">
-						<div class="empty-icon">🔍</div>
+						<div class="empty-icon"><Search size={32} /></div>
 						<p>ユーザー名を入力して検索</p>
 					</div>
 				{/if}

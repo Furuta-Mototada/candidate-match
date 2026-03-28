@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import type { PageData } from './$types.js';
 	import { PageHero, LoadingSpinner, EmptyState } from '$lib/components/index.js';
+	import { Target, ChartColumn, FileText, Vote, Search, X, Mailbox, Wrench } from '@lucide/svelte';
 
 	interface MemberLegislationScore {
 		memberId: number;
@@ -305,17 +306,15 @@
 
 <div class="page">
 	<!-- Hero Section -->
-	<PageHero
-		badge="🎯 議案分析"
-		title="議案別スコア分析"
-		description="各議案に対する全議員のスコアを分析・可視化します"
-	/>
+	<PageHero title="議案別スコア分析" description="各議案に対する全議員のスコアを分析・可視化します">
+		{#snippet badge()}<Target size={16} class="inline-icon" /> 議案分析{/snippet}
+	</PageHero>
 
 	<!-- Scoring Explanation Section -->
 	<section class="explanation-section">
 		<details class="scoring-explanation">
 			<summary class="scoring-summary">
-				<span class="summary-icon">📊</span>
+				<span class="summary-icon"><ChartColumn size={16} /></span>
 				<span>スコア計算方法について</span>
 				<span class="expand-icon">▼</span>
 			</summary>
@@ -328,7 +327,7 @@
 					<!-- Bill Submission -->
 					<div class="scoring-category">
 						<h4>
-							<span class="category-icon">📝</span>
+							<span class="category-icon"><FileText size={16} /></span>
 							議案提出
 						</h4>
 						<div class="score-items">
@@ -360,7 +359,7 @@
 					<!-- Bill Voting -->
 					<div class="scoring-category">
 						<h4>
-							<span class="category-icon">🗳️</span>
+							<span class="category-icon"><Vote size={16} /></span>
 							議案採決
 						</h4>
 						<div class="score-items">
@@ -424,7 +423,7 @@
 	<section class="controls-section">
 		<div class="controls-bar">
 			<div class="search-wrapper">
-				<span class="search-icon">🔍</span>
+				<span class="search-icon"><Search size={16} /></span>
 				<input
 					type="text"
 					bind:value={searchTerm}
@@ -450,7 +449,7 @@
 			</div>
 
 			<button onclick={requestCalculation} disabled={calculating} class="calculate-btn">
-				{calculating ? '計算中...' : '🔧 再計算'}
+				{#if calculating}計算中...{:else}<Wrench size={14} class="inline-icon" /> 再計算{/if}
 			</button>
 		</div>
 
@@ -476,7 +475,7 @@
 			</div>
 		{:else if sortedBills.length === 0}
 			<div class="no-results">
-				<span class="no-results-icon">📭</span>
+				<span class="no-results-icon"><Mailbox size={32} /></span>
 				<p>検索条件に一致する議案が見つかりませんでした。</p>
 			</div>
 		{:else}
@@ -553,7 +552,7 @@
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div class="modal-content" onclick={(e) => e.stopPropagation()}>
-			<button class="close-btn" onclick={closeModal}>✕</button>
+			<button class="close-btn" onclick={closeModal}><X size={16} /></button>
 
 			<div class="modal-header">
 				<h2>{selectedBill.billTitle}</h2>
@@ -689,7 +688,8 @@
 	}
 
 	.summary-icon {
-		font-size: 1.2rem;
+		display: flex;
+		align-items: center;
 	}
 
 	.expand-icon {
@@ -737,7 +737,8 @@
 	}
 
 	.category-icon {
-		font-size: 1.1rem;
+		display: flex;
+		align-items: center;
 	}
 
 	.score-items {
@@ -924,7 +925,8 @@
 	}
 
 	.search-icon {
-		font-size: 1rem;
+		display: flex;
+		align-items: center;
 		margin-right: 0.5rem;
 	}
 

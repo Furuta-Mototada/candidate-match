@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { GlobalMemberScore, BaseClusterResult } from '$lib/types/index.js';
+	import { Trophy, Medal, Award } from '@lucide/svelte';
 
 	interface Props {
 		members: GlobalMemberScore[]; // Changed from single member to array
@@ -39,7 +40,15 @@
 			<div class="spotlight-header">
 				<div class="rank-badge-wrapper">
 					<div class="rank-badge">
-						{#if idx === 0}🏆{:else if idx === 1}🥈{:else}🥉{/if}
+						{#if idx === 0}<Trophy
+								size={16}
+								class="inline-icon"
+								color="#eab308"
+							/>{:else if idx === 1}<Medal
+								size={16}
+								class="inline-icon"
+								color="#9ca3af"
+							/>{:else}<Award size={16} class="inline-icon" color="#cd7f32" />{/if}
 						{idx + 1}位
 					</div>
 				</div>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { Save, ClipboardList, Hourglass, Rocket, ChartColumn } from '@lucide/svelte';
 	import type { SavedVectorInfo, GroupedSavedVector } from '$lib/types/index.js';
 
 	interface Props {
@@ -20,8 +21,10 @@
 
 <div class="setup-container animate-in" style="--delay: 3">
 	<div class="setup-header">
-		<h2 class="setup-title"><span class="icon">💾</span> 保存済み設定を選択</h2>
-		<a href="/match/saved" class="view-saved-link"> 📋 過去の結果を見る </a>
+		<h2 class="setup-title"><span class="icon"><Save size={18} /></span> 保存済み設定を選択</h2>
+		<a href="/match/saved" class="view-saved-link">
+			<ClipboardList size={16} class="inline-icon" /> 過去の結果を見る
+		</a>
 	</div>
 
 	{#if groupedSavedVectors.length > 0}
@@ -59,17 +62,17 @@
 
 			<button onclick={onStart} disabled={isLoading} class="btn-primary btn-large">
 				{#if isLoading}
-					<span class="loading-spinner">⏳</span>
+					<span class="loading-spinner"><Hourglass size={16} /></span>
 					準備中...
 				{:else}
-					🚀 回答を始める（{selectedGroupedVector.clusterCount}クラスター）
+					<Rocket size={16} class="inline-icon" /> 回答を始める（{selectedGroupedVector.clusterCount}クラスター）
 				{/if}
 			</button>
 		{/if}
 	{:else}
 		<!-- No saved vectors available -->
 		<div class="empty-state">
-			<div class="empty-icon">📊</div>
+			<div class="empty-icon"><ChartColumn size={32} /></div>
 			<h3 class="empty-title">保存済みベクトルがありません</h3>
 			<p class="empty-description">
 				まずメンバーベクトルページでベクトル分析を実行し、結果を保存してください。

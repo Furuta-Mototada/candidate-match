@@ -1,3 +1,9 @@
 @import 'tailwindcss';
 @plugin '@tailwindcss/forms';
 @plugin '@tailwindcss/typography';
+
+/* Lucide inline icon alignment */
+.inline-icon {
+	display: inline-block;
+	vertical-align: -0.125em;
+}

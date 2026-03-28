@@ -1,5 +1,26 @@
 <script lang="ts">
 	import type { EnrichedBillData } from '$lib/types/index.js';
+	import {
+		ThumbsUp,
+		ThumbsDown,
+		ClipboardList,
+		CircleQuestionMark,
+		MessageSquare,
+		Check,
+		Hourglass,
+		BookOpen,
+		Book,
+		BookMarked,
+		FileText,
+		Target,
+		User,
+		Calendar,
+		Scale,
+		Lightbulb,
+		Vote,
+		Mic,
+		FileDown
+	} from '@lucide/svelte';
 
 	interface Props {
 		billId: number;
@@ -32,15 +53,15 @@
 	function getSpeechTypeLabel(type: string | null): string {
 		switch (type) {
 			case 'pro':
-				return '👍 賛成意見';
+				return '賛成意見';
 			case 'con':
-				return '👎 反対意見';
+				return '反対意見';
 			case 'explanation':
-				return '📋 政府説明';
+				return '政府説明';
 			case 'question':
-				return '❓ 質問';
+				return '質問';
 			default:
-				return '💬 発言';
+				return '発言';
 		}
 	}
 
@@ -67,15 +88,15 @@
 	<!-- Header with status -->
 	<div class="card-header">
 		<span class="bill-status" class:passed class:not-passed={!passed}>
-			{passed ? '✓ 成立' : '⏳ 審議中/廃案'}
+			{passed ? '✓ 成立' : '審議中/廃案'}
 		</span>
 		<button class="detail-toggle" onclick={toggleDetailLevel} disabled={isLoading}>
 			{#if detailLevel === 1}
-				📖 詳しく見る
+				<BookOpen size={14} class="inline-icon" /> 詳しく見る
 			{:else if detailLevel === 2}
-				📚 もっと詳しく
+				<Book size={14} class="inline-icon" /> もっと詳しく
 			{:else}
-				📕 閉じる
+				<BookMarked size={14} class="inline-icon" /> 閉じる
 			{/if}
 		</button>
 	</div>
@@ -115,7 +136,7 @@
 				<!-- Detailed Summary -->
 				{#if enrichmentData.summaryDetailed}
 					<div class="section">
-						<h3>📝 詳しい説明</h3>
+						<h3><FileText size={16} class="inline-icon" /> 詳しい説明</h3>
 						<p class="summary-detailed">{enrichmentData.summaryDetailed}</p>
 					</div>
 				{/if}
@@ -123,20 +144,23 @@
 				<!-- Key Points -->
 				{#if enrichmentData.keyPoints && enrichmentData.keyPoints.length > 0}
 					<div class="section">
-						<h3>🎯 ポイント</h3>
+						<h3><Target size={16} class="inline-icon" /> ポイント</h3>
 						<ul class="key-points">
 							{#each enrichmentData.keyPoints as point, i (i)}
 								<li class="key-point">
 									<div class="point-row">
-										<span class="point-label">👤 誰に:</span>
+										<span class="point-label"><User size={14} class="inline-icon" /> 誰に:</span>
 										<span class="point-value">{point.who}</span>
 									</div>
 									<div class="point-row">
-										<span class="point-label">📋 何が:</span>
+										<span class="point-label"
+											><ClipboardList size={14} class="inline-icon" /> 何が:</span
+										>
 										<span class="point-value">{point.what}</span>
 									</div>
 									<div class="point-row">
-										<span class="point-label">📅 いつ:</span>
+										<span class="point-label"><Calendar size={14} class="inline-icon" /> いつ:</span
+										>
 										<span class="point-value">{point.when}</span>
 									</div>
 								</li>
@@ -148,10 +172,10 @@
 				<!-- Pros and Cons -->
 				{#if enrichmentData.prosAndCons}
 					<div class="section pros-cons">
-						<h3>⚖️ 賛成・反対の論点</h3>
+						<h3><Scale size={16} class="inline-icon" /> 賛成・反対の論点</h3>
 						<div class="pros-cons-grid">
 							<div class="pros-column">
-								<h4>👍 賛成派の主張</h4>
+								<h4><ThumbsUp size={14} class="inline-icon" color="#22c55e" /> 賛成派の主張</h4>
 								<ul>
 									{#each enrichmentData.prosAndCons.pros as pro, i (i)}
 										<li>{pro}</li>
@@ -159,7 +183,7 @@
 								</ul>
 							</div>
 							<div class="cons-column">
-								<h4>👎 反対派の主張</h4>
+								<h4><ThumbsDown size={14} class="inline-icon" color="#ef4444" /> 反対派の主張</h4>
 								<ul>
 									{#each enrichmentData.prosAndCons.cons as con, i (i)}
 										<li>{con}</li>
@@ -173,7 +197,7 @@
 				<!-- Example Scenario -->
 				{#if enrichmentData.exampleScenario}
 					<div class="section">
-						<h3>💡 具体例</h3>
+						<h3><Lightbulb size={16} class="inline-icon" color="#f59e0b" /> 具体例</h3>
 						<p class="example-scenario">{enrichmentData.exampleScenario}</p>
 					</div>
 				{/if}
@@ -192,7 +216,7 @@
 				<!-- Voting Results -->
 				{#if enrichmentData.voteResults && enrichmentData.voteResults.length > 0}
 					<div class="section">
-						<h3>🗳️ 会派別投票結果</h3>
+						<h3><Vote size={16} class="inline-icon" /> 会派別投票結果</h3>
 						<div class="vote-results">
 							{#each enrichmentData.voteResults as vote (vote.groupName)}
 								<span
@@ -210,7 +234,9 @@
 				<!-- Debate Records -->
 				{#if enrichmentData.debates && enrichmentData.debates.length > 0}
 					<div class="section">
-						<h3>🎤 国会での議論 ({enrichmentData.debateCount}件)</h3>
+						<h3>
+							<Mic size={16} class="inline-icon" /> 国会での議論 ({enrichmentData.debateCount}件)
+						</h3>
 						<div class="debates">
 							{#each enrichmentData.debates as debate (debate.id)}
 								<div class="debate-record {getSpeechTypeClass(debate.speechType)}">
@@ -253,7 +279,7 @@
 							rel="noopener noreferrer"
 							class="pdf-link"
 						>
-							📄 法案原文 (PDF) を見る
+							<FileDown size={14} class="inline-icon" /> 法案原文 (PDF) を見る
 						</a>
 					</div>
 				{/if}

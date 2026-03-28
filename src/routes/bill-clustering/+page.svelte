@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import type { PageData } from './$types.js';
 	import { PageHero, ClusterCard, LoadingSpinner, EmptyState } from '$lib/components/index.js';
+	import { ChartColumn, RotateCcw, X, BookOpen, ThumbsUp, ThumbsDown } from '@lucide/svelte';
 
 	interface CommitteeInfo {
 		name: string | null;
@@ -360,10 +361,11 @@
 <div class="page">
 	<!-- Hero Section -->
 	<PageHero
-		badge="📊 クラスタリング"
 		title="法案クラスタリング分析"
 		description="法案を類似性に基づいてグループ化し、政策トピックを可視化します"
-	/>
+	>
+		{#snippet badge()}<ChartColumn size={16} class="inline-icon" /> クラスタリング{/snippet}
+	</PageHero>
 
 	<!-- Clustering Generation Section -->
 	<section class="generation-section">
@@ -434,8 +436,9 @@
 		{#if data.clusters.length === 0}
 			<EmptyState
 				message="クラスタリング結果がありません。上記のフォームから新しいクラスタリングを生成してください。"
-				icon="📊"
-			/>
+			>
+				{#snippet icon()}<ChartColumn size={48} />{/snippet}
+			</EmptyState>
 		{:else}
 			<div class="cluster-list">
 				{#each data.clusters as cluster}
@@ -494,7 +497,9 @@
 							>
 								+
 							</button>
-							<button class="zoom-btn reset" onclick={resetZoom} title="リセット"> ⟲ </button>
+							<button class="zoom-btn reset" onclick={resetZoom} title="リセット">
+								<RotateCcw size={14} />
+							</button>
 						</div>
 
 						<div class="scatter-plot-container">
@@ -636,7 +641,7 @@
 					onclick={() => {
 						selectedBillId = null;
 						selectedBill = null;
-					}}>✕</button
+					}}><X size={16} /></button
 				>
 			</div>
 
@@ -706,7 +711,7 @@
 
 				<!-- Enrichment Data Section -->
 				<div class="enrichment-section">
-					<h4 class="enrichment-title">📚 詳細情報</h4>
+					<h4 class="enrichment-title"><BookOpen size={16} class="inline-icon" /> 詳細情報</h4>
 
 					{#if isLoadingEnrichment}
 						<p class="loading-text">読み込み中...</p>
@@ -762,7 +767,9 @@
 									<div class="pros-cons">
 										{#if enrichmentData.prosAndCons.pros && enrichmentData.prosAndCons.pros.length > 0}
 											<div class="pros">
-												<span class="pros-cons-label">👍 賛成意見</span>
+												<span class="pros-cons-label"
+													><ThumbsUp size={14} class="inline-icon" /> 賛成意見</span
+												>
 												<ul>
 													{#each enrichmentData.prosAndCons.pros as pro}
 														<li>{pro}</li>
@@ -772,7 +779,9 @@
 										{/if}
 										{#if enrichmentData.prosAndCons.cons && enrichmentData.prosAndCons.cons.length > 0}
 											<div class="cons">
-												<span class="pros-cons-label">👎 反対意見</span>
+												<span class="pros-cons-label"
+													><ThumbsDown size={14} class="inline-icon" /> 反対意見</span
+												>
 												<ul>
 													{#each enrichmentData.prosAndCons.cons as con}
 														<li>{con}</li>

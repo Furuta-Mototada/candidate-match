@@ -1,5 +1,25 @@
 <script lang="ts">
 	import type { EnrichedBillData } from '$lib/types/index.js';
+	import {
+		ThumbsUp,
+		ThumbsDown,
+		ClipboardList,
+		CircleQuestionMark,
+		MessageSquare,
+		FileText,
+		Target,
+		User,
+		Calendar,
+		Scale,
+		Lightbulb,
+		Vote,
+		Mic,
+		FileDown,
+		TriangleAlert,
+		Handshake,
+		Undo2,
+		X
+	} from '@lucide/svelte';
 
 	interface Props {
 		billId: number;
@@ -45,15 +65,15 @@
 	function getSpeechTypeLabel(type: string | null): string {
 		switch (type) {
 			case 'pro':
-				return '👍 賛成意見';
+				return '賛成意見';
 			case 'con':
-				return '👎 反対意見';
+				return '反対意見';
 			case 'explanation':
-				return '📋 政府説明';
+				return '政府説明';
 			case 'question':
-				return '❓ 質問';
+				return '質問';
 			default:
-				return '💬 発言';
+				return '発言';
 		}
 	}
 
@@ -81,9 +101,9 @@
 	}
 
 	function getAnswerEmoji(score: number | null): string {
-		if (score === 1) return '👍';
-		if (score === -1) return '👎';
-		if (score === 0) return '🤔';
+		if (score === 1) return '';
+		if (score === -1) return '';
+		if (score === 0) return '';
 		return '';
 	}
 
@@ -180,7 +200,7 @@
 					{getResultLabel(billResult)}
 				</span>
 			</div>
-			<button class="modal-close-btn" onclick={onClose}>✕</button>
+			<button class="modal-close-btn" onclick={onClose}><X size={16} /></button>
 		</div>
 
 		<!-- Title -->
@@ -195,7 +215,7 @@
 				</div>
 			{:else if loadError}
 				<div class="error-state">
-					<p>⚠️ {loadError}</p>
+					<p><TriangleAlert size={14} class="inline-icon" color="#f59e0b" /> {loadError}</p>
 					<button class="retry-btn" onclick={loadEnrichment}>再読み込み</button>
 				</div>
 			{:else if enrichmentData}
@@ -218,7 +238,7 @@
 				<!-- Detailed Summary -->
 				{#if enrichmentData.summaryDetailed}
 					<div class="section">
-						<h3>📝 詳しい説明</h3>
+						<h3><FileText size={16} class="inline-icon" /> 詳しい説明</h3>
 						<p class="summary-detailed">{enrichmentData.summaryDetailed}</p>
 					</div>
 				{/if}
@@ -226,20 +246,23 @@
 				<!-- Key Points -->
 				{#if enrichmentData.keyPoints && enrichmentData.keyPoints.length > 0}
 					<div class="section">
-						<h3>🎯 ポイント</h3>
+						<h3><Target size={16} class="inline-icon" /> ポイント</h3>
 						<ul class="key-points">
 							{#each enrichmentData.keyPoints as point, i (i)}
 								<li class="key-point">
 									<div class="point-row">
-										<span class="point-label">👤 誰に:</span>
+										<span class="point-label"><User size={14} class="inline-icon" /> 誰に:</span>
 										<span class="point-value">{point.who}</span>
 									</div>
 									<div class="point-row">
-										<span class="point-label">📋 何が:</span>
+										<span class="point-label"
+											><ClipboardList size={14} class="inline-icon" /> 何が:</span
+										>
 										<span class="point-value">{point.what}</span>
 									</div>
 									<div class="point-row">
-										<span class="point-label">📅 いつ:</span>
+										<span class="point-label"><Calendar size={14} class="inline-icon" /> いつ:</span
+										>
 										<span class="point-value">{point.when}</span>
 									</div>
 								</li>
@@ -251,10 +274,10 @@
 				<!-- Pros and Cons -->
 				{#if enrichmentData.prosAndCons}
 					<div class="section">
-						<h3>⚖️ 賛成・反対の論点</h3>
+						<h3><Scale size={16} class="inline-icon" /> 賛成・反対の論点</h3>
 						<div class="pros-cons-grid">
 							<div class="pros-column">
-								<h4>👍 賛成派の主張</h4>
+								<h4><ThumbsUp size={14} class="inline-icon" color="#22c55e" /> 賛成派の主張</h4>
 								<ul>
 									{#each enrichmentData.prosAndCons.pros as pro, i (i)}
 										<li>{pro}</li>
@@ -262,7 +285,7 @@
 								</ul>
 							</div>
 							<div class="cons-column">
-								<h4>👎 反対派の主張</h4>
+								<h4><ThumbsDown size={14} class="inline-icon" color="#ef4444" /> 反対派の主張</h4>
 								<ul>
 									{#each enrichmentData.prosAndCons.cons as con, i (i)}
 										<li>{con}</li>
@@ -276,7 +299,7 @@
 				<!-- Example Scenario -->
 				{#if enrichmentData.exampleScenario}
 					<div class="section">
-						<h3>💡 具体例</h3>
+						<h3><Lightbulb size={16} class="inline-icon" color="#f59e0b" /> 具体例</h3>
 						<p class="example-scenario">{enrichmentData.exampleScenario}</p>
 					</div>
 				{/if}
@@ -284,7 +307,7 @@
 				<!-- Voting Results -->
 				{#if enrichmentData.voteResults && enrichmentData.voteResults.length > 0}
 					<div class="section">
-						<h3>🗳️ 会派別投票結果</h3>
+						<h3><Vote size={16} class="inline-icon" /> 会派別投票結果</h3>
 						<div class="vote-results">
 							{#each enrichmentData.voteResults as vote (vote.groupName)}
 								<span
@@ -302,7 +325,9 @@
 				<!-- Debate Records -->
 				{#if enrichmentData.debates && enrichmentData.debates.length > 0}
 					<div class="section">
-						<h3>🎤 国会での議論 ({enrichmentData.debateCount}件)</h3>
+						<h3>
+							<Mic size={16} class="inline-icon" /> 国会での議論 ({enrichmentData.debateCount}件)
+						</h3>
 						<div class="debates">
 							{#each enrichmentData.debates as debate (debate.id)}
 								<div class="debate-record {getSpeechTypeClass(debate.speechType)}">
@@ -345,7 +370,7 @@
 							rel="noopener noreferrer"
 							class="pdf-link"
 						>
-							📄 法案原文 (PDF) を見る
+							<FileDown size={14} class="inline-icon" /> 法案原文 (PDF) を見る
 						</a>
 					</div>
 				{/if}
@@ -368,7 +393,9 @@
 			{#if hasDelegation}
 				<!-- Delegated state -->
 				<div class="action-delegated">
-					<span class="delegation-info">🤝 {delegateUsername}に委任中</span>
+					<span class="delegation-info"
+						><Handshake size={14} class="inline-icon" /> {delegateUsername}に委任中</span
+					>
 					{#if onGoToDelegations}
 						<button class="btn-go-delegations" onclick={onGoToDelegations}>
 							委任タブで管理 →
@@ -381,7 +408,19 @@
 					<div class="current-answer">
 						<span class="current-answer-label">あなたの回答:</span>
 						<span class="current-answer-value {getAnswerClass(answerScore)}">
-							{getAnswerEmoji(answerScore)}
+							{#if answerScore === 1}<ThumbsUp
+									size={16}
+									class="inline-icon"
+									color="#22c55e"
+								/>{:else if answerScore === -1}<ThumbsDown
+									size={16}
+									class="inline-icon"
+									color="#ef4444"
+								/>{:else if answerScore === 0}<CircleQuestionMark
+									size={16}
+									class="inline-icon"
+									color="#6b7280"
+								/>{/if}
 							{getAnswerLabel(answerScore)}
 						</span>
 					</div>
@@ -392,21 +431,21 @@
 								<button
 									class="vote-btn-sm vote-agree-sm"
 									onclick={() => handleVote(1)}
-									disabled={actionLoading}>👍</button
+									disabled={actionLoading}><ThumbsUp size={16} /></button
 								>
 							{/if}
 							{#if answerScore !== 0}
 								<button
 									class="vote-btn-sm vote-skip-sm"
 									onclick={() => handleVote(0)}
-									disabled={actionLoading}>🤔</button
+									disabled={actionLoading}><CircleQuestionMark size={16} /></button
 								>
 							{/if}
 							{#if answerScore !== -1}
 								<button
 									class="vote-btn-sm vote-disagree-sm"
 									onclick={() => handleVote(-1)}
-									disabled={actionLoading}>👎</button
+									disabled={actionLoading}><ThumbsDown size={16} /></button
 								>
 							{/if}
 						</div>
@@ -425,13 +464,13 @@
 								<button
 									class="btn-retract"
 									onclick={() => (retractConfirm = true)}
-									disabled={actionLoading}>↩️ 取り消す</button
+									disabled={actionLoading}><Undo2 size={14} class="inline-icon" /> 取り消す</button
 								>
 							{/if}
 							<button
 								class="btn-delegate"
 								onclick={() => onDelegate(billId)}
-								disabled={actionLoading}>🤝 委任</button
+								disabled={actionLoading}><Handshake size={14} class="inline-icon" /> 委任</button
 							>
 						</div>
 					</div>
@@ -446,7 +485,7 @@
 							onclick={() => handleVote(1)}
 							disabled={actionLoading}
 						>
-							<span class="vote-emoji">👍</span>
+							<span class="vote-emoji"><ThumbsUp size={20} color="#22c55e" /></span>
 							<span class="vote-label">賛成</span>
 						</button>
 						<button
@@ -454,7 +493,7 @@
 							onclick={() => handleVote(0)}
 							disabled={actionLoading}
 						>
-							<span class="vote-emoji">🤔</span>
+							<span class="vote-emoji"><CircleQuestionMark size={20} color="#6b7280" /></span>
 							<span class="vote-label">わからない</span>
 						</button>
 						<button
@@ -462,7 +501,7 @@
 							onclick={() => handleVote(-1)}
 							disabled={actionLoading}
 						>
-							<span class="vote-emoji">👎</span>
+							<span class="vote-emoji"><ThumbsDown size={20} color="#ef4444" /></span>
 							<span class="vote-label">反対</span>
 						</button>
 					</div>
@@ -471,7 +510,7 @@
 						onclick={() => onDelegate(billId)}
 						disabled={actionLoading}
 					>
-						🤝 フレンドに委任する
+						<Handshake size={14} class="inline-icon" /> フレンドに委任する
 					</button>
 				</div>
 			{/if}
@@ -1202,7 +1241,9 @@
 	}
 
 	.vote-emoji {
-		font-size: 1.5rem;
+		display: flex;
+		align-items: center;
+		justify-content: center;
 	}
 
 	.vote-label {

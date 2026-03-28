@@ -4,6 +4,7 @@
 	import TopMatchSpotlight from '$lib/components/match/TopMatchSpotlight.svelte';
 	import ClusterInsightCard from '$lib/components/match/ClusterInsightCard.svelte';
 	import type { ClusterResult, BaseClusterResult, GlobalMemberScore } from '$lib/types/index.js';
+	import { ClipboardList, Save, Lock, RefreshCw, Hourglass, Plus, Search } from '@lucide/svelte';
 
 	interface Props {
 		clusterResults: BaseClusterResult[];
@@ -169,29 +170,31 @@
 				<div class="header-actions">
 					{#if totalUnansweredBills > 0 && onContinue}
 						<button class="btn-continue" onclick={onContinue} disabled={isContinuing}>
-							<span>{isContinuing ? '⏳' : '➕'}</span>
+							<span
+								>{#if isContinuing}<Hourglass size={14} />{:else}<Plus size={14} />{/if}</span
+							>
 							{isContinuing ? '読み込み中...' : `追加回答 (${totalUnansweredBills}件)`}
 						</button>
 					{/if}
 					{#if snapshotSaved}
 						<a href="/match/saved" class="btn-view-saved">
-							<span>📋</span>
+							<span><ClipboardList size={14} /></span>
 							保存済み結果を見る
 						</a>
 					{:else if onSave}
 						<button class="btn-save" onclick={openSaveModal} disabled={isSaving}>
-							<span>💾</span>
+							<span><Save size={14} /></span>
 							{isSaving ? '保存中...' : 'スナップショットを保存'}
 						</button>
 					{:else if !isLoggedIn}
 						<button class="btn-login-to-save" onclick={onLoginToSave}>
-							<span>🔒</span>
+							<span><Lock size={14} /></span>
 							ログインして保存
 						</button>
 					{/if}
 					{#if onReset}
 						<button class="btn-reset" onclick={onReset}>
-							<span>🔄</span>
+							<span><RefreshCw size={14} /></span>
 							設定に戻る
 						</button>
 					{/if}
@@ -311,7 +314,7 @@
 			<div class="all-candidates-tab fade-in">
 				<div class="filters-bar">
 					<div class="search-box">
-						<span class="search-icon">🔍</span>
+						<span class="search-icon"><Search size={16} /></span>
 						<input
 							type="text"
 							bind:value={searchQuery}
@@ -410,16 +413,23 @@
 	{#if !isReadonly}
 		<div class="final-actions">
 			{#if snapshotSaved}
-				<a href="/match/saved" class="view-saved-button"> 📋 保存済み結果を見る </a>
+				<a href="/match/saved" class="view-saved-button">
+					<ClipboardList size={14} class="inline-icon" /> 保存済み結果を見る
+				</a>
 			{:else if onSave}
 				<button onclick={openSaveModal} class="save-button" disabled={isSaving}>
-					💾 {isSaving ? '保存中...' : 'スナップショットを保存する'}
+					<Save size={14} class="inline-icon" />
+					{isSaving ? '保存中...' : 'スナップショットを保存する'}
 				</button>
 			{:else if !isLoggedIn}
-				<button onclick={onLoginToSave} class="save-button"> 🔒 ログインして保存 </button>
+				<button onclick={onLoginToSave} class="save-button">
+					<Lock size={14} class="inline-icon" /> ログインして保存
+				</button>
 			{/if}
 			{#if onReset}
-				<button onclick={onReset} class="restart-button"> 🔄 設定に戻る </button>
+				<button onclick={onReset} class="restart-button">
+					<RefreshCw size={14} class="inline-icon" /> 設定に戻る
+				</button>
 			{/if}
 		</div>
 	{/if}

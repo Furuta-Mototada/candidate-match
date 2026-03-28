@@ -2,6 +2,7 @@
 	import LatentSpaceVisualization from '$lib/components/match/LatentSpaceVisualization.svelte';
 	import MemberRankingList from '$lib/components/match/MemberRankingList.svelte';
 	import type { MemberMatch, ClusterResult, MemberVectorForViz } from '$lib/types/index.js';
+	import { CircleCheck, Hourglass, PartyPopper } from '@lucide/svelte';
 
 	interface Props {
 		currentClusterDisplayName: string | null;
@@ -54,7 +55,10 @@
 </script>
 
 <div class="cluster-review-container fade-in-up">
-	<h2 class="section-title">✅ {currentClusterDisplayName} 完了</h2>
+	<h2 class="section-title">
+		<CircleCheck size={20} class="inline-icon" color="#22c55e" />
+		{currentClusterDisplayName} 完了
+	</h2>
 
 	<div class="review-content">
 		<!-- 1. Rating Section -->
@@ -115,10 +119,10 @@
 	<div class="action-area">
 		<button onclick={onSaveAndContinue} disabled={isLoading} class="btn-primary btn-large">
 			{#if isLoading}
-				<span class="loading-spinner">⏳</span>
+				<span class="loading-spinner"><Hourglass size={14} /></span>
 				読み込み中...
 			{:else if isLastClusterInSession}
-				総合結果を見る 🎉
+				総合結果を見る <PartyPopper size={14} class="inline-icon" />
 			{:else}
 				次の分野へ進む →
 			{/if}
