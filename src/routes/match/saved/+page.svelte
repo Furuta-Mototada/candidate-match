@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { goto } from '$app/navigation';
 	import type { PageData } from './$types.js';
@@ -217,6 +217,9 @@
 
 	// Bill detail modal
 	let selectedBill: BillListItem | null = $state(null);
+
+	// Proxy voting: when user clicks 代理投票する in 委任 tab, navigate to 回答履歴 with this delegation
+	let proxyVotingDelegation: IncomingDelegation | null = $state(null);
 
 	// Group delegations by bill for unified view
 	let delegationGroups: DelegationGroup[] = $derived.by(() => {
@@ -631,6 +634,60 @@
 		}
 	}
 
+	/** Navigate from 委任 tab to 回答履歴 tab and open BillDetailModal for proxy voting */
+	async function startProxyVoteInAnswerTab(delegation: IncomingDelegation) {
+		proxyVotingDelegation = delegation;
+		await loadAllBills();
+		activeTab = 'answers';
+		// Open the modal immediately
+		const bill = allBills.find((b) => b.id === delegation.billId);
+		if (bill) {
+			selectedBill = bill;
+		}
+		// Wait for Svelte to render the answers tab DOM, then scroll + highlight in background
+		await tick();
+		const el = document.getElementById(`bill-item-${delegation.billId}`);
+		if (el) {
+			el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+			el.classList.add('bill-item-highlight');
+			setTimeout(() => el.classList.remove('bill-item-highlight'), 2000);
+		}
+	}
+
+	/** Handle vote from BillDetailModal when in proxy voting mode */
+	async function handleProxyModalVote(billId: number, score: number) {
+		// First, cast the direct vote
+		await handleModalVote(billId, score);
+		// Then accept the delegation (server will use the existing vote)
+		if (proxyVotingDelegation && proxyVotingDelegation.billId === billId) {
+			await acceptDelegation(proxyVotingDelegation.id);
+			proxyVotingDelegation = null;
+			// Reload allBills to reflect updated hasIncomingDelegation
+			allBillsLoaded = false;
+			await loadAllBills();
+			// Refresh the selected bill
+			if (selectedBill && selectedBill.id === billId) {
+				const updated = allBills.find((b) => b.id === billId);
+				if (updated) selectedBill = updated;
+			}
+		}
+	}
+
+	/** Navigate to 委任 tab targeting a specific bill */
+	async function goToDelegationsForBill(billId: number) {
+		selectedBill = null;
+		await switchTab('delegations');
+		// Scroll to the target bill card after a brief rendering delay
+		setTimeout(() => {
+			const el = document.getElementById(`delegation-bill-${billId}`);
+			if (el) {
+				el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+				el.classList.add('delegation-card-highlight');
+				setTimeout(() => el.classList.remove('delegation-card-highlight'), 2000);
+			}
+		}, 100);
+	}
+
 	onMount(() => {
 		const tabParam = new URLSearchParams(window.location.search).get('tab');
 		if (tabParam === 'delegations' || tabParam === 'answers' || tabParam === 'snapshots') {
@@ -884,6 +941,7 @@
 								<!-- svelte-ignore a11y_click_events_have_key_events -->
 								<!-- svelte-ignore a11y_no_static_element_interactions -->
 								<div
+									id="bill-item-{b.id}"
 									class="bill-item bill-item-clickable"
 									class:bill-item-answered={b.answerScore !== null}
 									class:bill-item-delegated={b.delegation !== null && b.answerScore === null}
@@ -982,6 +1040,7 @@
 									? 'pending'
 									: (outgoing?.status ?? incomingList[0]?.status ?? '')}
 								<div
+									id="delegation-bill-{group.billId}"
 									class="delegation-card"
 									class:delegation-card-pending={primaryStatus === 'pending'}
 								>
@@ -1102,7 +1161,8 @@
 									{/if}
 
 									<!-- Bill-level incoming actions (apply to ALL incoming for this bill) -->
-									{#if hasPendingIncoming}
+									<!-- Hide when user has an outgoing delegation (middleman - already forwarded) -->
+									{#if hasPendingIncoming && !outgoing}
 										{@const firstPending = incomingList.find((d) => d.status === 'pending')}
 										{#if firstPending}
 											<div class="delegation-actions">
@@ -1119,7 +1179,7 @@
 												{:else}
 													<button
 														class="btn-vote-for"
-														onclick={() => (votingDelegation = firstPending)}
+														onclick={() => startProxyVoteInAnswerTab(firstPending)}
 														disabled={isLoading}
 													>
 														<Vote size={16} class="inline-icon" /> 代理投票する
@@ -1351,16 +1411,19 @@
 			answerScore={selectedBill.answerScore}
 			hasDelegation={selectedBill.delegation !== null && selectedBill.answerScore === null}
 			delegateUsername={selectedBill.delegation?.delegateUsername ?? null}
-			onClose={() => (selectedBill = null)}
-			onVote={handleModalVote}
+			hasIncomingDelegation={selectedBill.hasIncomingDelegation}
+			onClose={() => {
+				selectedBill = null;
+				proxyVotingDelegation = null;
+			}}
+			onVote={proxyVotingDelegation ? handleProxyModalVote : handleModalVote}
 			onRetract={handleModalRetract}
 			onDelegate={(billId) => {
 				selectedBill = null;
 				openDelegateFromBill(allBills.find((bb) => bb.id === billId)!);
 			}}
 			onGoToDelegations={() => {
-				selectedBill = null;
-				switchTab('delegations');
+				goToDelegationsForBill(selectedBill!.id);
 			}}
 		/>
 	{/if}
@@ -1833,6 +1896,19 @@
 
 	.delegation-card-pending {
 		border-left: 3px solid #f59e0b;
+	}
+
+	.delegation-card-highlight {
+		animation: highlightPulse 2s ease-out;
+	}
+
+	@keyframes highlightPulse {
+		0% {
+			box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.5);
+		}
+		100% {
+			box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+		}
 	}
 
 	.delegation-bill-header {
@@ -2457,6 +2533,10 @@
 
 	.bill-item-clickable {
 		cursor: pointer;
+	}
+
+	.bill-item-highlight {
+		animation: highlightPulse 2s ease-out;
 	}
 
 	.bill-item:hover {

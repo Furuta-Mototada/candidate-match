@@ -71,6 +71,13 @@ export const GET: RequestHandler = async ({ locals }) => {
 		}
 	}
 
+	// Fetch bill IDs where the user has incoming delegations (is the delegate)
+	const incomingDelegationRows = await db
+		.select({ billId: voteDelegation.billId })
+		.from(voteDelegation)
+		.where(eq(voteDelegation.delegateId, userId));
+	const incomingDelegationBillIds = new Set(incomingDelegationRows.map((r) => r.billId));
+
 	const bills = rows.map((row) => ({
 		id: row.id,
 		type: row.type,
@@ -86,7 +93,8 @@ export const GET: RequestHandler = async ({ locals }) => {
 					status: row.delegationStatus,
 					delegateUsername: delegateUsernameMap.get(row.delegateId!) || ''
 				}
-			: null
+			: null,
+		hasIncomingDelegation: incomingDelegationBillIds.has(row.id)
 	}));
 
 	return json({ success: true, bills });

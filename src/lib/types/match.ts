@@ -113,6 +113,7 @@ export interface BillListItem {
 		status: string;
 		delegateUsername: string;
 	} | null;
+	hasIncomingDelegation: boolean;
 }
 
 export interface ResultSnapshotData {

@@ -30,6 +30,7 @@
 		answerScore: number | null;
 		hasDelegation: boolean;
 		delegateUsername: string | null;
+		hasIncomingDelegation: boolean;
 		onClose: () => void;
 		onVote: (billId: number, score: number) => Promise<void>;
 		onRetract: (billId: number) => Promise<void>;
@@ -47,6 +48,7 @@
 		answerScore = $bindable(),
 		hasDelegation,
 		delegateUsername,
+		hasIncomingDelegation,
 		onClose,
 		onVote,
 		onRetract,
@@ -459,11 +461,19 @@
 									disabled={actionLoading}><Undo2 size={14} class="inline-icon" /> 取り消す</button
 								>
 							{/if}
-							<button
-								class="btn-delegate"
-								onclick={() => onDelegate(billId)}
-								disabled={actionLoading}><Handshake size={14} class="inline-icon" /> 委任</button
-							>
+							{#if hasIncomingDelegation}
+								{#if onGoToDelegations}
+									<button class="btn-go-delegations" onclick={onGoToDelegations}>
+										<Handshake size={14} class="inline-icon" /> 委任タブで管理 →
+									</button>
+								{/if}
+							{:else}
+								<button
+									class="btn-delegate"
+									onclick={() => onDelegate(billId)}
+									disabled={actionLoading}><Handshake size={14} class="inline-icon" /> 委任</button
+								>
+							{/if}
 						</div>
 					</div>
 				</div>
@@ -497,13 +507,21 @@
 							<span class="vote-label">反対</span>
 						</button>
 					</div>
-					<button
-						class="btn-delegate standalone-delegate"
-						onclick={() => onDelegate(billId)}
-						disabled={actionLoading}
-					>
-						<Handshake size={14} class="inline-icon" /> フレンドに委任する
-					</button>
+					{#if hasIncomingDelegation}
+						{#if onGoToDelegations}
+							<button class="btn-go-delegations standalone-delegate" onclick={onGoToDelegations}>
+								<Handshake size={14} class="inline-icon" /> 委任タブで管理 →
+							</button>
+						{/if}
+					{:else}
+						<button
+							class="btn-delegate standalone-delegate"
+							onclick={() => onDelegate(billId)}
+							disabled={actionLoading}
+						>
+							<Handshake size={14} class="inline-icon" /> フレンドに委任する
+						</button>
+					{/if}
 				</div>
 			{/if}
 		</div>

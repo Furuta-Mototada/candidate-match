@@ -309,6 +309,24 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					and(eq(table.userBillAnswer.userId, userId), eq(table.userBillAnswer.billId, billId))
 				);
 
+			// If the delegate already has an outgoing delegation for this bill,
+			// auto-mark this new incoming as 'redelegated'
+			const [delegateOutgoing] = await db
+				.select()
+				.from(table.voteDelegation)
+				.where(
+					and(
+						eq(table.voteDelegation.delegatorId, delegateId),
+						eq(table.voteDelegation.billId, billId)
+					)
+				);
+			if (delegateOutgoing) {
+				await db
+					.update(table.voteDelegation)
+					.set({ status: 'redelegated', updatedAt: new Date() })
+					.where(eq(table.voteDelegation.id, existing.id));
+			}
+
 			const billTitle = await getBillTitle(billId);
 			await notifyDelegationReceived(delegateId, currentUsername, existing.id, billId, billTitle);
 
@@ -341,6 +359,24 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		await db
 			.delete(table.userBillAnswer)
 			.where(and(eq(table.userBillAnswer.userId, userId), eq(table.userBillAnswer.billId, billId)));
+
+		// If the delegate already has an outgoing delegation for this bill,
+		// auto-mark this new incoming as 'redelegated'
+		const [delegateOutgoing] = await db
+			.select()
+			.from(table.voteDelegation)
+			.where(
+				and(
+					eq(table.voteDelegation.delegatorId, delegateId),
+					eq(table.voteDelegation.billId, billId)
+				)
+			);
+		if (delegateOutgoing) {
+			await db
+				.update(table.voteDelegation)
+				.set({ status: 'redelegated', updatedAt: new Date() })
+				.where(eq(table.voteDelegation.id, inserted.id));
+		}
 
 		const billTitle = await getBillTitle(billId);
 		await notifyDelegationReceived(delegateId, currentUsername, inserted.id, billId, billTitle);
