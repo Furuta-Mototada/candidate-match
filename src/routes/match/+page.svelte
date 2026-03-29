@@ -181,34 +181,6 @@
 	}
 
 	/**
-	 * Set a configuration as the default for all users
-	 */
-	async function setAsDefault(name: string, clusterId: number) {
-		try {
-			const response = await fetch('/api/match', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					action: 'set-default',
-					name: name,
-					configClusterId: clusterId
-				})
-			});
-
-			if (response.ok) {
-				// Refresh saved vectors to reflect the change
-				const refreshResponse = await fetch('/api/match');
-				if (refreshResponse.ok) {
-					const refreshData = await refreshResponse.json();
-					savedVectors = refreshData.savedVectors || [];
-				}
-			}
-		} catch (e) {
-			error = e instanceof Error ? e.message : 'デフォルト設定に失敗しました';
-		}
-	}
-
-	/**
 	 * Start matching with a saved vector configuration (all clusters)
 	 */
 	async function startWithSavedVector() {
@@ -1278,7 +1250,6 @@
 				{isLoading}
 				isAdmin={data.user?.role === 'admin'}
 				onStart={startWithSavedVector}
-				onSetDefault={setAsDefault}
 			/>
 		{:else if phase === 'questioning'}
 			<QuestioningPhase

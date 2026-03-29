@@ -7,8 +7,7 @@
 		Settings,
 		Star,
 		ChevronDown,
-		ChevronUp,
-		Shield
+		ChevronUp
 	} from '@lucide/svelte';
 	import type { GroupedSavedVector } from '$lib/types/index.js';
 
@@ -19,7 +18,6 @@
 		isLoading: boolean;
 		isAdmin?: boolean;
 		onStart: () => void;
-		onSetDefault?: (name: string, clusterId: number) => void;
 	}
 
 	let {
@@ -28,8 +26,7 @@
 		selectedGroupedVector,
 		isLoading,
 		isAdmin = false,
-		onStart,
-		onSetDefault
+		onStart
 	}: Props = $props();
 
 	let showAdvancedSettings = $state(false);
@@ -129,25 +126,8 @@
 							</option>
 						{/each}
 					</select>
-					<a href="/member-vectors" class="create-new-link"> 新しい設定を作成 → </a>
-
-					{#if isAdmin && selectedGroupedVector && onSetDefault}
-						<div class="admin-actions">
-							<button
-								class="btn-set-default"
-								class:is-default={isCurrentDefault}
-								onclick={() =>
-									onSetDefault(selectedGroupedVector!.name, selectedGroupedVector!.clusterId)}
-								disabled={isCurrentDefault}
-							>
-								<Shield size={14} />
-								{#if isCurrentDefault}
-									デフォルトに設定済み
-								{:else}
-									この設定をデフォルトにする
-								{/if}
-							</button>
-						</div>
+					{#if isAdmin}
+						<a href="/member-vectors" class="create-new-link"> 新しい設定を作成 → </a>
 					{/if}
 				</div>
 			{/if}
@@ -382,42 +362,6 @@
 	.vector-select:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
-	}
-
-	/* Admin actions */
-	.admin-actions {
-		margin-top: 0.75rem;
-	}
-
-	.btn-set-default {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.375rem;
-		padding: 0.5rem 1rem;
-		background: #f9fafb;
-		border: 1px solid #d1d5db;
-		border-radius: 8px;
-		font-size: 0.8125rem;
-		font-weight: 500;
-		color: #4b5563;
-		cursor: pointer;
-		transition: all 0.2s ease;
-	}
-
-	.btn-set-default:hover:not(:disabled) {
-		background: #f3f4f6;
-		border-color: #9ca3af;
-	}
-
-	.btn-set-default.is-default {
-		background: #fef3c7;
-		border-color: #fbbf24;
-		color: #92400e;
-		cursor: default;
-	}
-
-	.btn-set-default:disabled {
-		opacity: 0.7;
 	}
 
 	.btn-primary {

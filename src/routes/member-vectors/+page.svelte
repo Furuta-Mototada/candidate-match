@@ -552,13 +552,26 @@
 		}
 	}
 
-	async function setAsDefault(group: GroupedSavedVector) {
+	let confirmDefaultGroup: GroupedSavedVector | null = $state(null);
+	let confirmDefaultAction: 'set' | 'clear' = $state('set');
+
+	function requestDefaultChange(group: GroupedSavedVector) {
+		confirmDefaultAction = group.isDefault ? 'clear' : 'set';
+		confirmDefaultGroup = group;
+	}
+
+	async function confirmSetDefault() {
+		const group = confirmDefaultGroup;
+		if (!group) return;
+		confirmDefaultGroup = null;
+
 		try {
+			const action = confirmDefaultAction === 'set' ? 'set-default' : 'clear-default';
 			const response = await fetch('/api/match', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					action: 'set-default',
+					action,
 					name: group.name,
 					configClusterId: group.clusterId
 				})
@@ -568,7 +581,7 @@
 				await loadSavedVectors();
 			}
 		} catch (error) {
-			console.error('Failed to set default:', error);
+			console.error('Failed to update default:', error);
 		}
 	}
 
@@ -1077,9 +1090,8 @@
 							<button
 								class="btn-set-default"
 								class:is-default={group.isDefault}
-								onclick={() => setAsDefault(group)}
-								disabled={group.isDefault}
-								title={group.isDefault ? 'デフォルトに設定済み' : 'マッチングのデフォルトに設定'}
+								onclick={() => requestDefaultChange(group)}
+								title={group.isDefault ? 'デフォルトを解除' : 'マッチングのデフォルトに設定'}
 							>
 								{#if group.isDefault}
 									★
@@ -1452,6 +1464,41 @@
 			</div>
 		</div>
 	{/if}
+
+	{#if confirmDefaultGroup}
+		<div
+			class="modal-overlay"
+			role="dialog"
+			tabindex="-1"
+			onclick={() => (confirmDefaultGroup = null)}
+			onkeydown={(e) => {
+				if (e.key === 'Escape') confirmDefaultGroup = null;
+			}}
+		>
+			<div class="confirm-modal" role="none" onclick={(e) => e.stopPropagation()}>
+				<h3>
+					{confirmDefaultAction === 'set' ? 'デフォルトに設定' : 'デフォルトを解除'}
+				</h3>
+				<p>
+					「{confirmDefaultGroup.name}」を
+					{confirmDefaultAction === 'set'
+						? 'マッチングのデフォルト設定にしますか？'
+						: 'デフォルトから解除しますか？'}
+				</p>
+				<div class="confirm-actions">
+					<button class="btn-cancel" onclick={() => (confirmDefaultGroup = null)}>キャンセル</button
+					>
+					<button
+						class="btn-confirm"
+						class:btn-confirm-danger={confirmDefaultAction === 'clear'}
+						onclick={confirmSetDefault}
+					>
+						{confirmDefaultAction === 'set' ? '設定する' : '解除する'}
+					</button>
+				</div>
+			</div>
+		</div>
+	{/if}
 </div>
 
 <style>
@@ -1645,11 +1692,84 @@
 		border-color: #fbbf24;
 		background: #fffbeb;
 		color: #f59e0b;
-		cursor: default;
+		cursor: pointer;
+	}
+
+	.btn-set-default.is-default:hover {
+		border-color: #ef4444;
+		color: #ef4444;
+		background: #fef2f2;
 	}
 
 	.btn-set-default:disabled {
 		opacity: 0.8;
+	}
+
+	.confirm-modal {
+		background: white;
+		border-radius: 16px;
+		padding: 1.5rem;
+		max-width: 400px;
+		width: 90%;
+		box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+	}
+
+	.confirm-modal h3 {
+		margin: 0 0 0.75rem;
+		font-size: 1.125rem;
+		color: #1f2937;
+	}
+
+	.confirm-modal p {
+		margin: 0 0 1.25rem;
+		color: #6b7280;
+		font-size: 0.9375rem;
+		line-height: 1.5;
+	}
+
+	.confirm-actions {
+		display: flex;
+		gap: 0.75rem;
+		justify-content: flex-end;
+	}
+
+	.btn-cancel {
+		padding: 0.5rem 1rem;
+		border: 1px solid #d1d5db;
+		background: white;
+		border-radius: 8px;
+		font-size: 0.875rem;
+		color: #6b7280;
+		cursor: pointer;
+		transition: all 0.2s;
+	}
+
+	.btn-cancel:hover {
+		background: #f3f4f6;
+	}
+
+	.btn-confirm {
+		padding: 0.5rem 1rem;
+		border: none;
+		background: #6366f1;
+		color: white;
+		border-radius: 8px;
+		font-size: 0.875rem;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 0.2s;
+	}
+
+	.btn-confirm:hover {
+		background: #4f46e5;
+	}
+
+	.btn-confirm-danger {
+		background: #ef4444;
+	}
+
+	.btn-confirm-danger:hover {
+		background: #dc2626;
 	}
 
 	.saved-meta {
