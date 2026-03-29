@@ -16,6 +16,7 @@ import {
 	estimateUserVector,
 	findMatchingMembers,
 	loadMemberGroups,
+	answerToScore,
 	type ClusterVectorData,
 	type UserAnswer
 } from '$lib/server/matching.js';
@@ -141,7 +142,7 @@ async function getAnswers(userId: string, clusterId: number | null) {
 			: await db
 					.select({
 						billId: userBillAnswer.billId,
-						score: userBillAnswer.score
+						answer: userBillAnswer.answer
 					})
 					.from(userBillAnswer)
 					.where(
@@ -151,7 +152,7 @@ async function getAnswers(userId: string, clusterId: number | null) {
 					);
 
 	// Get bill titles
-	const answeredBillIds = answers.map((a) => a.billId);
+	const answeredBillIds = answers.filter((a) => a.answer !== 'delegated').map((a) => a.billId);
 	const billTitles =
 		answeredBillIds.length > 0
 			? await db
@@ -163,12 +164,14 @@ async function getAnswers(userId: string, clusterId: number | null) {
 
 	return json({
 		success: true,
-		totalAnswers: answers.length,
-		answers: answers.map((a) => ({
-			billId: a.billId,
-			title: billTitleMap.get(a.billId) || '',
-			answer: a.score
-		}))
+		totalAnswers: answeredBillIds.length,
+		answers: answers
+			.filter((a) => a.answer !== 'delegated')
+			.map((a) => ({
+				billId: a.billId,
+				title: billTitleMap.get(a.billId) || '',
+				answer: answerToScore(a.answer)
+			}))
 	});
 }
 
@@ -399,13 +402,15 @@ async function handleLiveResults(
 
 	// Load ALL user answers once
 	const allUserAnswers = await db
-		.select({ billId: userBillAnswer.billId, score: userBillAnswer.score })
+		.select({ billId: userBillAnswer.billId, answer: userBillAnswer.answer })
 		.from(userBillAnswer)
 		.where(eq(userBillAnswer.userId, userId));
 
 	const userAnswerMap = new Map<number, { score: number; source: 'direct' | 'delegated' }>();
 	for (const a of allUserAnswers) {
-		userAnswerMap.set(a.billId, { score: a.score, source: 'direct' });
+		if (a.answer !== 'delegated') {
+			userAnswerMap.set(a.billId, { score: answerToScore(a.answer), source: 'direct' });
+		}
 	}
 
 	// Resolve delegated votes: walk delegation chains to find terminal voter's answer

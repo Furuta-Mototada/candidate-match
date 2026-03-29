@@ -12,6 +12,7 @@ import {
 	checkFriendship,
 	detectDelegationCycle
 } from '$lib/server/delegation-helpers';
+import { answerToScore, scoreToAnswer } from '$lib/server/matching';
 import {
 	notifyDelegationReceived,
 	notifyDelegationRejected,
@@ -129,10 +130,10 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 
 		// For each incoming delegation, check if the current user already voted on that bill
 		const incomingBillIds = incomingRaw.map((d: { billId: number }) => d.billId);
-		const myVotesMap = new Map<number, number>();
+		const myVotesMap = new Map<number, number | null>();
 		if (incomingBillIds.length > 0) {
 			const myVotes = await db
-				.select({ billId: table.userBillAnswer.billId, score: table.userBillAnswer.score })
+				.select({ billId: table.userBillAnswer.billId, answer: table.userBillAnswer.answer })
 				.from(table.userBillAnswer)
 				.where(
 					and(
@@ -141,7 +142,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 					)
 				);
 			for (const v of myVotes) {
-				myVotesMap.set(v.billId, v.score);
+				myVotesMap.set(v.billId, v.answer !== 'delegated' ? answerToScore(v.answer) : null);
 			}
 		}
 
@@ -173,10 +174,10 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 		// Build delegation chain info for outgoing delegations
 		// Also look up the current user's vote for each bill (this IS the delegated vote result)
 		const outgoingBillIds = outgoingRaw.map((d: { billId: number }) => d.billId);
-		const myOutgoingVotesMap = new Map<number, number>();
+		const myOutgoingVotesMap = new Map<number, number | null>();
 		if (outgoingBillIds.length > 0) {
 			const myOutVotes = await db
-				.select({ billId: table.userBillAnswer.billId, score: table.userBillAnswer.score })
+				.select({ billId: table.userBillAnswer.billId, answer: table.userBillAnswer.answer })
 				.from(table.userBillAnswer)
 				.where(
 					and(
@@ -185,7 +186,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 					)
 				);
 			for (const v of myOutVotes) {
-				myOutgoingVotesMap.set(v.billId, v.score);
+				myOutgoingVotesMap.set(v.billId, v.answer !== 'delegated' ? answerToScore(v.answer) : null);
 			}
 		}
 
@@ -327,12 +328,21 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					)
 				);
 
-			// Remove user's own vote — the delegate will decide
+			// Mark user's answer as delegated — the delegate will decide
 			await db
-				.delete(table.userBillAnswer)
-				.where(
-					and(eq(table.userBillAnswer.userId, userId), eq(table.userBillAnswer.billId, billId))
-				);
+				.insert(table.userBillAnswer)
+				.values({
+					userId,
+					billId,
+					answer: 'delegated'
+				})
+				.onConflictDoUpdate({
+					target: [table.userBillAnswer.userId, table.userBillAnswer.billId],
+					set: {
+						answer: 'delegated',
+						updatedAt: sql`now()`
+					}
+				});
 
 			// If the delegate already has an outgoing delegation for this bill,
 			// auto-mark this new incoming as 'redelegated'
@@ -380,10 +390,21 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				)
 			);
 
-		// Remove user's own vote — the delegate will decide
+		// Mark user's answer as delegated — the delegate will decide
 		await db
-			.delete(table.userBillAnswer)
-			.where(and(eq(table.userBillAnswer.userId, userId), eq(table.userBillAnswer.billId, billId)));
+			.insert(table.userBillAnswer)
+			.values({
+				userId,
+				billId,
+				answer: 'delegated'
+			})
+			.onConflictDoUpdate({
+				target: [table.userBillAnswer.userId, table.userBillAnswer.billId],
+				set: {
+					answer: 'delegated',
+					updatedAt: sql`now()`
+				}
+			});
 
 		// If the delegate already has an outgoing delegation for this bill,
 		// auto-mark this new incoming as 'redelegated'
@@ -446,8 +467,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 		// If delegate already voted, use their existing vote; otherwise require a score
 		let score: number;
-		if (existingAnswer) {
-			score = existingAnswer.score;
+		if (existingAnswer && existingAnswer.answer !== 'delegated') {
+			score = answerToScore(existingAnswer.answer);
 		} else if (providedScore !== undefined && [1, 0, -1].includes(providedScore)) {
 			score = providedScore;
 
@@ -457,12 +478,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				.values({
 					userId,
 					billId: delegation.billId,
-					score
+					answer: scoreToAnswer(score)
 				})
 				.onConflictDoUpdate({
 					target: [table.userBillAnswer.userId, table.userBillAnswer.billId],
 					set: {
-						score,
+						answer: scoreToAnswer(score),
 						updatedAt: sql`now()`
 					}
 				});
@@ -601,15 +622,21 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			});
 		}
 
-		// Remove user's own vote — the new delegate will decide
+		// Mark user's answer as delegated — the new delegate will decide
 		await db
-			.delete(table.userBillAnswer)
-			.where(
-				and(
-					eq(table.userBillAnswer.userId, userId),
-					eq(table.userBillAnswer.billId, delegation.billId)
-				)
-			);
+			.insert(table.userBillAnswer)
+			.values({
+				userId,
+				billId: delegation.billId,
+				answer: 'delegated'
+			})
+			.onConflictDoUpdate({
+				target: [table.userBillAnswer.userId, table.userBillAnswer.billId],
+				set: {
+					answer: 'delegated',
+					updatedAt: sql`now()`
+				}
+			});
 
 		// Notify the new delegate about the incoming delegation
 		const billTitle = await getBillTitle(delegation.billId);
@@ -705,6 +732,19 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				)
 			);
 
+		// Remove 'delegated' answer for each rejected delegator so they can vote again
+		for (const d of allPendingForBill) {
+			await db
+				.delete(table.userBillAnswer)
+				.where(
+					and(
+						eq(table.userBillAnswer.userId, d.delegatorId),
+						eq(table.userBillAnswer.billId, delegation.billId),
+						eq(table.userBillAnswer.answer, 'delegated')
+					)
+				);
+		}
+
 		// Notify all delegators
 		const billTitle = await getBillTitle(delegation.billId);
 		for (const d of allPendingForBill) {
@@ -740,6 +780,17 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		}
 
 		await db.delete(table.voteDelegation).where(eq(table.voteDelegation.id, delegationId));
+
+		// Remove the 'delegated' answer so user can vote again
+		await db
+			.delete(table.userBillAnswer)
+			.where(
+				and(
+					eq(table.userBillAnswer.userId, userId),
+					eq(table.userBillAnswer.billId, delegation.billId),
+					eq(table.userBillAnswer.answer, 'delegated')
+				)
+			);
 
 		// Restore ALL upstream 'redelegated' delegations back to 'pending'
 		await db
@@ -827,6 +878,18 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			return json({ error: '委任が見つかりません' }, { status: 404 });
 		}
 
+		// Find ALL rejected delegations for this bill before reverting
+		const allRejectedForBill = await db
+			.select()
+			.from(table.voteDelegation)
+			.where(
+				and(
+					eq(table.voteDelegation.delegateId, userId),
+					eq(table.voteDelegation.billId, delegation.billId),
+					eq(table.voteDelegation.status, 'rejected')
+				)
+			);
+
 		// Revert ALL rejected incoming delegations for the same bill
 		await db
 			.update(table.voteDelegation)
@@ -838,6 +901,24 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					eq(table.voteDelegation.status, 'rejected')
 				)
 			);
+
+		// Restore 'delegated' answer for each delegator (was deleted during rejection)
+		for (const d of allRejectedForBill) {
+			await db
+				.insert(table.userBillAnswer)
+				.values({
+					userId: d.delegatorId,
+					billId: delegation.billId,
+					answer: 'delegated'
+				})
+				.onConflictDoUpdate({
+					target: [table.userBillAnswer.userId, table.userBillAnswer.billId],
+					set: {
+						answer: 'delegated',
+						updatedAt: sql`now()`
+					}
+				});
+		}
 
 		return json({ success: true, message: '拒否を取り消し、保留に戻しました' });
 	}

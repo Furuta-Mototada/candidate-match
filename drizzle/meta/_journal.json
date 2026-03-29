@@ -190,6 +190,13 @@
       "when": 1774696941219,
       "tag": "0026_remove_accepted_delegation",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1774800000000,
+      "tag": "0027_bill_answer_enum",
+      "breakpoints": true
     }
   ]
 }

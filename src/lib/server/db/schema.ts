@@ -407,6 +407,8 @@ export type NewSession = typeof session.$inferInsert;
 // User Bill Answers - global per-user answers to bills (shared across sessions)
 // ============================================================================
 
+export const billAnswerEnum = pgEnum('bill_answer_value', ['yes', 'no', 'skip', 'delegated']);
+
 export const userBillAnswer = pgTable(
 	'user_bill_answer',
 	{
@@ -417,7 +419,7 @@ export const userBillAnswer = pgTable(
 		billId: integer('bill_id')
 			.notNull()
 			.references(() => bill.id),
-		score: integer('score').notNull(), // -1, 0, or 1
+		answer: billAnswerEnum('answer').notNull(),
 		createdAt: timestamp('created_at').notNull().defaultNow(),
 		updatedAt: timestamp('updated_at').notNull().defaultNow()
 	},
@@ -426,6 +428,7 @@ export const userBillAnswer = pgTable(
 
 export type UserBillAnswer = typeof userBillAnswer.$inferSelect;
 export type NewUserBillAnswer = typeof userBillAnswer.$inferInsert;
+export type BillAnswerValue = (typeof billAnswerEnum.enumValues)[number];
 
 // Result snapshots - standalone point-in-time snapshots of matching results
 export const resultSnapshot = pgTable('result_snapshot', {

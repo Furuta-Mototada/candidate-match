@@ -15,6 +15,32 @@
 import { db } from './db/index.js';
 import { bill, group, memberGroup } from './db/schema.js';
 import { eq, inArray } from 'drizzle-orm';
+import type { BillAnswerValue } from './db/schema.js';
+
+// ============================================================================
+// Answer conversion utilities
+// ============================================================================
+
+/** Convert a DB enum answer to a numeric score for matching math. */
+export function answerToScore(answer: BillAnswerValue): number {
+	switch (answer) {
+		case 'yes':
+			return 1;
+		case 'no':
+			return -1;
+		case 'skip':
+			return 0;
+		case 'delegated':
+			return 0; // should not be used in matching directly
+	}
+}
+
+/** Convert a numeric score to the DB enum value. */
+export function scoreToAnswer(score: number): 'yes' | 'no' | 'skip' {
+	if (score >= 1) return 'yes';
+	if (score <= -1) return 'no';
+	return 'skip';
+}
 
 // ============================================================================
 // Types

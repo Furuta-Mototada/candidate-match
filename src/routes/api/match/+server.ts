@@ -21,6 +21,8 @@ import {
 	loadBillInfo,
 	loadMemberGroups,
 	buildBillInfoMap,
+	answerToScore,
+	scoreToAnswer,
 	type MatchingState,
 	type UserAnswer,
 	type ClusterVectorData,
@@ -282,10 +284,12 @@ async function handleStart(
 		);
 
 		// Merge direct + delegated answers
-		const allAnswers: { billId: number; score: number }[] = existingAnswers.map((a) => ({
-			billId: a.billId,
-			score: a.score
-		}));
+		const allAnswers: { billId: number; score: number }[] = existingAnswers
+			.filter((a) => a.answer !== 'delegated')
+			.map((a) => ({
+				billId: a.billId,
+				score: answerToScore(a.answer)
+			}));
 		for (const [billId, score] of delegatedVotes) {
 			// Only add if not already in direct answers
 			if (!allAnswers.some((a) => a.billId === billId)) {
@@ -464,10 +468,12 @@ async function handleResume(
 		const delegatedVotes = await resolveDelegatedVotes(userId, clusterData.billIds);
 
 		// Merge direct + delegated answers
-		const allAnswers: { billId: number; score: number }[] = existingAnswers.map((a) => ({
-			billId: a.billId,
-			score: a.score
-		}));
+		const allAnswers: { billId: number; score: number }[] = existingAnswers
+			.filter((a) => a.answer !== 'delegated')
+			.map((a) => ({
+				billId: a.billId,
+				score: answerToScore(a.answer)
+			}));
 		for (const [billId, score] of delegatedVotes) {
 			if (!allAnswers.some((a) => a.billId === billId)) {
 				allAnswers.push({ billId, score });
@@ -622,12 +628,12 @@ async function handleAnswer(
 				.values({
 					userId,
 					billId,
-					score: normalizedScore
+					answer: scoreToAnswer(normalizedScore)
 				})
 				.onConflictDoUpdate({
 					target: [userBillAnswer.userId, userBillAnswer.billId],
 					set: {
-						score: normalizedScore,
+						answer: scoreToAnswer(normalizedScore),
 						updatedAt: sql`now()`
 					}
 				});
@@ -721,12 +727,12 @@ async function handleSkip(sessionId: string, billId: number, userId: string | nu
 				.values({
 					userId,
 					billId,
-					score: 0
+					answer: 'skip'
 				})
 				.onConflictDoUpdate({
 					target: [userBillAnswer.userId, userBillAnswer.billId],
 					set: {
-						score: 0,
+						answer: 'skip',
 						updatedAt: sql`now()`
 					}
 				});
@@ -798,10 +804,16 @@ async function handleRetractAnswer(billId: number, userId: string | null) {
 		);
 	}
 
-	// Delete the user's answer
+	// Delete the user's answer (but not if it's a 'delegated' placeholder)
 	const result = await db
 		.delete(userBillAnswer)
-		.where(and(eq(userBillAnswer.userId, userId), eq(userBillAnswer.billId, billId)))
+		.where(
+			and(
+				eq(userBillAnswer.userId, userId),
+				eq(userBillAnswer.billId, billId),
+				sql`${userBillAnswer.answer} != 'delegated'`
+			)
+		)
 		.returning();
 
 	if (result.length === 0) {
@@ -851,12 +863,12 @@ async function handleDirectVote(billId: number, score: number, userId: string | 
 		.values({
 			userId,
 			billId,
-			score: normalizedScore
+			answer: scoreToAnswer(normalizedScore)
 		})
 		.onConflictDoUpdate({
 			target: [userBillAnswer.userId, userBillAnswer.billId],
 			set: {
-				score: normalizedScore,
+				answer: scoreToAnswer(normalizedScore),
 				updatedAt: sql`now()`
 			}
 		});

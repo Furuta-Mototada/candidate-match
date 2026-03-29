@@ -1,6 +1,7 @@
 import { eq, and, or, inArray } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
+import { answerToScore } from '$lib/server/matching';
 
 /**
  * Get the downstream delegation chain: who did the delegate forward this to?
@@ -315,7 +316,7 @@ export async function resolveDelegatedVotes(
 		// If the chain ended with a vote, look up the terminal voter's answer
 		if (currentStatus === 'voted') {
 			const [answer] = await db
-				.select({ score: table.userBillAnswer.score })
+				.select({ answer: table.userBillAnswer.answer })
 				.from(table.userBillAnswer)
 				.where(
 					and(
@@ -324,8 +325,8 @@ export async function resolveDelegatedVotes(
 					)
 				);
 
-			if (answer) {
-				result.set(delegation.billId, answer.score);
+			if (answer && answer.answer !== 'delegated') {
+				result.set(delegation.billId, answerToScore(answer.answer));
 			}
 		}
 	}

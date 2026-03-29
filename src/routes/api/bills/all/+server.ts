@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types.js';
 import { db } from '$lib/server/db/index.js';
 import { bill, userBillAnswer, voteDelegation, user } from '$lib/server/db/schema.js';
 import { eq, and, sql } from 'drizzle-orm';
+import { answerToScore } from '$lib/server/matching.js';
 
 /**
  * GET /api/bills/all
@@ -31,7 +32,7 @@ export const GET: RequestHandler = async ({ locals }) => {
 			result: bill.result,
 			submissionDate: bill.submissionDate,
 			// User's own answer (null if not answered)
-			answerScore: userBillAnswer.score,
+			answerValue: userBillAnswer.answer,
 			// Outgoing delegation fields (null if not delegated)
 			delegationId: voteDelegation.id,
 			delegationStatus: voteDelegation.status,
@@ -86,7 +87,8 @@ export const GET: RequestHandler = async ({ locals }) => {
 		title: row.title || '',
 		result: row.result,
 		submissionDate: row.submissionDate,
-		answerScore: row.answerScore,
+		answerScore:
+			row.answerValue && row.answerValue !== 'delegated' ? answerToScore(row.answerValue) : null,
 		delegation: row.delegationId
 			? {
 					id: row.delegationId,
