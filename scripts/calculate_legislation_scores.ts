@@ -27,6 +27,7 @@ interface LegislationScore {
 	billNumber: number;
 	session: number;
 	submissionDate: string | null;
+	result: string | null;
 	memberScores: MemberLegislationScore[];
 	totalPositive: number;
 	totalNegative: number;
@@ -544,6 +545,7 @@ async function calculateLegislationScores(cache: CachedData): Promise<Legislatio
 			billNumber: bill.number,
 			session: bill.submissionSession,
 			submissionDate: bill.submissionDate,
+			result: bill.result,
 			memberScores,
 			totalPositive,
 			totalNegative,

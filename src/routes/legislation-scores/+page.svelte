@@ -18,6 +18,7 @@
 		billNumber: number;
 		session: number;
 		submissionDate: string | null;
+		result: string | null;
 		memberScores: MemberLegislationScore[];
 		totalPositive: number;
 		totalNegative: number;
@@ -38,12 +39,48 @@
 	let showConfirmDialog: boolean = $state(false);
 	let sortBy: 'billId' | 'positive' | 'negative' | 'average' = $state('billId');
 
-	// Filter bills based on search
-	let filteredBills = $derived(
-		legislationScores.filter((bill) =>
-			bill.billTitle.toLowerCase().includes(searchTerm.toLowerCase())
-		)
+	// Filter state
+	let typeFilter: string = $state('all');
+	let sessionFilter: string = $state('all');
+	let resultFilter: string = $state('all');
+
+	// Derive unique types and sessions for filter dropdowns
+	let availableTypes = $derived([...new Set(legislationScores.map((b) => b.billType))].sort());
+	let availableSessions = $derived(
+		[...new Set(legislationScores.map((b) => b.session))].sort((a, b) => b - a)
 	);
+
+	// Filter bills based on search and filters
+	let filteredBills = $derived.by(() => {
+		let result = legislationScores;
+
+		// Search filter
+		if (searchTerm.trim()) {
+			const q = searchTerm.trim().toLowerCase();
+			result = result.filter((bill) => bill.billTitle.toLowerCase().includes(q));
+		}
+
+		// Type filter
+		if (typeFilter !== 'all') {
+			result = result.filter((bill) => bill.billType === typeFilter);
+		}
+
+		// Session filter
+		if (sessionFilter !== 'all') {
+			result = result.filter((bill) => bill.session === parseInt(sessionFilter));
+		}
+
+		// Result filter
+		if (resultFilter !== 'all') {
+			if (resultFilter === 'none') {
+				result = result.filter((bill) => !bill.result);
+			} else {
+				result = result.filter((bill) => bill.result === resultFilter);
+			}
+		}
+
+		return result;
+	});
 
 	// Filter member scores based on search
 	let filteredMemberScores: MemberLegislationScore[] = $derived.by(() => {
@@ -463,6 +500,41 @@
 					{#if calculating}計算中...{:else}<Wrench size={14} class="inline-icon" /> 再計算{/if}
 				</button>
 			{/if}
+		</div>
+
+		<!-- Filters -->
+		<div class="bills-filters">
+			<div class="filter-group">
+				<label class="filter-label" for="filter-type">種類</label>
+				<select id="filter-type" class="filter-select" bind:value={typeFilter}>
+					<option value="all">すべて</option>
+					{#each availableTypes as type (type)}
+						<option value={type}>{type}</option>
+					{/each}
+				</select>
+			</div>
+
+			<div class="filter-group">
+				<label class="filter-label" for="filter-session">回次</label>
+				<select id="filter-session" class="filter-select" bind:value={sessionFilter}>
+					<option value="all">すべて</option>
+					{#each availableSessions as session (session)}
+						<option value={session.toString()}>第{session}回</option>
+					{/each}
+				</select>
+			</div>
+
+			<div class="filter-group">
+				<label class="filter-label" for="filter-result">結果</label>
+				<select id="filter-result" class="filter-select" bind:value={resultFilter}>
+					<option value="all">すべて</option>
+					<option value="可決">可決</option>
+					<option value="否決">否決</option>
+					<option value="撤回">撤回</option>
+					<option value="未了">未了</option>
+					<option value="none">審議中</option>
+				</select>
+			</div>
 		</div>
 
 		{#if calculationMessage}
@@ -1003,6 +1075,44 @@
 		border-color: #6366f1;
 	}
 
+	.bills-filters {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+		margin-top: 0.75rem;
+	}
+
+	.filter-group {
+		display: flex;
+		flex-direction: column;
+		gap: 0.2rem;
+	}
+
+	.filter-label {
+		font-size: 0.7rem;
+		color: #6b7280;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+
+	.filter-select {
+		padding: 0.35rem 0.6rem;
+		border: 1px solid #e5e7eb;
+		border-radius: 8px;
+		background: white;
+		font-size: 0.85rem;
+		color: #374151;
+		cursor: pointer;
+		outline: none;
+		transition: border-color 0.2s ease;
+	}
+
+	.filter-select:focus {
+		border-color: #6366f1;
+		box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+	}
+
 	.calculate-btn {
 		padding: 0.6rem 1.25rem;
 		background: #6366f1;
@@ -1538,6 +1648,18 @@
 
 		.calculate-btn {
 			margin-left: 0;
+		}
+
+		.bills-filters {
+			flex-direction: column;
+		}
+
+		.filter-group {
+			width: 100%;
+		}
+
+		.filter-select {
+			width: 100%;
 		}
 
 		.modal-stats {
