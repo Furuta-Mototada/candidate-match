@@ -1339,21 +1339,33 @@
 
 					<!-- Stats row -->
 					<div class="cluster-stats">
-						{#if directAnsweredCount > 0}
-							<span class="stat-badge stat-answered">回答 {directAnsweredCount}</span>
-						{/if}
-						{#if skippedCount > 0}
-							<span class="stat-badge stat-skipped">スキップ {skippedCount}</span>
-						{/if}
-						{#if delegatedVotedCount > 0}
-							<span class="stat-badge stat-delegated-voted">委任済 {delegatedVotedCount}</span>
-						{/if}
-						{#if delegatedPendingCount > 0}
-							<span class="stat-badge stat-delegated-pending">委任中 {delegatedPendingCount}</span>
-						{/if}
-						{#if unansweredCount > 0}
-							<span class="stat-badge stat-pending">未回答 {unansweredCount}</span>
-						{/if}
+						<div class="stats-badges">
+							{#if directAnsweredCount > 0}
+								<span class="stat-badge stat-answered">回答 {directAnsweredCount}</span>
+							{/if}
+							{#if skippedCount > 0}
+								<span class="stat-badge stat-skipped">スキップ {skippedCount}</span>
+							{/if}
+							{#if delegatedVotedCount > 0}
+								<span class="stat-badge stat-delegated-voted">委任済 {delegatedVotedCount}</span>
+							{/if}
+							{#if delegatedPendingCount > 0}
+								<span class="stat-badge stat-delegated-pending">委任中 {delegatedPendingCount}</span
+								>
+							{/if}
+							{#if unansweredCount > 0}
+								<span class="stat-badge stat-pending">未回答 {unansweredCount}</span>
+							{/if}
+						</div>
+						<button
+							onclick={finishCurrentCluster}
+							disabled={isLoading || answeredCount < 2}
+							class="btn-next-cluster"
+						>
+							{answeredCount >= 2
+								? '次のクラスターに進む →'
+								: `あと${2 - answeredCount}問回答してください`}
+						</button>
 					</div>
 				{/if}
 			</div>
@@ -1670,8 +1682,42 @@
 	/* ===== CLUSTER STATS ===== */
 	.cluster-stats {
 		display: flex;
+		align-items: center;
+		justify-content: space-between;
 		gap: 0.5rem;
 		margin-top: 0.5rem;
+	}
+
+	.stats-badges {
+		display: flex;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+	}
+
+	.btn-next-cluster {
+		padding: 0.375rem 0.875rem;
+		border-radius: 100px;
+		font-weight: 600;
+		font-size: 0.75rem;
+		cursor: pointer;
+		transition: all 0.2s ease;
+		border: 1.5px solid #6366f1;
+		background: white;
+		color: #6366f1;
+		white-space: nowrap;
+		flex-shrink: 0;
+	}
+
+	.btn-next-cluster:hover:not(:disabled) {
+		background: #6366f1;
+		color: white;
+	}
+
+	.btn-next-cluster:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+		border-color: #9ca3af;
+		color: #9ca3af;
 	}
 
 	.stat-badge {
@@ -1789,7 +1835,13 @@
 		}
 
 		.cluster-stats {
+			flex-wrap: wrap;
+			justify-content: space-between;
+		}
+
+		.stats-badges {
 			justify-content: center;
+			flex: 1;
 		}
 	}
 

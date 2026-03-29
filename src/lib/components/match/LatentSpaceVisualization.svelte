@@ -52,6 +52,8 @@
 		collapsedLabel?: string;
 		/** Label for the button when expanded */
 		expandedLabel?: string;
+		/** Callback when a member is clicked */
+		onMemberClick?: (member: { memberId: number; name: string; group: string | null }) => void;
 	}
 
 	let {
@@ -70,7 +72,8 @@
 		compact = false,
 		collapsible = false,
 		collapsedLabel = '表示',
-		expandedLabel = '隠す'
+		expandedLabel = '隠す',
+		onMemberClick
 	}: Props = $props();
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
@@ -427,6 +430,44 @@
 		}
 	}
 
+	function handleCanvasClick(event: MouseEvent) {
+		if (!canvasElement || !members.length || !onMemberClick) return;
+
+		const rect = canvasElement.getBoundingClientRect();
+		const scaleX = width / rect.width;
+		const scaleY = height / rect.height;
+		const mouseX = (event.clientX - rect.left) * scaleX;
+		const mouseY = (event.clientY - rect.top) * scaleY;
+
+		const bounds = visualizationBounds;
+		const padding = compact ? 45 : 55;
+		const plotWidth = width - padding * 2;
+		const plotHeight = height - padding * 2;
+
+		const toCanvasX = (val: number) =>
+			padding + ((val - bounds.minX) / (bounds.maxX - bounds.minX)) * plotWidth;
+		const toCanvasY = (val: number) =>
+			height - padding - ((val - bounds.minY) / (bounds.maxY - bounds.minY)) * plotHeight;
+
+		let found: MemberPoint | null = null;
+		let minDist = Infinity;
+
+		for (const member of members) {
+			const x = toCanvasX(member.latentVector[xDimension] ?? 0);
+			const y = toCanvasY(member.latentVector[yDimension] ?? 0);
+			const dist = Math.sqrt((mouseX - x) ** 2 + (mouseY - y) ** 2);
+
+			if (dist < 15 && dist < minDist) {
+				minDist = dist;
+				found = member;
+			}
+		}
+
+		if (found) {
+			onMemberClick({ memberId: found.memberId, name: found.name, group: found.group });
+		}
+	}
+
 	function handleCanvasMouseMove(event: MouseEvent) {
 		if (!canvasElement || !members.length) return;
 
@@ -528,9 +569,11 @@
 				<canvas
 					bind:this={canvasElement}
 					class="viz-canvas"
+					class:clickable={!!onMemberClick}
 					style="width: 100%; max-width: {width}px; height: auto; aspect-ratio: {width} / {height};"
 					onmousemove={handleCanvasMouseMove}
 					onmouseleave={handleCanvasMouseLeave}
+					onclick={handleCanvasClick}
 				></canvas>
 			</div>
 
@@ -628,6 +671,10 @@
 		display: block;
 		width: 100%;
 		cursor: crosshair;
+	}
+
+	.viz-canvas.clickable {
+		cursor: pointer;
 	}
 
 	.viz-legend {
