@@ -45,6 +45,7 @@ const sessions = new Map<
 				title: string;
 				description: string | null;
 				passed: boolean;
+				result: string | null;
 				loading: number[];
 				memberVariance: number;
 			}
@@ -408,6 +409,7 @@ async function handleStart(
 					title: nextQuestion.bill.title,
 					description: nextQuestion.bill.description,
 					passed: nextQuestion.bill.passed,
+					result: nextQuestion.bill.result,
 					reason: nextQuestion.reason,
 					dimensionTarget: nextQuestion.dimensionTarget
 				}
@@ -598,6 +600,7 @@ async function handleResume(
 					title: nextQuestion.bill.title,
 					description: nextQuestion.bill.description,
 					passed: nextQuestion.bill.passed,
+					result: nextQuestion.bill.result,
 					reason: nextQuestion.reason,
 					dimensionTarget: nextQuestion.dimensionTarget
 				}
@@ -713,6 +716,7 @@ async function handleAnswer(
 					title: nextQuestion.bill.title,
 					description: nextQuestion.bill.description,
 					passed: nextQuestion.bill.passed,
+					result: nextQuestion.bill.result,
 					reason: nextQuestion.reason,
 					dimensionTarget: nextQuestion.dimensionTarget
 				}
@@ -801,6 +805,7 @@ async function handleSkip(sessionId: string, billId: number, userId: string | nu
 					title: nextQuestion.bill.title,
 					description: nextQuestion.bill.description,
 					passed: nextQuestion.bill.passed,
+					result: nextQuestion.bill.result,
 					reason: nextQuestion.reason,
 					dimensionTarget: nextQuestion.dimensionTarget
 				}

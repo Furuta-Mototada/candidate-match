@@ -26,12 +26,44 @@
 	let successMessage: string | null = $state(null);
 	let confirmingFriend: Friend | null = $state(null);
 
+	// Long-press state for friend delegation
+	const HOLD_DURATION = 600;
+	let holdingFriendId = $state<string | null>(null);
+	let holdProgress = $state(0);
+	let holdTimer: ReturnType<typeof setInterval> | null = null;
+	let holdStartTime = 0;
+
+	function startFriendHold(friend: Friend) {
+		if (submitting) return;
+		holdingFriendId = friend.friendId;
+		holdProgress = 0;
+		holdStartTime = Date.now();
+		holdTimer = setInterval(() => {
+			const elapsed = Date.now() - holdStartTime;
+			holdProgress = Math.min(elapsed / HOLD_DURATION, 1);
+			if (holdProgress >= 1) {
+				cancelFriendHold();
+				handleFriendClick(friend);
+			}
+		}, 16);
+	}
+
+	function cancelFriendHold() {
+		if (holdTimer) {
+			clearInterval(holdTimer);
+			holdTimer = null;
+		}
+		holdingFriendId = null;
+		holdProgress = 0;
+	}
+
 	$effect(() => {
 		if (show) {
 			loadFriends();
 			error = null;
 			successMessage = null;
 			confirmingFriend = null;
+			cancelFriendHold();
 		}
 	});
 
@@ -169,18 +201,27 @@
 					</div>
 				{:else}
 					<p class="modal-desc">
-						委任先のフレンドを選んでください。フレンドがあなたの代わりに投票します。
+						委任先のフレンドを長押しで選んでください。フレンドがあなたの代わりに投票します。
 					</p>
 					<div class="friends-list">
 						{#each friends as friend (friend.requestId)}
 							<button
 								class="friend-item"
-								onclick={() => handleFriendClick(friend)}
+								class:holding={holdingFriendId === friend.friendId}
+								onpointerdown={() => startFriendHold(friend)}
+								onpointerup={cancelFriendHold}
+								onpointerleave={cancelFriendHold}
 								disabled={submitting}
 							>
+								<span
+									class="friend-fill"
+									style="transform: scaleX({holdingFriendId === friend.friendId
+										? holdProgress
+										: 0})"
+								></span>
 								<span class="friend-avatar"><User size={16} /></span>
 								<span class="friend-name">{friend.friendUsername}</span>
-								<span class="delegate-action">委任 →</span>
+								<span class="delegate-action">長押しで委任</span>
 							</button>
 						{/each}
 					</div>
@@ -330,6 +371,7 @@
 	}
 
 	.friend-item {
+		position: relative;
 		display: flex;
 		align-items: center;
 		gap: 0.75rem;
@@ -341,12 +383,32 @@
 		transition: all 0.2s ease;
 		width: 100%;
 		text-align: left;
+		overflow: hidden;
+		-webkit-user-select: none;
+		user-select: none;
 	}
 
 	.friend-item:hover:not(:disabled) {
-		background: #ede9fe;
-		border-color: #c4b5fd;
-		transform: translateX(4px);
+		background: #f3f4f6;
+		border-color: #d1d5db;
+	}
+
+	.friend-item.holding {
+		border-color: #6366f1;
+		transform: scale(0.98);
+	}
+
+	.friend-fill {
+		position: absolute;
+		top: 0;
+		left: 0;
+		bottom: 0;
+		width: 100%;
+		background: rgba(99, 102, 241, 0.15);
+		transform-origin: left;
+		transform: scaleX(0);
+		pointer-events: none;
+		z-index: 0;
 	}
 
 	.friend-item:disabled {
@@ -355,11 +417,15 @@
 	}
 
 	.friend-avatar {
+		position: relative;
+		z-index: 1;
 		font-size: 1.5rem;
 		flex-shrink: 0;
 	}
 
 	.friend-name {
+		position: relative;
+		z-index: 1;
 		flex: 1;
 		font-weight: 600;
 		color: #1f2937;
@@ -367,15 +433,17 @@
 	}
 
 	.delegate-action {
-		font-size: 0.85rem;
-		color: #6366f1;
-		font-weight: 600;
-		opacity: 0;
-		transition: opacity 0.2s;
+		position: relative;
+		z-index: 1;
+		font-size: 0.8rem;
+		color: #9ca3af;
+		font-weight: 500;
+		transition: color 0.2s;
 	}
 
-	.friend-item:hover .delegate-action {
-		opacity: 1;
+	.friend-item.holding .delegate-action {
+		color: #6366f1;
+		font-weight: 600;
 	}
 
 	.confirm-message {

@@ -12,3 +12,4 @@ export { default as ClusterReviewPhase } from './match/ClusterReviewPhase.svelte
 export { default as GlobalResultsPhase } from './match/GlobalResultsPhase.svelte';
 export { default as ExplanationModal } from './match/ExplanationModal.svelte';
 export { default as EnrichedBillCard } from './match/EnrichedBillCard.svelte';
+export { default as BillDetailPanel } from './match/BillDetailPanel.svelte';

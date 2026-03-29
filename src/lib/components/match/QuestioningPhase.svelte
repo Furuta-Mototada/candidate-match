@@ -2,6 +2,7 @@
 	import LatentSpaceVisualization from '$lib/components/match/LatentSpaceVisualization.svelte';
 	import MemberRankingList from '$lib/components/match/MemberRankingList.svelte';
 	import EnrichedBillCard from '$lib/components/match/EnrichedBillCard.svelte';
+	import BillDetailPanel from '$lib/components/match/BillDetailPanel.svelte';
 	import DelegationModal from '$lib/components/match/DelegationModal.svelte';
 	import {
 		ThumbsUp,
@@ -121,6 +122,34 @@
 	// Delegation modal state
 	let showDelegationModal = $state(false);
 
+	// Detail panel state
+	let billDetailLevel = $state(1);
+	let showDetailPanel = $derived(billDetailLevel >= 2);
+	let isDetailFullscreen = $state(false);
+
+	// Reset detail level when question changes
+	$effect(() => {
+		if (currentQuestion) {
+			// Access billId to track changes
+			void currentQuestion.billId;
+			billDetailLevel = 1;
+			isDetailFullscreen = false;
+		}
+	});
+
+	function handleDetailLevelChange(level: number) {
+		billDetailLevel = level;
+	}
+
+	function closeDetailPanel() {
+		billDetailLevel = 1;
+		isDetailFullscreen = false;
+	}
+
+	function toggleDetailFullscreen() {
+		isDetailFullscreen = !isDetailFullscreen;
+	}
+
 	function openDelegationModal() {
 		showDelegationModal = true;
 	}
@@ -133,6 +162,37 @@
 		if (currentQuestion) {
 			onDelegateBill(currentQuestion.billId);
 		}
+	}
+
+	// Long-press vote state
+	const HOLD_DURATION = 600; // ms to hold before vote casts
+	let holdingVote = $state<number | null>(null);
+	let holdProgress = $state(0);
+	let holdTimer: ReturnType<typeof setInterval> | null = null;
+	let holdStartTime = 0;
+
+	function startHold(vote: number) {
+		if (isLoading) return;
+		holdingVote = vote;
+		holdProgress = 0;
+		holdStartTime = Date.now();
+		holdTimer = setInterval(() => {
+			const elapsed = Date.now() - holdStartTime;
+			holdProgress = Math.min(elapsed / HOLD_DURATION, 1);
+			if (holdProgress >= 1) {
+				cancelHold();
+				onSubmitAnswer(vote);
+			}
+		}, 16);
+	}
+
+	function cancelHold() {
+		if (holdTimer) {
+			clearInterval(holdTimer);
+			holdTimer = null;
+		}
+		holdingVote = null;
+		holdProgress = 0;
 	}
 
 	function toggleAnsweredBills() {
@@ -152,77 +212,145 @@
 	}
 </script>
 
-<div class="questioning-container">
+<div class="questioning-container" class:detail-open={showDetailPanel}>
 	{#if currentQuestion}
-		<!-- Question Card with Enriched Bill Information -->
-		<div class="question-card fade-in-up" class:editing-mode={isEditingAnswer}>
-			{#if isEditingAnswer}
-				<div class="editing-banner">
-					<span class="editing-banner-text"
-						><Pencil size={14} class="inline-icon" /> 回答を変更中</span
-					>
-					<button class="cancel-edit-btn" onclick={onCancelEditing} disabled={isLoading}>
-						<X size={14} class="inline-icon" /> キャンセル
-					</button>
+		<div class="question-layout" class:expanded={showDetailPanel}>
+			<!-- Left: Voting Card -->
+			<div class="question-card-wrapper">
+				<div class="question-card fade-in-up" class:editing-mode={isEditingAnswer}>
+					{#if isEditingAnswer}
+						<div class="editing-banner">
+							<span class="editing-banner-text"
+								><Pencil size={14} class="inline-icon" /> 回答を変更中</span
+							>
+							<button class="cancel-edit-btn" onclick={onCancelEditing} disabled={isLoading}>
+								<X size={14} class="inline-icon" /> キャンセル
+							</button>
+						</div>
+					{/if}
+
+					<!-- Enriched Bill Card (basic view only) -->
+					<EnrichedBillCard
+						billId={currentQuestion.billId}
+						title={currentQuestion.title}
+						description={currentQuestion.description}
+						passed={currentQuestion.passed}
+						result={currentQuestion.result}
+						enrichmentData={currentEnrichmentData}
+						isLoading={currentEnrichmentLoading}
+						onLoadEnrichment={() => loadEnrichment(currentQuestion.billId)}
+						detailLevel={billDetailLevel}
+						onDetailLevelChange={handleDetailLevelChange}
+					/>
+
+					<!-- Vote Buttons -->
+					<hr class="vote-divider" />
+					<div class="vote-buttons">
+						<button
+							onpointerdown={() => startHold(1)}
+							onpointerup={cancelHold}
+							onpointerleave={cancelHold}
+							disabled={isLoading}
+							class="vote-btn vote-agree"
+							class:holding={holdingVote === 1}
+						>
+							<span
+								class="vote-fill vote-fill-agree"
+								style="transform: scaleY({holdingVote === 1 ? holdProgress : 0})"
+							></span>
+							<span class="vote-emoji"
+								><ThumbsUp size={28} color={holdingVote === 1 ? '#166534' : '#22c55e'} /></span
+							>
+							<span class="vote-label" class:vote-label-active={holdingVote === 1}>賛成</span>
+						</button>
+						<button
+							onpointerdown={() => startHold(0)}
+							onpointerup={cancelHold}
+							onpointerleave={cancelHold}
+							disabled={isLoading}
+							class="vote-btn vote-neutral"
+							class:holding={holdingVote === 0}
+						>
+							<span
+								class="vote-fill vote-fill-neutral"
+								style="transform: scaleY({holdingVote === 0 ? holdProgress : 0})"
+							></span>
+							<span class="vote-emoji"
+								><CircleQuestionMark
+									size={28}
+									color={holdingVote === 0 ? '#1e40af' : '#3b82f6'}
+								/></span
+							>
+							<span class="vote-label" class:vote-label-active={holdingVote === 0}>わからない</span>
+						</button>
+						<button
+							onpointerdown={() => startHold(-1)}
+							onpointerup={cancelHold}
+							onpointerleave={cancelHold}
+							disabled={isLoading}
+							class="vote-btn vote-disagree"
+							class:holding={holdingVote === -1}
+						>
+							<span
+								class="vote-fill vote-fill-disagree"
+								style="transform: scaleY({holdingVote === -1 ? holdProgress : 0})"
+							></span>
+							<span class="vote-emoji"
+								><ThumbsDown size={28} color={holdingVote === -1 ? '#991b1b' : '#ef4444'} /></span
+							>
+							<span class="vote-label" class:vote-label-active={holdingVote === -1}>反対</span>
+						</button>
+					</div>
+					<p class="vote-hint">長押しで投票</p>
+
+					<!-- Actions (hide when editing, show cancel instead) -->
+					{#if !isEditingAnswer}
+						<div class="question-actions">
+							{#if isLoggedIn}
+								<button
+									onclick={openDelegationModal}
+									disabled={isLoading}
+									class="action-btn-delegate"
+								>
+									<Handshake size={14} class="inline-icon" /> フレンドに委任
+								</button>
+							{:else}
+								<button onclick={onSkipQuestion} disabled={isLoading} class="action-btn-secondary">
+									スキップ →
+								</button>
+							{/if}
+						</div>
+					{/if}
 				</div>
-			{/if}
 
-			<!-- Enriched Bill Card with expandable details -->
-			<EnrichedBillCard
-				billId={currentQuestion.billId}
-				title={currentQuestion.title}
-				description={currentQuestion.description}
-				passed={currentQuestion.passed}
-				enrichmentData={currentEnrichmentData}
-				isLoading={currentEnrichmentLoading}
-				onLoadEnrichment={() => loadEnrichment(currentQuestion.billId)}
-			/>
-
-			<!-- Vote Buttons -->
-			<div class="vote-buttons">
-				<button onclick={() => onSubmitAnswer(1)} disabled={isLoading} class="vote-btn vote-agree">
-					<span class="vote-emoji"><ThumbsUp size={36} color="#22c55e" /></span>
-					<span class="vote-label">賛成</span>
-				</button>
-				<button
-					onclick={() => onSubmitAnswer(0)}
-					disabled={isLoading}
-					class="vote-btn vote-neutral"
-				>
-					<span class="vote-emoji"><CircleQuestionMark size={36} color="#3b82f6" /></span>
-					<span class="vote-label">わからない</span>
-				</button>
-				<button
-					onclick={() => onSubmitAnswer(-1)}
-					disabled={isLoading}
-					class="vote-btn vote-disagree"
-				>
-					<span class="vote-emoji"><ThumbsDown size={36} color="#ef4444" /></span>
-					<span class="vote-label">反対</span>
-				</button>
+				<!-- Cluster finish button - outside the voting card -->
+				{#if !isEditingAnswer}
+					<div class="cluster-finish-action">
+						<button
+							onclick={onFinishCluster}
+							disabled={isLoading || answeredCount < 2}
+							class="action-btn-finish"
+						>
+							{answeredCount >= 2
+								? 'このクラスターを終了 →'
+								: `あと${2 - answeredCount}問回答してください`}
+						</button>
+					</div>
+				{/if}
 			</div>
 
-			<!-- Actions (hide when editing, show cancel instead) -->
-			{#if !isEditingAnswer}
-				<div class="question-actions">
-					{#if isLoggedIn}
-						<button onclick={openDelegationModal} disabled={isLoading} class="action-btn-delegate">
-							<Handshake size={14} class="inline-icon" /> フレンドに委任
-						</button>
-					{:else}
-						<button onclick={onSkipQuestion} disabled={isLoading} class="action-btn-secondary">
-							スキップ →
-						</button>
-					{/if}
-					<button
-						onclick={onFinishCluster}
-						disabled={isLoading || answeredCount < 2}
-						class="action-btn-primary"
-					>
-						{answeredCount >= 2
-							? 'このクラスターを終了'
-							: `あと${2 - answeredCount}問回答してください`}
-					</button>
+			<!-- Right: Detail Panel (slides in from right) -->
+			{#if showDetailPanel}
+				<div class="detail-panel-wrapper" class:fullscreen-wrapper={isDetailFullscreen}>
+					<BillDetailPanel
+						enrichmentData={currentEnrichmentData}
+						isLoading={currentEnrichmentLoading}
+						detailLevel={billDetailLevel}
+						isFullscreen={isDetailFullscreen}
+						onClose={closeDetailPanel}
+						onDetailLevelChange={handleDetailLevelChange}
+						onToggleFullscreen={toggleDetailFullscreen}
+					/>
 				</div>
 			{/if}
 		</div>
@@ -330,6 +458,47 @@
 	.questioning-container {
 		max-width: 800px;
 		margin: 0 auto;
+		transition: max-width 0.4s ease;
+	}
+
+	.questioning-container.detail-open {
+		max-width: 1200px;
+	}
+
+	/* Side-by-side layout */
+	.question-layout {
+		display: flex;
+		gap: 1.5rem;
+		align-items: flex-start;
+		margin-bottom: 1.5rem;
+	}
+
+	.question-card-wrapper {
+		flex: 1;
+		min-width: 0;
+		transition: flex 0.4s ease;
+	}
+
+	.question-layout.expanded .question-card-wrapper {
+		flex: 0 0 50%;
+	}
+
+	.detail-panel-wrapper {
+		flex: 0 0 48%;
+		min-width: 0;
+		position: sticky;
+		top: 1rem;
+	}
+
+	.detail-panel-wrapper.fullscreen-wrapper {
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		z-index: 1000;
+		flex: none;
+		width: 100%;
 	}
 
 	/* Cluster Info - removed, using parent progress */
@@ -340,7 +509,6 @@
 		border-radius: 16px;
 		padding: 2rem;
 		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-		margin-bottom: 1.5rem;
 		transition: all 0.3s ease;
 	}
 
@@ -432,26 +600,85 @@
 		display: grid;
 		grid-template-columns: repeat(3, 1fr);
 		gap: 1rem;
-		margin-bottom: 1.5rem;
+		margin-bottom: 0.25rem;
+	}
+
+	.vote-divider {
+		border: none;
+		border-top: 1px solid #e5e7eb;
+		margin: 1.25rem 0;
 	}
 
 	.vote-btn {
+		position: relative;
 		display: flex;
 		flex-direction: column;
 		align-items: center;
-		gap: 0.75rem;
-		padding: 2rem 1rem;
+		gap: 0.5rem;
+		padding: 1.25rem 1rem;
 		border: 2px solid transparent;
-		border-radius: 16px;
+		border-radius: 12px;
 		background: #f9fafb;
 		cursor: pointer;
 		transition: all 0.3s ease;
 		font-weight: 600;
+		overflow: hidden;
+		-webkit-user-select: none;
+		user-select: none;
+		-webkit-touch-callout: none;
 	}
 
 	.vote-btn:hover:not(:disabled) {
-		transform: translateY(-4px);
-		box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1);
+		transform: translateY(-2px);
+		box-shadow: 0 8px 16px rgba(0, 0, 0, 0.08);
+	}
+
+	.vote-btn.holding {
+		transform: scale(0.97);
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+	}
+
+	.vote-agree.holding {
+		border-color: #22c55e;
+	}
+
+	.vote-neutral.holding {
+		border-color: #3b82f6;
+	}
+
+	.vote-disagree.holding {
+		border-color: #ef4444;
+	}
+
+	.vote-fill {
+		position: absolute;
+		bottom: 0;
+		left: 0;
+		right: 0;
+		height: 100%;
+		transform-origin: bottom;
+		transform: scaleY(0);
+		pointer-events: none;
+		z-index: 0;
+	}
+
+	.vote-fill-agree {
+		background: rgba(34, 197, 94, 0.35);
+	}
+
+	.vote-fill-neutral {
+		background: rgba(59, 130, 246, 0.3);
+	}
+
+	.vote-fill-disagree {
+		background: rgba(239, 68, 68, 0.3);
+	}
+
+	.vote-hint {
+		text-align: center;
+		font-size: 0.75rem;
+		color: #9ca3af;
+		margin: 0.25rem 0 1rem;
 	}
 
 	.vote-btn:disabled {
@@ -487,14 +714,26 @@
 	}
 
 	.vote-emoji {
+		position: relative;
+		z-index: 1;
 		display: flex;
 		align-items: center;
 		justify-content: center;
 	}
 
 	.vote-label {
+		position: relative;
+		z-index: 1;
 		font-size: 1rem;
 		color: #374151;
+		transition:
+			color 0.15s,
+			font-weight 0.15s;
+	}
+
+	.vote-label-active {
+		color: #111827;
+		font-weight: 700;
 	}
 
 	/* Question Actions */
@@ -524,16 +763,20 @@
 	}
 
 	.action-btn-delegate {
-		background: linear-gradient(135deg, #ede9fe, #ddd6fe);
-		color: #6d28d9;
-		border: 1px solid #c4b5fd;
+		padding: 0.875rem 1.5rem;
+		border-radius: 10px;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 0.2s ease;
+		background: #f9fafb;
+		color: #6b7280;
+		border: 1px solid #e5e7eb;
 	}
 
 	.action-btn-delegate:hover:not(:disabled) {
-		background: linear-gradient(135deg, #ddd6fe, #c4b5fd);
-		border-color: #a78bfa;
-		transform: translateY(-1px);
-		box-shadow: 0 4px 8px rgba(109, 40, 217, 0.15);
+		background: #f3f4f6;
+		border-color: #d1d5db;
+		color: #374151;
 	}
 
 	.action-btn-primary {
@@ -549,6 +792,33 @@
 
 	.action-btn-primary:disabled {
 		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.cluster-finish-action {
+		margin-top: 0.75rem;
+		text-align: center;
+	}
+
+	.action-btn-finish {
+		padding: 0.75rem 1.5rem;
+		border-radius: 10px;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 0.3s ease;
+		border: none;
+		background: transparent;
+		color: #6b7280;
+		font-size: 0.9rem;
+	}
+
+	.action-btn-finish:hover:not(:disabled) {
+		color: #6366f1;
+		background: #f0f0ff;
+	}
+
+	.action-btn-finish:disabled {
+		opacity: 0.4;
 		cursor: not-allowed;
 	}
 
@@ -736,6 +1006,24 @@
 	}
 
 	@media (max-width: 768px) {
+		.question-layout {
+			flex-direction: column;
+		}
+
+		.question-layout.expanded .question-card-wrapper {
+			flex: 1;
+		}
+
+		.detail-panel-wrapper {
+			flex: 1;
+			position: static;
+			width: 100%;
+		}
+
+		.questioning-container.detail-open {
+			max-width: 800px;
+		}
+
 		.vote-buttons {
 			grid-template-columns: 1fr;
 		}

@@ -51,6 +51,7 @@ export interface BillInfo {
 	title: string;
 	description: string | null;
 	passed: boolean;
+	result: string | null;
 	loading: number[]; // Bill's loading on each latent dimension
 	memberVariance: number; // How much members disagree on this bill
 }
@@ -467,7 +468,8 @@ export async function loadBillInfo(billIds: number[]): Promise<Map<number, Parti
 			billId: b.id,
 			title: b.title || `法案 ${b.id}`,
 			description: null,
-			passed: b.result === '可決'
+			passed: b.result === '可決',
+			result: b.result
 		});
 	}
 
@@ -540,6 +542,7 @@ export function buildBillInfoMap(
 			title: dbInfo.title || `法案 ${billId}`,
 			description: dbInfo.description || null,
 			passed: dbInfo.passed || false,
+			result: dbInfo.result || null,
 			loading,
 			memberVariance: variance
 		});

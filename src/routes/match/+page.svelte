@@ -27,6 +27,7 @@
 		title: string;
 		description: string | null;
 		passed: boolean;
+		result: string | null;
 		reason: string;
 		dimensionTarget: number;
 	}
@@ -699,6 +700,7 @@
 			title: bill.title,
 			description: null,
 			passed: true, // We don't have this info, but it's not critical for editing
+			result: null,
 			reason: '回答を変更中',
 			dimensionTarget: 0
 		};

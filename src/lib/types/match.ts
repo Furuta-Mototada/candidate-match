@@ -31,6 +31,7 @@ export interface Bill {
 	title: string;
 	description: string | null;
 	passed: boolean;
+	result: string | null;
 	reason: string;
 	dimensionTarget: number;
 }
