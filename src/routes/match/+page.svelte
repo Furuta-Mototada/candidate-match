@@ -65,7 +65,14 @@
 	let clusterId: number | null = $state(null);
 	let nComponents: number = $state(3);
 	let currentClusterMatches: MemberMatch[] = $state([]);
-	let currentClusterAnsweredBills: { billId: number; title: string; answer: number }[] = $state([]);
+	let currentClusterAnsweredBills: {
+		billId: number;
+		title: string;
+		answer: number;
+		source?: 'direct' | 'delegated';
+		delegationStatus?: 'pending' | 'voted';
+		delegateId?: string;
+	}[] = $state([]);
 	let isEditingAnswer: boolean = $state(false);
 	let previousQuestion: NextQuestion | null = $state(null); // Store previous question for cancel editing
 
@@ -124,10 +131,32 @@
 			? clusterLabelNameMap[currentClusterLabel] || `クラスター${currentClusterLabel}`
 			: null
 	);
-	let progress = $derived.by(() => {
-		if (clusterLabelsToProcess.length === 0) return 0;
-		return (currentClusterIndex / clusterLabelsToProcess.length) * 100;
+	// Current cluster progress (answered or delegated / total in cluster)
+	let clusterProgress = $derived.by(() => {
+		if (currentClusterBillCount === 0) return 0;
+		return (answeredCount / currentClusterBillCount) * 100;
 	});
+
+	// Stats for current cluster
+	let directAnsweredCount = $derived(
+		currentClusterAnsweredBills.filter(
+			(b) => b.source !== 'delegated' && (b.answer === 1 || b.answer === -1)
+		).length
+	);
+	let skippedCount = $derived(
+		currentClusterAnsweredBills.filter((b) => b.source !== 'delegated' && b.answer === 0).length
+	);
+	let delegatedVotedCount = $derived(
+		currentClusterAnsweredBills.filter(
+			(b) => b.source === 'delegated' && b.delegationStatus === 'voted'
+		).length
+	);
+	let delegatedPendingCount = $derived(
+		currentClusterAnsweredBills.filter(
+			(b) => b.source === 'delegated' && b.delegationStatus !== 'voted'
+		).length
+	);
+	let unansweredCount = $derived(Math.max(0, currentClusterBillCount - answeredCount));
 	let confidence = $derived.by(() => {
 		if (uncertainty.length === 0) return 0;
 		const avgUncertainty = uncertainty.reduce((a, b) => a + b, 0) / uncertainty.length;
@@ -554,7 +583,8 @@
 		const billInfo = {
 			billId: currentQuestion.billId,
 			title: currentQuestion.title,
-			answer: score
+			answer: score,
+			source: 'direct' as const
 		};
 
 		isLoading = true;
@@ -629,7 +659,8 @@
 		const billInfo = {
 			billId: currentQuestion.billId,
 			title: currentQuestion.title,
-			answer: 0 // 0 for skip/neutral
+			answer: 0, // 0 for skip/neutral
+			source: 'direct' as const
 		};
 
 		isLoading = true;
@@ -690,7 +721,13 @@
 	/**
 	 * Select a previously answered bill to edit the answer
 	 */
-	function selectBillToEdit(bill: { billId: number; title: string; answer: number }) {
+	function selectBillToEdit(bill: {
+		billId: number;
+		title: string;
+		answer: number;
+		source?: 'direct' | 'delegated';
+		delegationStatus?: 'pending' | 'voted';
+	}) {
 		// Store the current question so we can restore it on cancel
 		previousQuestion = currentQuestion;
 
@@ -720,9 +757,85 @@
 	 * Handle delegation: after a bill is delegated, skip to the next question
 	 */
 	async function handleDelegateBill(billId: number) {
-		void billId;
-		// After delegating, move to next question (same as skip behavior)
-		await skipQuestion();
+		if (!sessionId) return;
+
+		// Find bill info from answered bills or current question
+		const existingBill = currentClusterAnsweredBills.find((b) => b.billId === billId);
+		const billTitle = existingBill?.title || currentQuestion?.title || `法案 #${billId}`;
+
+		// Capture info before update - mark as delegated
+		const billInfo = {
+			billId,
+			title: billTitle,
+			answer: 0,
+			source: 'delegated' as const,
+			delegationStatus: 'pending' as const
+		};
+
+		isLoading = true;
+		error = null;
+
+		try {
+			// If the bill is already answered in the session, we don't need to skip via API
+			// (the session already has it). Just update the local record.
+			const isAlreadyAnswered = existingBill != null;
+
+			if (!isAlreadyAnswered && currentQuestion) {
+				// New bill - skip via API to advance to next question
+				const response = await fetch('/api/match', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						action: 'skip',
+						sessionId: sessionId,
+						billId
+					})
+				});
+
+				const result = await response.json();
+
+				if (!response.ok || !result.success) {
+					throw new Error(result.error || '委任に失敗しました');
+				}
+
+				answeredCount = result.answeredBills ?? answeredCount + 1;
+				uncertainty = result.uncertainty || [];
+				userVector = result.userVector || [];
+				topMatches = result.topMatches || [];
+
+				if (isEditingAnswer) {
+					isEditingAnswer = false;
+				}
+				currentQuestion = result.nextQuestion;
+			}
+
+			// Record as delegated in currentClusterAnsweredBills
+			const existingIndex = currentClusterAnsweredBills.findIndex(
+				(b) => b.billId === billInfo.billId
+			);
+			if (existingIndex >= 0) {
+				currentClusterAnsweredBills = currentClusterAnsweredBills.map((b, i) =>
+					i === existingIndex ? billInfo : b
+				);
+			} else {
+				currentClusterAnsweredBills = [...currentClusterAnsweredBills, billInfo];
+			}
+
+			// If we were editing this bill, cancel edit and go back to previous question
+			if (isEditingAnswer) {
+				isEditingAnswer = false;
+				currentQuestion = previousQuestion;
+				previousQuestion = null;
+			}
+		} catch (e) {
+			error = e instanceof Error ? e.message : '不明なエラーが発生しました';
+		} finally {
+			isLoading = false;
+		}
+	}
+
+	function scrollChipIntoView(el: HTMLElement) {
+		el.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
 	}
 
 	/**
@@ -1185,62 +1298,64 @@
 			</div>
 		{/if}
 
-		<!-- Progress bar for multi-cluster -->
+		<!-- Progress section for multi-cluster -->
 		{#if phase !== 'setup' && phase !== 'global-results'}
 			<div class="progress-section animate-in">
-				<div class="progress-header">
-					<div class="progress-info">
-						<span class="progress-cluster-name">
-							{currentClusterDisplayName || `クラスター${currentClusterIndex + 1}`}
-						</span>
-						<span class="progress-count">
-							分野 {currentClusterIndex + 1}/{clusterLabelsToProcess.length}
-						</span>
-					</div>
-
-					{#if phase === 'questioning'}
-						<div class="progress-stats">
-							<span class="stat-item">
-								<span class="stat-label">回答数:</span>
-								<span class="stat-value">{answeredCount}/{currentClusterBillCount}</span>
-							</span>
-							<span class="stat-divider">|</span>
-							<span class="stat-item">
-								<span class="stat-label">信頼度:</span>
-								<span class="stat-value">{confidence.toFixed(0)}%</span>
-							</span>
-						</div>
-					{/if}
-				</div>
-				<div class="progress-bar-container">
-					<div class="progress-bar" style="width: {progress}%"></div>
-				</div>
-
-				<!-- Cluster chips - clickable for navigation -->
-				<div class="cluster-chips">
+				<!-- Cluster chips - horizontal scrollable -->
+				<div class="cluster-chips-scroll" id="cluster-chips-scroll">
 					{#each clusterLabelsToProcess as label, idx (label)}
 						{@const displayName = getClusterDisplayName(label)}
-						{@const hasAnswers = clusterResults.some(
-							(cr) => cr.clusterLabel === label && cr.answeredCount > 0
-						)}
+						{@const hasAnswers =
+							clusterResults.some((cr) => cr.clusterLabel === label && cr.answeredCount > 0) ||
+							(label === currentClusterLabel && answeredCount > 0)}
 						<button
 							class="cluster-chip"
 							class:completed={hasAnswers && idx !== currentClusterIndex}
 							class:active={idx === currentClusterIndex}
 							class:pending={!hasAnswers && idx !== currentClusterIndex}
-							onclick={() => navigateToCluster(idx)}
+							onclick={(e) => {
+								navigateToCluster(idx);
+								scrollChipIntoView(e.currentTarget);
+							}}
 							disabled={isLoading}
 							title={idx === currentClusterIndex ? '現在のクラスター' : `${displayName}に移動`}
 						>
 							{#if hasAnswers && idx !== currentClusterIndex}
 								<span class="chip-icon">✓</span>
-							{:else if idx === currentClusterIndex}
-								<span class="chip-icon">▶</span>
 							{/if}
 							{displayName}
 						</button>
 					{/each}
 				</div>
+
+				{#if phase === 'questioning'}
+					<!-- Progress bar - current cluster -->
+					<div class="progress-bar-row">
+						<div class="progress-bar-container">
+							<div class="progress-bar" style="width: {clusterProgress}%"></div>
+						</div>
+						<span class="progress-label">{answeredCount}/{currentClusterBillCount}</span>
+					</div>
+
+					<!-- Stats row -->
+					<div class="cluster-stats">
+						{#if directAnsweredCount > 0}
+							<span class="stat-badge stat-answered">回答 {directAnsweredCount}</span>
+						{/if}
+						{#if skippedCount > 0}
+							<span class="stat-badge stat-skipped">スキップ {skippedCount}</span>
+						{/if}
+						{#if delegatedVotedCount > 0}
+							<span class="stat-badge stat-delegated-voted">委任済 {delegatedVotedCount}</span>
+						{/if}
+						{#if delegatedPendingCount > 0}
+							<span class="stat-badge stat-delegated-pending">委任中 {delegatedPendingCount}</span>
+						{/if}
+						{#if unansweredCount > 0}
+							<span class="stat-badge stat-pending">未回答 {unansweredCount}</span>
+						{/if}
+					</div>
+				{/if}
 			</div>
 		{/if}
 
@@ -1508,64 +1623,19 @@
 		margin-right: auto;
 	}
 
-	.progress-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 0.75rem;
-	}
-
-	.progress-info {
-		display: flex;
-		align-items: baseline;
-		gap: 0.75rem;
-	}
-
-	.progress-cluster-name {
-		font-size: 1.125rem;
-		font-weight: 700;
-		color: #1f2937;
-	}
-
-	.progress-count {
-		font-size: 0.875rem;
-		color: #6b7280;
-		font-weight: 500;
-	}
-
-	.progress-stats {
+	.progress-bar-row {
 		display: flex;
 		align-items: center;
 		gap: 0.75rem;
-		font-size: 0.875rem;
-	}
-
-	.stat-item {
-		display: flex;
-		align-items: center;
-		gap: 0.375rem;
-	}
-
-	.stat-label {
-		color: #6b7280;
-	}
-
-	.stat-value {
-		font-weight: 600;
-		color: #4b5563;
-		font-variant-numeric: tabular-nums;
-	}
-
-	.stat-divider {
-		color: #e5e7eb;
+		margin-top: 0.75rem;
 	}
 
 	.progress-bar-container {
+		flex: 1;
 		height: 6px;
 		background: #e5e7eb;
 		border-radius: 100px;
 		overflow: hidden;
-		margin-bottom: 1rem;
 		position: relative;
 	}
 
@@ -1589,11 +1659,67 @@
 		animation: shimmer 2s infinite;
 	}
 
-	/* ===== CLUSTER CHIPS ===== */
-	.cluster-chips {
+	.progress-label {
+		font-size: 0.8rem;
+		font-weight: 600;
+		color: #6b7280;
+		white-space: nowrap;
+		font-variant-numeric: tabular-nums;
+	}
+
+	/* ===== CLUSTER STATS ===== */
+	.cluster-stats {
 		display: flex;
-		flex-wrap: wrap;
 		gap: 0.5rem;
+		margin-top: 0.5rem;
+	}
+
+	.stat-badge {
+		font-size: 0.75rem;
+		font-weight: 600;
+		padding: 0.25rem 0.625rem;
+		border-radius: 100px;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.stat-answered {
+		background: rgba(34, 197, 94, 0.12);
+		color: #15803d;
+	}
+
+	.stat-skipped {
+		background: rgba(59, 130, 246, 0.1);
+		color: #2563eb;
+	}
+
+	.stat-delegated-voted {
+		background: rgba(139, 92, 246, 0.1);
+		color: #7c3aed;
+	}
+
+	.stat-delegated-pending {
+		background: rgba(245, 158, 11, 0.12);
+		color: #b45309;
+	}
+
+	.stat-pending {
+		background: rgba(107, 114, 128, 0.1);
+		color: #6b7280;
+	}
+
+	/* ===== CLUSTER CHIPS ===== */
+	.cluster-chips-scroll {
+		display: flex;
+		gap: 0.5rem;
+		overflow-x: auto;
+		scroll-behavior: smooth;
+		-webkit-overflow-scrolling: touch;
+		scrollbar-width: none;
+		padding-bottom: 2px;
+	}
+
+	.cluster-chips-scroll::-webkit-scrollbar {
+		display: none;
 	}
 
 	.cluster-chip {
@@ -1604,14 +1730,15 @@
 		border-radius: 100px;
 		font-size: 0.85rem;
 		font-weight: 600;
-		transition: all 0.3s ease;
+		transition: all 0.2s ease;
 		border: 2px solid transparent;
 		cursor: pointer;
+		white-space: nowrap;
+		flex-shrink: 0;
 	}
 
 	.cluster-chip:hover:not(:disabled):not(.active) {
-		transform: translateY(-2px);
-		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 	}
 
 	.cluster-chip:disabled {
@@ -1620,19 +1747,18 @@
 	}
 
 	.cluster-chip.completed {
-		background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+		background: #d1fae5;
 		color: #065f46;
 		border-color: #10b981;
 	}
 
 	.cluster-chip.completed:hover:not(:disabled) {
-		background: linear-gradient(135deg, #a7f3d0, #6ee7b7);
+		background: #a7f3d0;
 	}
 
 	.cluster-chip.active {
-		background: linear-gradient(135deg, #ddd6fe, #c4b5fd);
+		background: #ddd6fe;
 		color: #5b21b6;
-		animation: pulse 2s ease-in-out infinite;
 		border-color: #8b5cf6;
 		cursor: default;
 	}
@@ -1662,7 +1788,7 @@
 			font-size: 2rem;
 		}
 
-		.cluster-chips {
+		.cluster-stats {
 			justify-content: center;
 		}
 	}

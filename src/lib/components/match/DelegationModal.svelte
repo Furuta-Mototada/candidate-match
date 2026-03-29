@@ -13,11 +13,24 @@
 		billId: number;
 		billTitle: string;
 		hasExistingVote?: boolean;
+		currentDelegateId?: string | null;
+		currentDelegationStatus?: 'pending' | 'voted' | null;
 		onClose: () => void;
 		onDelegated: () => void;
 	}
 
-	let { show, billId, billTitle, hasExistingVote = false, onClose, onDelegated }: Props = $props();
+	let {
+		show,
+		billId,
+		billTitle,
+		hasExistingVote = false,
+		currentDelegateId = null,
+		currentDelegationStatus = null,
+		onClose,
+		onDelegated
+	}: Props = $props();
+
+	let isChangingDelegate = $derived(!!currentDelegateId);
 
 	let friends: Friend[] = $state([]);
 	let loading = $state(false);
@@ -115,7 +128,7 @@
 	}
 
 	function handleFriendClick(friend: Friend) {
-		if (hasExistingVote) {
+		if (hasExistingVote || isChangingDelegate) {
 			confirmingFriend = friend;
 		} else {
 			delegateTo(friend.friendId);
@@ -147,7 +160,10 @@
 	>
 		<div class="modal-content">
 			<div class="modal-header">
-				<h3 class="modal-title"><Handshake size={16} class="inline-icon" /> 投票を委任する</h3>
+				<h3 class="modal-title">
+					<Handshake size={16} class="inline-icon" />
+					{isChangingDelegate ? '委任先を変更' : '投票を委任する'}
+				</h3>
 				<button class="modal-close" onclick={onClose} aria-label="閉じる"><X size={16} /></button>
 			</div>
 
@@ -178,10 +194,27 @@
 					</div>
 				{:else if confirmingFriend}
 					<div class="confirm-message">
-						<p>
-							<TriangleAlert size={14} class="inline-icon" color="#f59e0b" /> この法案にはすでに投票があります。委任すると投票が削除されます。
+						{#if isChangingDelegate && currentDelegationStatus === 'voted'}
+							<div class="caution-box">
+								<p>
+									<TriangleAlert size={14} class="inline-icon" color="#dc2626" />
+									現在の委任先は既に投票済みです。委任先を変えると、結果が変わる可能性があります。
+								</p>
+							</div>
+						{:else if isChangingDelegate}
+							<p>
+								<TriangleAlert size={14} class="inline-icon" color="#f59e0b" />
+								現在の委任を取り消して、新しいフレンドに委任します。
+							</p>
+						{:else}
+							<p>
+								<TriangleAlert size={14} class="inline-icon" color="#f59e0b" />
+								この法案にはすでに投票があります。委任すると投票が削除されます。
+							</p>
+						{/if}
+						<p class="confirm-target">
+							新しい委任先: <strong>{confirmingFriend.friendUsername}</strong>
 						</p>
-						<p class="confirm-target">委任先: <strong>{confirmingFriend.friendUsername}</strong></p>
 						<div class="confirm-actions">
 							<button
 								class="confirm-btn confirm-btn-cancel"
@@ -195,7 +228,7 @@
 								onclick={() => delegateTo(confirmingFriend!.friendId)}
 								disabled={submitting}
 							>
-								投票を削除して委任する
+								{isChangingDelegate ? '委任先を変更する' : '投票を削除して委任する'}
 							</button>
 						</div>
 					</div>
@@ -205,13 +238,15 @@
 					</p>
 					<div class="friends-list">
 						{#each friends as friend (friend.requestId)}
+							{@const isCurrentDelegate = currentDelegateId === friend.friendId}
 							<button
 								class="friend-item"
 								class:holding={holdingFriendId === friend.friendId}
+								class:current-delegate={isCurrentDelegate}
 								onpointerdown={() => startFriendHold(friend)}
 								onpointerup={cancelFriendHold}
 								onpointerleave={cancelFriendHold}
-								disabled={submitting}
+								disabled={submitting || isCurrentDelegate}
 							>
 								<span
 									class="friend-fill"
@@ -221,7 +256,11 @@
 								></span>
 								<span class="friend-avatar"><User size={16} /></span>
 								<span class="friend-name">{friend.friendUsername}</span>
-								<span class="delegate-action">長押しで委任</span>
+								{#if isCurrentDelegate}
+									<span class="current-delegate-badge">現在の委任先</span>
+								{:else}
+									<span class="delegate-action">長押しで委任</span>
+								{/if}
 							</button>
 						{/each}
 					</div>
@@ -446,6 +485,25 @@
 		font-weight: 600;
 	}
 
+	.friend-item.current-delegate {
+		background: #f3f4f6;
+		border-color: #d1d5db;
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
+	.current-delegate-badge {
+		position: relative;
+		z-index: 1;
+		font-size: 0.75rem;
+		color: #6366f1;
+		font-weight: 600;
+		background: #eef2ff;
+		padding: 0.2rem 0.5rem;
+		border-radius: 6px;
+		white-space: nowrap;
+	}
+
 	.confirm-message {
 		text-align: center;
 		padding: 0.5rem 0;
@@ -455,6 +513,21 @@
 		margin: 0 0 0.75rem;
 		color: #92400e;
 		font-size: 0.95rem;
+	}
+
+	.caution-box {
+		background: #fef2f2;
+		border: 1px solid #fecaca;
+		border-radius: 8px;
+		padding: 0.75rem 1rem;
+		margin-bottom: 0.75rem;
+	}
+
+	.caution-box p {
+		color: #991b1b;
+		margin: 0;
+		font-size: 0.9rem;
+		line-height: 1.5;
 	}
 
 	.confirm-target {

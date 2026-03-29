@@ -297,16 +297,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			);
 
 		if (existing) {
-			if (existing.status === 'pending' || existing.status === 'redelegated') {
-				return json(
-					{
-						error:
-							'この法案には既にアクティブな委任があります。先に取り消してから再委任してください。'
-					},
-					{ status: 400 }
-				);
+			if (existing.delegateId === delegateId && existing.status !== 'rejected') {
+				return json({ error: 'この法案は既にこのフレンドに委任されています。' }, { status: 400 });
 			}
-			// If rejected or voted — allow re-delegation by updating
+			// Allow re-delegation by updating the existing record
 			await db
 				.update(table.voteDelegation)
 				.set({

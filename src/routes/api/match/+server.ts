@@ -305,6 +305,11 @@ async function handleStart(
 		clusterData.dimensions
 	);
 
+	// Track source per bill for frontend response
+	const billSourceMap = new Map<number, 'direct' | 'delegated'>();
+	const delegationStatusMap = new Map<number, 'pending' | 'voted'>();
+	const delegateIdMap = new Map<number, string>();
+
 	// If user is logged in, pre-populate with existing bill answers
 	if (userId) {
 		const existingAnswers = await db
@@ -317,22 +322,56 @@ async function handleStart(
 		// Also resolve delegated votes for bills in this cluster
 		const delegatedVotes = await resolveDelegatedVotes(userId, clusterData.billIds);
 
+		// Find bills with active (non-rejected) outgoing delegations (includes pending/voted/redelegated)
+		const activeDelegations = await db
+			.select({ billId: voteDelegation.billId, delegateId: voteDelegation.delegateId })
+			.from(voteDelegation)
+			.where(
+				and(
+					eq(voteDelegation.delegatorId, userId),
+					inArray(voteDelegation.billId, clusterData.billIds),
+					sql`${voteDelegation.status} != 'rejected'`
+				)
+			);
+		const delegatedBillIds = new Set(activeDelegations.map((d) => d.billId));
+		for (const d of activeDelegations) {
+			delegateIdMap.set(d.billId, d.delegateId);
+		}
+
 		console.log(
-			`[handleStart] cluster=${selectedLabel}, userId=${userId}, billIds count=${clusterData.billIds.length}, existingAnswers count=${existingAnswers.length}, delegatedVotes count=${delegatedVotes.size}`
+			`[handleStart] cluster=${selectedLabel}, userId=${userId}, billIds count=${clusterData.billIds.length}, existingAnswers count=${existingAnswers.length}, delegatedVotes count=${delegatedVotes.size}, activeDelegations count=${delegatedBillIds.size}`
 		);
 
 		// Merge direct + delegated answers
-		const allAnswers: { billId: number; score: number }[] = existingAnswers
-			.filter((a) => a.answer !== 'delegated')
-			.map((a) => ({
-				billId: a.billId,
-				score: answerToScore(a.answer)
-			}));
+		const allAnswers: { billId: number; score: number; source: 'direct' | 'delegated' }[] =
+			existingAnswers
+				.filter((a) => a.answer !== 'delegated')
+				.map((a) => ({
+					billId: a.billId,
+					score: answerToScore(a.answer),
+					source: 'direct' as const
+				}));
 		for (const [billId, score] of delegatedVotes) {
 			// Only add if not already in direct answers
 			if (!allAnswers.some((a) => a.billId === billId)) {
-				allAnswers.push({ billId, score });
+				allAnswers.push({ billId, score, source: 'delegated' });
 			}
+		}
+		// Add pending delegated bills (not yet voted by delegate) as score 0 so they're skipped
+		for (const billId of delegatedBillIds) {
+			if (!allAnswers.some((a) => a.billId === billId)) {
+				allAnswers.push({ billId, score: 0, source: 'delegated' });
+			}
+		}
+
+		// Populate source per bill for frontend
+		for (const a of allAnswers) {
+			billSourceMap.set(a.billId, a.source);
+		}
+		// Override: any bill with active delegation is 'delegated' regardless
+		for (const billId of delegatedBillIds) {
+			billSourceMap.set(billId, 'delegated');
+			delegationStatusMap.set(billId, delegatedVotes.has(billId) ? 'voted' : 'pending');
 		}
 
 		if (allAnswers.length > 0) {
@@ -427,10 +466,16 @@ async function handleStart(
 		preExistingAnswerCount: state.answeredBills.length,
 		preExistingAnsweredBills: state.answeredBills.map((ab) => {
 			const info = billInfoMap.get(ab.billId);
+			const source = billSourceMap.get(ab.billId) || 'direct';
 			return {
 				billId: ab.billId,
 				title: info?.title || `法案 #${ab.billId}`,
-				answer: ab.score
+				answer: ab.score,
+				source,
+				...(source === 'delegated' && {
+					delegationStatus: delegationStatusMap.get(ab.billId) || 'pending',
+					delegateId: delegateIdMap.get(ab.billId)
+				})
 			};
 		}),
 		memberVectors: memberVectorsForViz,
@@ -494,6 +539,11 @@ async function handleResume(
 		clusterData.dimensions
 	);
 
+	// Track source per bill for frontend response
+	const resumeBillSourceMap = new Map<number, 'direct' | 'delegated'>();
+	const resumeDelegationStatusMap = new Map<number, 'pending' | 'voted'>();
+	const resumeDelegateIdMap = new Map<number, string>();
+
 	// If user is logged in, load all answers from user_bill_answer for bills in this cluster
 	if (userId) {
 		const existingAnswers = await db
@@ -506,17 +556,50 @@ async function handleResume(
 		// Also resolve delegated votes for bills in this cluster
 		const delegatedVotes = await resolveDelegatedVotes(userId, clusterData.billIds);
 
+		// Find bills with active (non-rejected) outgoing delegations
+		const activeDelegations = await db
+			.select({ billId: voteDelegation.billId, delegateId: voteDelegation.delegateId })
+			.from(voteDelegation)
+			.where(
+				and(
+					eq(voteDelegation.delegatorId, userId),
+					inArray(voteDelegation.billId, clusterData.billIds),
+					sql`${voteDelegation.status} != 'rejected'`
+				)
+			);
+		const delegatedBillIds = new Set(activeDelegations.map((d) => d.billId));
+		for (const d of activeDelegations) {
+			resumeDelegateIdMap.set(d.billId, d.delegateId);
+		}
+
 		// Merge direct + delegated answers
-		const allAnswers: { billId: number; score: number }[] = existingAnswers
-			.filter((a) => a.answer !== 'delegated')
-			.map((a) => ({
-				billId: a.billId,
-				score: answerToScore(a.answer)
-			}));
+		const allAnswers: { billId: number; score: number; source: 'direct' | 'delegated' }[] =
+			existingAnswers
+				.filter((a) => a.answer !== 'delegated')
+				.map((a) => ({
+					billId: a.billId,
+					score: answerToScore(a.answer),
+					source: 'direct' as const
+				}));
 		for (const [billId, score] of delegatedVotes) {
 			if (!allAnswers.some((a) => a.billId === billId)) {
-				allAnswers.push({ billId, score });
+				allAnswers.push({ billId, score, source: 'delegated' });
 			}
+		}
+		// Add pending delegated bills (not yet voted by delegate) as score 0 so they're skipped
+		for (const billId of delegatedBillIds) {
+			if (!allAnswers.some((a) => a.billId === billId)) {
+				allAnswers.push({ billId, score: 0, source: 'delegated' });
+			}
+		}
+
+		// Populate source & delegation status maps
+		for (const a of allAnswers) {
+			resumeBillSourceMap.set(a.billId, a.source);
+		}
+		for (const billId of delegatedBillIds) {
+			resumeBillSourceMap.set(billId, 'delegated');
+			resumeDelegationStatusMap.set(billId, delegatedVotes.has(billId) ? 'voted' : 'pending');
 		}
 
 		if (allAnswers.length > 0) {
@@ -611,10 +694,16 @@ async function handleResume(
 		preExistingAnswerCount: state.answeredBills.length,
 		preExistingAnsweredBills: state.answeredBills.map((ab) => {
 			const info = billInfoMap.get(ab.billId);
+			const source = resumeBillSourceMap.get(ab.billId) || 'direct';
 			return {
 				billId: ab.billId,
 				title: info?.title || `法案 #${ab.billId}`,
-				answer: ab.score
+				answer: ab.score,
+				source,
+				...(source === 'delegated' && {
+					delegationStatus: resumeDelegationStatusMap.get(ab.billId) || 'pending',
+					delegateId: resumeDelegateIdMap.get(ab.billId)
+				})
 			};
 		}),
 		memberVectors: memberVectorsForViz,
@@ -663,6 +752,32 @@ async function handleAnswer(
 			.limit(1);
 
 		if (!activeDelegation) {
+			await db
+				.insert(userBillAnswer)
+				.values({
+					userId,
+					billId,
+					answer: scoreToAnswer(normalizedScore)
+				})
+				.onConflictDoUpdate({
+					target: [userBillAnswer.userId, userBillAnswer.billId],
+					set: {
+						answer: scoreToAnswer(normalizedScore),
+						updatedAt: sql`now()`
+					}
+				});
+		} else {
+			// User is overriding a delegation with a direct vote — retract the delegation
+			await db
+				.update(voteDelegation)
+				.set({ status: 'rejected' })
+				.where(
+					and(
+						eq(voteDelegation.delegatorId, userId),
+						eq(voteDelegation.billId, billId),
+						sql`${voteDelegation.status} != 'rejected'`
+					)
+				);
 			await db
 				.insert(userBillAnswer)
 				.values({
