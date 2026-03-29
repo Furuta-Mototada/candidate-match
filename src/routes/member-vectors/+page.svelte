@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { PageData } from './$types.js';
 	import { SvelteMap } from 'svelte/reactivity';
-	import { PageHero } from '$lib/components/index.js';
+	import { PageHero, EmptyState } from '$lib/components/index.js';
 	import {
 		TrendingUp,
 		BookOpen,
@@ -82,6 +82,7 @@
 	}
 
 	let { data }: { data: PageData } = $props();
+	let isAdmin = $derived(data.user?.role === 'admin');
 
 	let availableClusters: ClusterInfo[] = $state(data.clusters || []);
 	let selectedClusterId: number | null = $state(null);
@@ -101,6 +102,7 @@
 	// Saved vectors state
 	let savedVectors: SavedVectorInfo[] = $state([]);
 	let isLoadingSaved: boolean = $state(false);
+	let isLoadingResult: boolean = $state(false);
 	let selectedSavedVectorKey: string | null = $state(null);
 	let loadedVectorizationName: string | null = $state(null);
 
@@ -547,9 +549,11 @@
 	}
 
 	async function loadSavedVectorization(group: GroupedSavedVector) {
-		isLoadingSaved = true;
+		isLoadingResult = true;
 		selectedSavedVectorKey = group.key;
 		loadedVectorizationName = group.name;
+		calculationResult = null;
+		currentClusterData = null;
 
 		try {
 			// Load full data for each cluster label in the group
@@ -597,20 +601,10 @@
 			}
 		} catch (error) {
 			console.error('Failed to load saved vectorization:', error);
-			alert('保存済みベクトルの読み込みに失敗しました');
+			alert('保存済み分析の読み込みに失敗しました');
 		} finally {
-			isLoadingSaved = false;
+			isLoadingResult = false;
 		}
-	}
-
-	function clearLoadedVectorization() {
-		calculationResult = null;
-		currentClusterData = null;
-		selectedClusterLabel = null;
-		selectedSavedVectorKey = null;
-		loadedVectorizationName = null;
-		selectedClusterId = null;
-		clusterLabels = [];
 	}
 
 	async function loadClusterLabels(clusterId: number) {
@@ -655,7 +649,7 @@
 		}
 
 		if (!vectorizationName.trim()) {
-			alert('保存名を入力してください');
+			alert('分析名を入力してください');
 			return;
 		}
 
@@ -697,7 +691,7 @@
 			);
 		} catch (error) {
 			console.error('Failed to calculate vectors:', error);
-			alert('ベクトル計算に失敗しました');
+			alert('分析に失敗しました');
 		} finally {
 			isCalculating = false;
 		}
@@ -803,7 +797,7 @@
 		title="クラスター別メンバーベクトル分析"
 		description="法案クラスターごとに議員の投票パターンを潜在空間で分析"
 	>
-		{#snippet badge()}<TrendingUp size={16} class="inline-icon" /> ベクトル分析{/snippet}
+		{#snippet badge()}<TrendingUp size={16} class="inline-icon" /> クラスタリング分析{/snippet}
 	</PageHero>
 
 	<!-- Explanation Section (Collapsible) -->
@@ -933,97 +927,104 @@
 		</details>
 	</section>
 
-	<!-- New Vectorization Section -->
-	<section class="content-section">
-		<div class="section-header">
-			<h2>新規ベクトル分析</h2>
-		</div>
-
-		<div class="form-grid">
-			<div class="form-group">
-				<label for="clusterSelect">クラスタリング設定</label>
-				<select
-					id="clusterSelect"
-					class="select"
-					bind:value={selectedClusterId}
-					onchange={() => selectedClusterId && loadClusterLabels(selectedClusterId)}
-				>
-					<option value={null}>-- 選択してください --</option>
-					{#each availableClusters as cluster (cluster.id)}
-						<option value={cluster.id}>{cluster.name}</option>
-					{/each}
-				</select>
+	{#if isAdmin}
+		<!-- New Vectorization Section -->
+		<section class="content-section">
+			<div class="section-header">
+				<h2>新規クラスタリング分析</h2>
 			</div>
 
-			<div class="form-group">
-				<label for="nComponents">潜在次元数</label>
-				<select id="nComponents" bind:value={nComponents} class="select">
-					<option value={1}>1次元</option>
-					<option value={2}>2次元</option>
-					<option value={3}>3次元</option>
-					<option value={4}>4次元</option>
-					<option value={5}>5次元</option>
-				</select>
-			</div>
-
-			<div class="form-group full-width">
-				<label for="vectorizationName">保存名</label>
-				<input
-					type="text"
-					id="vectorizationName"
-					bind:value={vectorizationName}
-					placeholder="例: 2024年分析 (3次元)"
-					class="input-text"
-				/>
-			</div>
-		</div>
-
-		{#if isLoadingLabels}
-			<p class="loading-state">クラスター情報を読み込み中...</p>
-		{:else if selectedClusterId && clusterLabels.length > 0}
-			<div class="cluster-preview-box">
-				<div class="preview-header">
-					<span class="preview-title">計算対象クラスター（{clusterLabels.length}件）</span>
-					<a href="/bill-clustering?id={selectedClusterId}" class="preview-link" target="_blank">
-						クラスタリング結果を見る →
-					</a>
+			<div class="form-grid">
+				<div class="form-group full-width">
+					<label for="vectorizationName">分析名</label>
+					<input
+						type="text"
+						id="vectorizationName"
+						bind:value={vectorizationName}
+						placeholder="例: 2024年分析 (3次元)"
+						class="input-text"
+					/>
 				</div>
-				<div class="preview-tags">
-					{#each clusterLabels as { label, billCount, name } (label)}
-						<span class="preview-tag">
-							{name || 'クラスター ' + label}
-							<span class="tag-count">({billCount}法案)</span>
-						</span>
-					{/each}
+
+				<div class="form-group">
+					<label for="clusterSelect">クラスタリング設定</label>
+					<select
+						id="clusterSelect"
+						class="select"
+						bind:value={selectedClusterId}
+						onchange={() => selectedClusterId && loadClusterLabels(selectedClusterId)}
+					>
+						<option value={null}>-- 選択してください --</option>
+						{#each availableClusters as cluster (cluster.id)}
+							<option value={cluster.id}>{cluster.name}</option>
+						{/each}
+					</select>
+				</div>
+
+				<div class="form-group">
+					<label for="nComponents">潜在次元数</label>
+					<select id="nComponents" bind:value={nComponents} class="select">
+						<option value={1}>1次元</option>
+						<option value={2}>2次元</option>
+						<option value={3}>3次元</option>
+						<option value={4}>4次元</option>
+						<option value={5}>5次元</option>
+					</select>
 				</div>
 			</div>
-		{/if}
 
-		<button
-			class="btn-primary"
-			onclick={calculateAndSaveVectors}
-			disabled={isCalculating || !selectedClusterId || !vectorizationName.trim() || isLoadingLabels}
-		>
-			{#if isCalculating}
-				計算中...
-			{:else}
-				ベクトル分析を実行
+			{#if isLoadingLabels}
+				<p class="loading-state">クラスター情報を読み込み中...</p>
+			{:else if selectedClusterId && clusterLabels.length > 0}
+				<div class="cluster-preview-box">
+					<div class="preview-header">
+						<span class="preview-title">計算対象クラスター（{clusterLabels.length}件）</span>
+						<a href="/bill-clustering?id={selectedClusterId}" class="preview-link" target="_blank">
+							クラスタリング結果を見る →
+						</a>
+					</div>
+					<div class="preview-tags">
+						{#each clusterLabels as { label, billCount, name } (label)}
+							<span class="preview-tag">
+								{name || 'クラスター ' + label}
+								<span class="tag-count">({billCount}法案)</span>
+							</span>
+						{/each}
+					</div>
+				</div>
 			{/if}
-		</button>
-	</section>
+
+			<button
+				class="btn-primary"
+				onclick={calculateAndSaveVectors}
+				disabled={isCalculating ||
+					!selectedClusterId ||
+					!vectorizationName.trim() ||
+					isLoadingLabels}
+			>
+				{#if isCalculating}
+					計算中...
+				{:else}
+					クラスタリング分析を実行
+				{/if}
+			</button>
+		</section>
+	{/if}
 
 	<!-- Saved Vectorizations Section -->
 	<section class="content-section">
 		<div class="section-header">
-			<h2>保存済みベクトル分析</h2>
+			<h2>保存済みクラスタリング分析</h2>
 		</div>
 
 		{#if isLoadingSaved}
 			<p class="loading-state">読み込み中...</p>
 		{:else if groupedSavedVectors.length === 0}
-			<p class="empty-state">
-				保存済みのベクトル分析がありません。上記のフォームから新しい分析を実行してください。
-			</p>
+			<EmptyState
+				message="保存済みのクラスタリング分析がありません。上記のフォームから新しい分析を実行してください。"
+			>
+				{#snippet icon()}<TrendingUp size={48} />{/snippet}
+			</EmptyState>
 		{:else}
 			<div class="saved-list">
 				{#each groupedSavedVectors as group (group.key)}
@@ -1047,15 +1048,17 @@
 		{/if}
 	</section>
 
-	{#if calculationResult && currentClusterData}
+	{#if isLoadingResult}
 		<section class="content-section results-section">
 			<div class="section-header">
 				<h2>分析結果: {loadedVectorizationName || vectorizationName}</h2>
-				{#if loadedVectorizationName}
-					<button class="btn-secondary" onclick={clearLoadedVectorization}
-						><X size={14} class="inline-icon" /> クリア</button
-					>
-				{/if}
+			</div>
+			<p class="loading-state">読み込み中...</p>
+		</section>
+	{:else if calculationResult && currentClusterData}
+		<section class="content-section results-section">
+			<div class="section-header">
+				<h2>分析結果: {loadedVectorizationName || vectorizationName}</h2>
 			</div>
 
 			{#if Object.keys(calculationResult).length > 1}
@@ -1435,16 +1438,6 @@
 		margin: 0;
 	}
 
-	.empty-state {
-		color: #64748b;
-		font-style: italic;
-		text-align: center;
-		padding: 2rem;
-		background: white;
-		border-radius: 12px;
-		border: 1px solid #e5e7eb;
-	}
-
 	/* ===== FORM GRID ===== */
 	.form-grid {
 		display: grid;
@@ -1527,35 +1520,36 @@
 
 	/* ===== SAVED VECTORS SECTION ===== */
 	.saved-list {
-		display: flex;
-		flex-wrap: wrap;
+		display: grid;
 		gap: 0.75rem;
 	}
 
 	.saved-card {
+		display: block;
+		width: 100%;
 		padding: 1rem 1.25rem;
-		border: 1px solid #d1fae5;
-		border-radius: 10px;
+		border: 1px solid #e5e7eb;
+		border-radius: 12px;
 		background: white;
 		cursor: pointer;
 		transition: all 0.2s;
 		text-align: left;
-		min-width: 200px;
 	}
 
 	.saved-card:hover {
-		border-color: #10b981;
-		background: #f0fdf4;
+		border-color: #6366f1;
+		box-shadow: 0 4px 12px rgba(99, 102, 241, 0.1);
 	}
 
 	.saved-card.active {
-		border-color: #10b981;
-		background: #ecfdf5;
+		border-color: #6366f1;
+		background: #f5f3ff;
+		box-shadow: 0 4px 12px rgba(99, 102, 241, 0.15);
 	}
 
 	.saved-name {
 		font-weight: 600;
-		color: #065f46;
+		color: #1f2937;
 		margin-bottom: 0.5rem;
 	}
 
@@ -1576,22 +1570,6 @@
 		color: #6b7280;
 		padding: 2rem;
 		text-align: center;
-	}
-
-	.btn-secondary {
-		background: #f3f4f6;
-		color: #374151;
-		border: 1px solid #d1d5db;
-		padding: 0.5rem 1rem;
-		border-radius: 6px;
-		font-size: 0.85rem;
-		cursor: pointer;
-		transition: all 0.2s;
-	}
-
-	.btn-secondary:hover {
-		background: #e5e7eb;
-		border-color: #9ca3af;
 	}
 
 	.badge {

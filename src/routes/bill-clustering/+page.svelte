@@ -25,6 +25,7 @@
 	}
 
 	let { data }: { data: PageData } = $props();
+	let isAdmin = $derived(data.user?.role === 'admin');
 
 	// State for clustering parameters
 	let algorithm = $state<'kmeans' | 'hdbscan'>('kmeans');
@@ -131,7 +132,7 @@
 
 	async function generateClustering() {
 		if (!clusteringName.trim()) {
-			alert('Please enter a name for this clustering');
+			alert('分析名を入力してください');
 			return;
 		}
 
@@ -155,17 +156,17 @@
 			});
 
 			if (response.ok) {
-				const result = await response.json();
-				alert(`Clustering generated successfully! Cluster ID: ${result.clusterId}`);
+				await response.json();
+				alert(`クラスタリング分析が完了しました！`);
 				// Reload page to show new cluster
 				window.location.reload();
 			} else {
 				const error = await response.json();
-				alert(`Failed to generate clustering: ${error.message}`);
+				alert(`クラスタリング分析に失敗しました: ${error.message}`);
 			}
 		} catch (error) {
 			console.error('Failed to generate clustering:', error);
-			alert('Failed to generate clustering. See console for details.');
+			alert('クラスタリング分析に失敗しました');
 		} finally {
 			isGenerating = false;
 		}
@@ -364,78 +365,91 @@
 		title="法案クラスタリング分析"
 		description="法案を類似性に基づいてグループ化し、政策トピックを可視化します"
 	>
-		{#snippet badge()}<ChartColumn size={16} class="inline-icon" /> クラスタリング{/snippet}
+		{#snippet badge()}<ChartColumn size={16} class="inline-icon" /> クラスタリング分析{/snippet}
 	</PageHero>
 
-	<!-- Clustering Generation Section -->
-	<section class="generation-section">
-		<div class="section-header">
-			<h2>新しいクラスタリングを生成</h2>
-		</div>
-
-		<div class="form-group">
-			<label for="name">クラスタリング名</label>
-			<input
-				id="name"
-				type="text"
-				bind:value={clusteringName}
-				placeholder="例: 政策トピック - 10クラスタ"
-				class="input"
-			/>
-		</div>
-
-		<div class="form-group">
-			<label for="algorithm">アルゴリズム</label>
-			<select id="algorithm" bind:value={algorithm} class="select">
-				<option value="kmeans">K-Means (クラスタ数指定)</option>
-				<option value="hdbscan">HDBSCAN (自動クラスタ数)</option>
-			</select>
-		</div>
-
-		{#if algorithm === 'kmeans'}
-			<div class="form-group">
-				<label for="nClusters">クラスタ数</label>
-				<input id="nClusters" type="number" bind:value={nClusters} min="2" max="20" class="input" />
+	{#if isAdmin}
+		<!-- Clustering Generation Section -->
+		<section class="generation-section">
+			<div class="section-header">
+				<h2>新規クラスタリング分析</h2>
 			</div>
-		{:else}
+
 			<div class="form-group">
-				<label for="minClusterSize">最小クラスタサイズ</label>
+				<label for="name">分析名</label>
 				<input
-					id="minClusterSize"
-					type="number"
-					bind:value={minClusterSize}
-					min="2"
-					max="50"
+					id="name"
+					type="text"
+					bind:value={clusteringName}
+					placeholder="例: 政策トピック - 10クラスタ"
 					class="input"
 				/>
 			</div>
-			<div class="form-group">
-				<label for="minSamples">最小サンプル数</label>
-				<input
-					id="minSamples"
-					type="number"
-					bind:value={minSamples}
-					min="1"
-					max="20"
-					class="input"
-				/>
-			</div>
-		{/if}
 
-		<button onclick={generateClustering} disabled={isGenerating} class="btn-primary">
-			{isGenerating ? 'クラスタリング実行中...' : 'クラスタリング実行'}
-		</button>
-	</section>
+			<div class="form-group">
+				<label for="algorithm">アルゴリズム</label>
+				<select id="algorithm" bind:value={algorithm} class="select">
+					<option value="kmeans">K-Means (クラスタ数指定)</option>
+					<option value="hdbscan">HDBSCAN (自動クラスタ数)</option>
+				</select>
+			</div>
+
+			{#if algorithm === 'kmeans'}
+				<div class="form-group">
+					<label for="nClusters">クラスタ数</label>
+					<input
+						id="nClusters"
+						type="number"
+						bind:value={nClusters}
+						min="2"
+						max="20"
+						class="input"
+					/>
+				</div>
+			{:else}
+				<div class="form-group">
+					<label for="minClusterSize">最小クラスタサイズ</label>
+					<input
+						id="minClusterSize"
+						type="number"
+						bind:value={minClusterSize}
+						min="2"
+						max="50"
+						class="input"
+					/>
+				</div>
+				<div class="form-group">
+					<label for="minSamples">最小サンプル数</label>
+					<input
+						id="minSamples"
+						type="number"
+						bind:value={minSamples}
+						min="1"
+						max="20"
+						class="input"
+					/>
+				</div>
+			{/if}
+
+			<button
+				onclick={generateClustering}
+				disabled={isGenerating || !clusteringName.trim()}
+				class="btn-primary"
+			>
+				{isGenerating ? 'クラスタリング実行中...' : 'クラスタリング分析を実行'}
+			</button>
+		</section>
+	{/if}
 
 	<!-- Clustering Results Section -->
 	<section class="results-section">
 		<div class="section-header">
-			<h2>既存のクラスタリング結果</h2>
+			<h2>保存済みクラスタリング分析</h2>
 		</div>
 
 		{#if data.clusters.length === 0}
 			<EmptyState
-				message="クラスタリング結果がありません。上記のフォームから新しいクラスタリングを生成してください。"
+				message="保存済みのクラスタリング分析がありません。上記のフォームから新しい分析を実行してください。"
 			>
 				{#snippet icon()}<ChartColumn size={48} />{/snippet}
 			</EmptyState>
@@ -459,7 +473,7 @@
 	{#if selectedClusterId && clusterData}
 		<section class="visualization-section">
 			<div class="section-header">
-				<h2>クラスタ詳細: {clusterData.name}</h2>
+				<h2>分析結果: {clusterData.name}</h2>
 			</div>
 
 			{#if isLoadingCluster}

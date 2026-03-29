@@ -44,7 +44,11 @@ interface CalculationResult {
  * Calculate cluster-specific member vectors using weighted PCA/SVD
  * If saveImmediately is true and saveName is provided, saves all calculated clusters to the database
  */
-export const POST: RequestHandler = async ({ request }): Promise<Response> => {
+export const POST: RequestHandler = async ({ request, locals }): Promise<Response> => {
+	if (!locals.user || locals.user.role !== 'admin') {
+		return json({ error: 'Admin permission required' }, { status: 403 });
+	}
+
 	try {
 		const body = await request.json();
 		const { clusterId, clusterLabel, nComponents = 3, saveImmediately = false, saveName } = body;

@@ -9,7 +9,11 @@ const execAsync = promisify(exec);
  * POST /api/generate-clustering
  * Generate a new clustering by calling the Python script
  */
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async ({ request, locals }) => {
+	if (!locals.user || locals.user.role !== 'admin') {
+		return json({ error: 'Admin permission required' }, { status: 403 });
+	}
+
 	try {
 		const body = await request.json();
 		const { algorithm, name, n_clusters, min_cluster_size, min_samples } = body;

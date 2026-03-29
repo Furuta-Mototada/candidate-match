@@ -1744,6 +1744,7 @@
 			}}
 		>
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<!-- svelte-ignore a11y_click_events_have_key_events -->
 			<div class="modal-content save-modal" onclick={(e) => e.stopPropagation()}>
 				<h3 class="modal-title">スナップショットを保存</h3>
 				<label class="save-modal-label">

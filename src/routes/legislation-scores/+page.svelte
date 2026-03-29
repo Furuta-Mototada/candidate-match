@@ -25,7 +25,7 @@
 	}
 
 	let { data }: { data: PageData } = $props();
-	void data;
+	let isAdmin = $derived(data.user?.role === 'admin');
 
 	let legislationScores: LegislationScore[] = $state([]);
 	let loadingScores: boolean = $state(true);
@@ -458,9 +458,11 @@
 				</select>
 			</div>
 
-			<button onclick={requestCalculation} disabled={calculating} class="calculate-btn">
-				{#if calculating}計算中...{:else}<Wrench size={14} class="inline-icon" /> 再計算{/if}
-			</button>
+			{#if isAdmin}
+				<button onclick={requestCalculation} disabled={calculating} class="calculate-btn">
+					{#if calculating}計算中...{:else}<Wrench size={14} class="inline-icon" /> 再計算{/if}
+				</button>
+			{/if}
 		</div>
 
 		{#if calculationMessage}
@@ -545,6 +547,7 @@
 		<div class="confirm-dialog" onclick={(e) => e.stopPropagation()}>
 			<h3>スコア再計算の確認</h3>
 			<p>全議案のスコアを再計算します。この処理には時間がかかる場合があります。</p>
+			<p class="warning">⚠️ この操作は既存のスコアを上書きします。実行後は元に戻せません。</p>
 			<p class="warning">よろしいですか？</p>
 			<div class="dialog-buttons">
 				<button class="btn-cancel" onclick={cancelCalculation}>キャンセル</button>
