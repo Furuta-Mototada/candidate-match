@@ -1,5 +1,15 @@
 <script lang="ts">
-	import { Save, ClipboardList, Hourglass, Rocket, ChartColumn } from '@lucide/svelte';
+	import {
+		ClipboardList,
+		Hourglass,
+		Rocket,
+		ChartColumn,
+		Settings,
+		Star,
+		ChevronDown,
+		ChevronUp,
+		Shield
+	} from '@lucide/svelte';
 	import type { GroupedSavedVector } from '$lib/types/index.js';
 
 	interface Props {
@@ -7,7 +17,9 @@
 		selectedSavedVectorKey: string | null;
 		selectedGroupedVector: GroupedSavedVector | null;
 		isLoading: boolean;
+		isAdmin?: boolean;
 		onStart: () => void;
+		onSetDefault?: (name: string, clusterId: number) => void;
 	}
 
 	let {
@@ -15,65 +27,136 @@
 		selectedSavedVectorKey = $bindable(),
 		selectedGroupedVector,
 		isLoading,
-		onStart
+		isAdmin = false,
+		onStart,
+		onSetDefault
 	}: Props = $props();
+
+	let showAdvancedSettings = $state(false);
+
+	// Check if the current selection is the default
+	let isCurrentDefault = $derived(selectedGroupedVector?.isDefault ?? false);
 </script>
 
 <div class="setup-container animate-in" style="--delay: 3">
+	<!-- Friendly header for all users -->
 	<div class="setup-header">
-		<h2 class="setup-title"><span class="icon"><Save size={18} /></span> 保存済み設定を選択</h2>
+		<h2 class="setup-title">
+			<span class="icon"><Rocket size={20} /></span> あなたに合う政治家を見つけよう
+		</h2>
 		<a href="/match/saved" class="view-saved-link">
 			<ClipboardList size={16} class="inline-icon" /> 過去の結果を見る
 		</a>
 	</div>
 
+	<p class="setup-description">
+		法案についての質問にいくつか回答するだけで、あなたの考えに近い政治家がわかります。
+	</p>
+
 	{#if groupedSavedVectors.length > 0}
-		<div class="vector-selector">
-			<select
-				id="savedVector"
-				class="vector-select"
-				bind:value={selectedSavedVectorKey}
-				disabled={isLoading}
-			>
-				<option value={null}>-- 保存済み設定を選択 --</option>
-				{#each groupedSavedVectors as group (group.key)}
-					<option value={group.key}>
-						{group.name} ({group.clusterCount}クラスター, {group.dimensions}D, {group.totalMembers}議員,
-						{group.totalBills}法案)
-					</option>
-				{/each}
-			</select>
-			<a href="/member-vectors" class="create-new-link"> または新しい設定を作成 → </a>
-		</div>
-
 		{#if selectedGroupedVector}
-			<div class="selected-vector-info">
-				<h3 class="selected-vector-title">
-					{selectedGroupedVector.name}
-				</h3>
-				<div class="cluster-tags">
-					{#each selectedGroupedVector.vectors.sort((a, b) => a.clusterLabel - b.clusterLabel) as v (v.id)}
-						<span class="cluster-tag">
-							{v.clusterLabelName || `クラスター${v.clusterLabel}`} ({v.billCount}法案)
-						</span>
-					{/each}
+			<!-- Show selected config info and start button prominently -->
+			<div class="ready-to-start">
+				<div class="selected-config-summary">
+					<div class="config-badge">
+						{#if isCurrentDefault}
+							<span class="default-badge"><Star size={12} /> おすすめ</span>
+						{/if}
+						<span class="config-name">{selectedGroupedVector.name}</span>
+					</div>
+					<div class="config-stats">
+						<span class="stat">{selectedGroupedVector.clusterCount} テーマ</span>
+						<span class="stat-divider">·</span>
+						<span class="stat">{selectedGroupedVector.totalBills} 法案</span>
+						<span class="stat-divider">·</span>
+						<span class="stat">{selectedGroupedVector.totalMembers} 議員</span>
+					</div>
+					<div class="cluster-tags">
+						{#each selectedGroupedVector.vectors.sort((a, b) => a.clusterLabel - b.clusterLabel) as v (v.id)}
+							<span class="cluster-tag">
+								{v.clusterLabelName || `クラスター${v.clusterLabel}`}
+							</span>
+						{/each}
+					</div>
 				</div>
-			</div>
 
-			<button onclick={onStart} disabled={isLoading} class="btn-primary btn-large">
-				{#if isLoading}
-					<span class="loading-spinner"><Hourglass size={16} /></span>
-					準備中...
+				<button onclick={onStart} disabled={isLoading} class="btn-primary btn-large">
+					{#if isLoading}
+						<span class="loading-spinner"><Hourglass size={16} /></span>
+						準備中...
+					{:else}
+						<Rocket size={18} class="inline-icon" /> マッチングを始める
+					{/if}
+				</button>
+			</div>
+		{:else}
+			<!-- No selection yet and no default - prompt to pick one -->
+			<div class="no-selection-prompt">
+				<p class="prompt-text">下の設定を選択して始めましょう。</p>
+			</div>
+		{/if}
+
+		<!-- Collapsible advanced settings -->
+		<div class="advanced-settings-section">
+			<button
+				class="advanced-toggle"
+				onclick={() => (showAdvancedSettings = !showAdvancedSettings)}
+			>
+				<Settings size={14} />
+				{#if showAdvancedSettings}
+					設定を変更
+					<ChevronUp size={14} />
 				{:else}
-					<Rocket size={16} class="inline-icon" /> 回答を始める（{selectedGroupedVector.clusterCount}クラスター）
+					設定を変更
+					<ChevronDown size={14} />
 				{/if}
 			</button>
-		{/if}
+
+			{#if showAdvancedSettings}
+				<div class="advanced-content">
+					<select
+						id="savedVector"
+						class="vector-select"
+						bind:value={selectedSavedVectorKey}
+						disabled={isLoading}
+					>
+						<option value={null}>-- 設定を選択 --</option>
+						{#each groupedSavedVectors as group (group.key)}
+							<option value={group.key}>
+								{group.name}
+								{#if group.isDefault}(デフォルト){/if}
+								— {group.clusterCount}テーマ, {group.totalBills}法案, {group.totalMembers}議員
+							</option>
+						{/each}
+					</select>
+					<a href="/member-vectors" class="create-new-link"> 新しい設定を作成 → </a>
+
+					{#if isAdmin && selectedGroupedVector && onSetDefault}
+						<div class="admin-actions">
+							<button
+								class="btn-set-default"
+								class:is-default={isCurrentDefault}
+								onclick={() =>
+									onSetDefault(selectedGroupedVector!.name, selectedGroupedVector!.clusterId)}
+								disabled={isCurrentDefault}
+							>
+								<Shield size={14} />
+								{#if isCurrentDefault}
+									デフォルトに設定済み
+								{:else}
+									この設定をデフォルトにする
+								{/if}
+							</button>
+						</div>
+					{/if}
+				</div>
+			{/if}
+		</div>
 	{:else}
 		<!-- No saved vectors available -->
 		<div class="empty-state">
 			<div class="empty-icon"><ChartColumn size={32} /></div>
-			<h3 class="empty-title">保存済みベクトルがありません</h3>
+			<h3 class="empty-title">まだ設定がありません</h3>
 			<p class="empty-description">
 				まずメンバーベクトルページでベクトル分析を実行し、結果を保存してください。
 			</p>
@@ -92,7 +175,7 @@
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		margin-bottom: 2.5rem;
+		margin-bottom: 0.75rem;
 		flex-wrap: wrap;
 		gap: 1rem;
 	}
@@ -117,6 +200,13 @@
 		color: #6366f1;
 	}
 
+	.setup-description {
+		font-size: 1.0625rem;
+		color: #6b7280;
+		line-height: 1.6;
+		margin-bottom: 2rem;
+	}
+
 	.view-saved-link {
 		display: inline-flex;
 		align-items: center;
@@ -138,8 +228,118 @@
 		border-color: #d1d5db;
 	}
 
-	.vector-selector {
+	/* Ready to start section */
+	.ready-to-start {
+		background: linear-gradient(135deg, #faf5ff 0%, #eff6ff 100%);
+		border: 1px solid #e0e7ff;
+		border-radius: 16px;
+		padding: 1.5rem;
 		margin-bottom: 1.5rem;
+	}
+
+	.selected-config-summary {
+		margin-bottom: 1.25rem;
+	}
+
+	.config-badge {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin-bottom: 0.5rem;
+	}
+
+	.default-badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25rem;
+		background: linear-gradient(135deg, #fbbf24, #f59e0b);
+		color: white;
+		font-size: 0.75rem;
+		font-weight: 600;
+		padding: 0.2rem 0.5rem;
+		border-radius: 999px;
+	}
+
+	.config-name {
+		font-size: 1.125rem;
+		font-weight: 600;
+		color: #1f2937;
+	}
+
+	.config-stats {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin-bottom: 0.75rem;
+	}
+
+	.stat {
+		font-size: 0.875rem;
+		color: #6b7280;
+		font-weight: 500;
+	}
+
+	.stat-divider {
+		color: #d1d5db;
+	}
+
+	.cluster-tags {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+
+	.cluster-tag {
+		padding: 0.375rem 0.75rem;
+		background: white;
+		border: 1px solid #e5e7eb;
+		border-radius: 6px;
+		font-size: 0.8125rem;
+		color: #4b5563;
+		font-weight: 500;
+	}
+
+	.no-selection-prompt {
+		background: #f9fafb;
+		border: 1px dashed #d1d5db;
+		border-radius: 12px;
+		padding: 1.5rem;
+		text-align: center;
+		margin-bottom: 1.5rem;
+	}
+
+	.prompt-text {
+		color: #6b7280;
+		font-size: 0.9375rem;
+		margin: 0;
+	}
+
+	/* Advanced settings */
+	.advanced-settings-section {
+		border-top: 1px solid #e5e7eb;
+		padding-top: 1rem;
+	}
+
+	.advanced-toggle {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.375rem;
+		background: none;
+		border: none;
+		color: #6b7280;
+		font-size: 0.875rem;
+		font-weight: 500;
+		cursor: pointer;
+		padding: 0.375rem 0;
+		transition: color 0.2s ease;
+	}
+
+	.advanced-toggle:hover {
+		color: #4b5563;
+	}
+
+	.advanced-content {
+		margin-top: 1rem;
 	}
 
 	.create-new-link {
@@ -184,30 +384,40 @@
 		cursor: not-allowed;
 	}
 
-	.selected-vector-info {
-		margin: 1.5rem 0 2rem;
+	/* Admin actions */
+	.admin-actions {
+		margin-top: 0.75rem;
 	}
 
-	.selected-vector-title {
-		font-size: 1rem;
-		font-weight: 600;
-		color: #6b7280;
-		margin-bottom: 0.75rem;
-	}
-
-	.cluster-tags {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.5rem;
-	}
-
-	.cluster-tag {
-		padding: 0.375rem 0.75rem;
-		background: #f3f4f6;
-		border-radius: 6px;
+	.btn-set-default {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.375rem;
+		padding: 0.5rem 1rem;
+		background: #f9fafb;
+		border: 1px solid #d1d5db;
+		border-radius: 8px;
 		font-size: 0.8125rem;
-		color: #4b5563;
 		font-weight: 500;
+		color: #4b5563;
+		cursor: pointer;
+		transition: all 0.2s ease;
+	}
+
+	.btn-set-default:hover:not(:disabled) {
+		background: #f3f4f6;
+		border-color: #9ca3af;
+	}
+
+	.btn-set-default.is-default {
+		background: #fef3c7;
+		border-color: #fbbf24;
+		color: #92400e;
+		cursor: default;
+	}
+
+	.btn-set-default:disabled {
+		opacity: 0.7;
 	}
 
 	.btn-primary {

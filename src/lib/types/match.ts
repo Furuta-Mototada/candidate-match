@@ -9,6 +9,7 @@ export interface SavedVectorInfo {
 	memberCount: number;
 	billCount: number;
 	createdAt: string;
+	isDefault: boolean;
 }
 
 export interface GroupedSavedVector {
@@ -22,6 +23,7 @@ export interface GroupedSavedVector {
 	totalBills: number;
 	vectors: SavedVectorInfo[]; // All cluster labels in this group
 	createdAt: string;
+	isDefault: boolean;
 }
 
 export interface Bill {

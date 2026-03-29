@@ -95,13 +95,16 @@
 					totalMembers: sv.memberCount,
 					totalBills: 0,
 					vectors: [],
-					createdAt: sv.createdAt
+					createdAt: sv.createdAt,
+					isDefault: sv.isDefault
 				});
 			}
 			const group = groups.get(key)!;
 			group.vectors.push(sv);
 			group.clusterCount++;
 			group.totalBills += sv.billCount;
+			// If any vector in the group is default, mark the group as default
+			if (sv.isDefault) group.isDefault = true;
 		}
 		return Array.from(groups.values()).sort(
 			(a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
@@ -175,6 +178,34 @@
 	 */
 	function getClusterDisplayName(clusterLabel: number): string {
 		return clusterLabelNameMap[clusterLabel] || `クラスター${clusterLabel}`;
+	}
+
+	/**
+	 * Set a configuration as the default for all users
+	 */
+	async function setAsDefault(name: string, clusterId: number) {
+		try {
+			const response = await fetch('/api/match', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					action: 'set-default',
+					name: name,
+					configClusterId: clusterId
+				})
+			});
+
+			if (response.ok) {
+				// Refresh saved vectors to reflect the change
+				const refreshResponse = await fetch('/api/match');
+				if (refreshResponse.ok) {
+					const refreshData = await refreshResponse.json();
+					savedVectors = refreshData.savedVectors || [];
+				}
+			}
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'デフォルト設定に失敗しました';
+		}
 	}
 
 	/**
@@ -1068,6 +1099,14 @@
 			mounted = true;
 		}, 100);
 
+		// Auto-select default configuration if none selected
+		if (!selectedSavedVectorKey && groupedSavedVectors.length > 0) {
+			const defaultGroup = groupedSavedVectors.find((g) => g.isDefault);
+			if (defaultGroup) {
+				selectedSavedVectorKey = defaultGroup.key;
+			}
+		}
+
 		// Check for pending save after login/register
 		const pendingSave = sessionStorage.getItem('pendingSaveData');
 		if (pendingSave && data.user) {
@@ -1237,7 +1276,9 @@
 				bind:selectedSavedVectorKey
 				{selectedGroupedVector}
 				{isLoading}
+				isAdmin={data.user?.role === 'admin'}
 				onStart={startWithSavedVector}
+				onSetDefault={setAsDefault}
 			/>
 		{:else if phase === 'questioning'}
 			<QuestioningPhase

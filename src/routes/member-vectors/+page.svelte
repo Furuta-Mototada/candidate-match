@@ -65,6 +65,7 @@
 		dimensions: number;
 		memberCount: number;
 		billCount: number;
+		isDefault: boolean;
 		createdAt: string;
 	}
 
@@ -79,6 +80,7 @@
 		totalBills: number;
 		vectors: SavedVectorInfo[];
 		createdAt: string;
+		isDefault: boolean;
 	}
 
 	let { data }: { data: PageData } = $props();
@@ -123,13 +125,15 @@
 					clusterCount: 0,
 					totalBills: 0,
 					vectors: [],
-					createdAt: sv.createdAt
+					createdAt: sv.createdAt,
+					isDefault: sv.isDefault
 				});
 			}
 			const group = groups.get(key)!;
 			group.vectors.push(sv);
 			group.clusterCount++;
 			group.totalBills += sv.billCount;
+			if (sv.isDefault) group.isDefault = true;
 		}
 		return Array.from(groups.values()).sort(
 			(a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
@@ -548,6 +552,26 @@
 		}
 	}
 
+	async function setAsDefault(group: GroupedSavedVector) {
+		try {
+			const response = await fetch('/api/match', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					action: 'set-default',
+					name: group.name,
+					configClusterId: group.clusterId
+				})
+			});
+
+			if (response.ok) {
+				await loadSavedVectors();
+			}
+		} catch (error) {
+			console.error('Failed to set default:', error);
+		}
+	}
+
 	async function loadSavedVectorization(group: GroupedSavedVector) {
 		isLoadingResult = true;
 		selectedSavedVectorKey = group.key;
@@ -797,7 +821,7 @@
 		title="クラスター別メンバーベクトル分析"
 		description="法案クラスターごとに議員の投票パターンを潜在空間で分析"
 	>
-		{#snippet badge()}<TrendingUp size={16} class="inline-icon" /> クラスタリング分析{/snippet}
+		{#snippet badge()}<TrendingUp size={16} class="inline-icon" /> ベクトル分析{/snippet}
 	</PageHero>
 
 	<!-- Explanation Section (Collapsible) -->
@@ -931,7 +955,7 @@
 		<!-- New Vectorization Section -->
 		<section class="content-section">
 			<div class="section-header">
-				<h2>新規クラスタリング分析</h2>
+				<h2>新規ベクトル分析</h2>
 			</div>
 
 			<div class="form-grid">
@@ -1005,7 +1029,7 @@
 				{#if isCalculating}
 					計算中...
 				{:else}
-					クラスタリング分析を実行
+					ベクトル分析を実行
 				{/if}
 			</button>
 		</section>
@@ -1014,35 +1038,57 @@
 	<!-- Saved Vectorizations Section -->
 	<section class="content-section">
 		<div class="section-header">
-			<h2>保存済みクラスタリング分析</h2>
+			<h2>保存済みベクトル分析</h2>
 		</div>
 
 		{#if isLoadingSaved}
 			<p class="loading-state">読み込み中...</p>
 		{:else if groupedSavedVectors.length === 0}
 			<EmptyState
-				message="保存済みのクラスタリング分析がありません。上記のフォームから新しい分析を実行してください。"
+				message="保存済みのベクトル分析がありません。上記のフォームから新しい分析を実行してください。"
 			>
 				{#snippet icon()}<TrendingUp size={48} />{/snippet}
 			</EmptyState>
 		{:else}
 			<div class="saved-list">
 				{#each groupedSavedVectors as group (group.key)}
-					<button
-						class="saved-card"
-						class:active={selectedSavedVectorKey === group.key}
-						onclick={() => loadSavedVectorization(group)}
-					>
-						<div class="saved-name">{group.name}</div>
-						<div class="saved-meta">
-							<span class="badge">{group.clusterName}</span>
-							<span class="text-sm">{group.dimensions}次元</span>
-							<span class="text-sm">{group.clusterCount}クラスター</span>
-						</div>
-						<div class="saved-stats">
-							{group.totalBills}法案 • {new Date(group.createdAt).toLocaleDateString('ja-JP')}
-						</div>
-					</button>
+					<div class="saved-card-wrapper">
+						<button
+							class="saved-card"
+							class:active={selectedSavedVectorKey === group.key}
+							onclick={() => loadSavedVectorization(group)}
+						>
+							<div class="saved-name">
+								{group.name}
+								{#if group.isDefault}
+									<span class="default-badge">デフォルト</span>
+								{/if}
+							</div>
+							<div class="saved-meta">
+								<span class="badge">{group.clusterName}</span>
+								<span class="text-sm">{group.dimensions}次元</span>
+								<span class="text-sm">{group.clusterCount}クラスター</span>
+							</div>
+							<div class="saved-stats">
+								{group.totalBills}法案 • {new Date(group.createdAt).toLocaleDateString('ja-JP')}
+							</div>
+						</button>
+						{#if isAdmin}
+							<button
+								class="btn-set-default"
+								class:is-default={group.isDefault}
+								onclick={() => setAsDefault(group)}
+								disabled={group.isDefault}
+								title={group.isDefault ? 'デフォルトに設定済み' : 'マッチングのデフォルトに設定'}
+							>
+								{#if group.isDefault}
+									★
+								{:else}
+									☆
+								{/if}
+							</button>
+						{/if}
+					</div>
 				{/each}
 			</div>
 		{/if}
@@ -1524,9 +1570,16 @@
 		gap: 0.75rem;
 	}
 
+	.saved-card-wrapper {
+		display: flex;
+		gap: 0.5rem;
+		align-items: stretch;
+	}
+
 	.saved-card {
 		display: block;
 		width: 100%;
+		flex: 1;
 		padding: 1rem 1.25rem;
 		border: 1px solid #e5e7eb;
 		border-radius: 12px;
@@ -1548,9 +1601,55 @@
 	}
 
 	.saved-name {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
 		font-weight: 600;
 		color: #1f2937;
 		margin-bottom: 0.5rem;
+	}
+
+	.default-badge {
+		display: inline-flex;
+		align-items: center;
+		font-size: 0.6875rem;
+		font-weight: 600;
+		padding: 0.15rem 0.5rem;
+		background: linear-gradient(135deg, #fbbf24, #f59e0b);
+		color: white;
+		border-radius: 999px;
+	}
+
+	.btn-set-default {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 2.5rem;
+		min-width: 2.5rem;
+		border: 1px solid #e5e7eb;
+		border-radius: 12px;
+		background: white;
+		cursor: pointer;
+		font-size: 1.125rem;
+		color: #9ca3af;
+		transition: all 0.2s;
+	}
+
+	.btn-set-default:hover:not(:disabled) {
+		border-color: #fbbf24;
+		color: #f59e0b;
+		background: #fffbeb;
+	}
+
+	.btn-set-default.is-default {
+		border-color: #fbbf24;
+		background: #fffbeb;
+		color: #f59e0b;
+		cursor: default;
+	}
+
+	.btn-set-default:disabled {
+		opacity: 0.8;
 	}
 
 	.saved-meta {

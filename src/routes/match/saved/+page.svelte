@@ -107,6 +107,7 @@
 				key: string;
 				name: string;
 				clusterId: number;
+				isDefault: boolean;
 				clusterLabels: { label: number; labelName: string | null; billCount: number }[];
 			}
 		>();
@@ -117,10 +118,13 @@
 					key,
 					name: sv.name,
 					clusterId: sv.clusterId,
+					isDefault: sv.isDefault,
 					clusterLabels: []
 				});
 			}
-			groups.get(key)!.clusterLabels.push({
+			const group = groups.get(key)!;
+			if (sv.isDefault) group.isDefault = true;
+			group.clusterLabels.push({
 				label: sv.clusterLabel,
 				labelName: sv.clusterLabelName,
 				billCount: sv.billCount
@@ -147,10 +151,11 @@
 		groupedSavedVectors.find((g) => g.key === selectedVectorGroupKey) || null
 	);
 
-	// Auto-select first vector group when available
+	// Auto-select default vector group (or first) when available
 	$effect(() => {
 		if (selectedVectorGroupKey === null && groupedSavedVectors.length > 0) {
-			selectedVectorGroupKey = groupedSavedVectors[0].key;
+			const defaultGroup = groupedSavedVectors.find((g) => g.isDefault);
+			selectedVectorGroupKey = defaultGroup ? defaultGroup.key : groupedSavedVectors[0].key;
 		}
 	});
 	let liveTopMatch = $derived.by(() => {

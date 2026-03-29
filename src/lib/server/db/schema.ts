@@ -368,6 +368,7 @@ export const clusterVectorResults = pgTable('cluster_vector_results', {
 	memberCount: integer('member_count').notNull(),
 	billCount: integer('bill_count').notNull(),
 	representativeBills: text('representative_bills'), // JSON: RepresentativeBill[][]
+	isDefault: boolean('is_default').notNull().default(false), // Whether this is the default config for /match
 	createdAt: timestamp('created_at').notNull().defaultNow()
 });
 

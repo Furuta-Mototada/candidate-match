@@ -284,6 +284,7 @@ export const GET: RequestHandler = async ({ url }): Promise<Response> => {
 					dimensions: clusterVectorResults.dimensions,
 					memberCount: clusterVectorResults.memberCount,
 					billCount: clusterVectorResults.billCount,
+					isDefault: clusterVectorResults.isDefault,
 					createdAt: clusterVectorResults.createdAt
 				})
 				.from(clusterVectorResults)

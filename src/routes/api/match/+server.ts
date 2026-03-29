@@ -115,6 +115,43 @@ export const POST: RequestHandler = async ({ request, locals }): Promise<Respons
 			case 'direct-vote':
 				return await handleDirectVote(billId, score, userId);
 
+			case 'set-default': {
+				if (!locals.user || locals.user.role !== 'admin') {
+					return json({ error: 'Admin access required' }, { status: 403 });
+				}
+				const { name: configName, configClusterId } = body;
+				if (!configName || configClusterId == null) {
+					return json({ error: 'name and configClusterId are required' }, { status: 400 });
+				}
+				// Clear all existing defaults
+				await db
+					.update(clusterVectorResults)
+					.set({ isDefault: false })
+					.where(eq(clusterVectorResults.isDefault, true));
+				// Set new default
+				await db
+					.update(clusterVectorResults)
+					.set({ isDefault: true })
+					.where(
+						and(
+							eq(clusterVectorResults.name, configName),
+							eq(clusterVectorResults.clusterId, configClusterId)
+						)
+					);
+				return json({ success: true });
+			}
+
+			case 'clear-default': {
+				if (!locals.user || locals.user.role !== 'admin') {
+					return json({ error: 'Admin access required' }, { status: 403 });
+				}
+				await db
+					.update(clusterVectorResults)
+					.set({ isDefault: false })
+					.where(eq(clusterVectorResults.isDefault, true));
+				return json({ success: true });
+			}
+
 			default:
 				return json({ error: 'Invalid action' }, { status: 400 });
 		}
@@ -976,7 +1013,8 @@ export const GET: RequestHandler = async () => {
 				memberCount: clusterVectorResults.memberCount,
 				billCount: clusterVectorResults.billCount,
 				createdAt: clusterVectorResults.createdAt,
-				clusterLabelName: billClusterLabelNames.name
+				clusterLabelName: billClusterLabelNames.name,
+				isDefault: clusterVectorResults.isDefault
 			})
 			.from(clusterVectorResults)
 			.leftJoin(
