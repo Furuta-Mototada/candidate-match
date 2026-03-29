@@ -53,6 +53,7 @@ export interface BaseClusterResult {
 		billId: number;
 		title: string;
 		answer: number; // 1=Agree, -1=Disagree, 0=Neutral/Skip
+		source?: 'direct' | 'delegated';
 	}[];
 }
 

@@ -1,4 +1,4 @@
-import { eq, and, or } from 'drizzle-orm';
+import { eq, and, or, inArray } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 
@@ -234,4 +234,101 @@ export async function detectDelegationCycle(
 	}
 
 	return false;
+}
+
+/**
+ * Resolve all delegated votes for a user.
+ *
+ * For each bill where the user has an outgoing delegation, walks the delegation
+ * chain to find the terminal voter. If the chain ends with a 'voted' status,
+ * looks up the terminal voter's userBillAnswer and returns the resolved score.
+ *
+ * Optionally filter to specific billIds for efficiency.
+ *
+ * Returns a Map of billId -> resolved score (from the terminal voter).
+ */
+export async function resolveDelegatedVotes(
+	userId: string,
+	filterBillIds?: number[]
+): Promise<Map<number, number>> {
+	// Find all outgoing delegations for this user
+	if (filterBillIds && filterBillIds.length === 0) return new Map();
+
+	const outgoing = filterBillIds
+		? await db
+				.select({
+					billId: table.voteDelegation.billId,
+					delegateId: table.voteDelegation.delegateId,
+					status: table.voteDelegation.status
+				})
+				.from(table.voteDelegation)
+				.where(
+					and(
+						eq(table.voteDelegation.delegatorId, userId),
+						inArray(table.voteDelegation.billId, filterBillIds)
+					)
+				)
+		: await db
+				.select({
+					billId: table.voteDelegation.billId,
+					delegateId: table.voteDelegation.delegateId,
+					status: table.voteDelegation.status
+				})
+				.from(table.voteDelegation)
+				.where(eq(table.voteDelegation.delegatorId, userId));
+
+	if (outgoing.length === 0) return new Map();
+
+	const result = new Map<number, number>();
+
+	for (const delegation of outgoing) {
+		let currentDelegateId = delegation.delegateId;
+		let currentStatus = delegation.status;
+		const visited = new Set<string>();
+
+		// Walk the chain until we find a terminal state
+		while (
+			(currentStatus === 'redelegated' || currentStatus === 'pending') &&
+			!visited.has(currentDelegateId)
+		) {
+			visited.add(currentDelegateId);
+
+			const [next] = await db
+				.select({
+					delegateId: table.voteDelegation.delegateId,
+					status: table.voteDelegation.status
+				})
+				.from(table.voteDelegation)
+				.where(
+					and(
+						eq(table.voteDelegation.delegatorId, currentDelegateId),
+						eq(table.voteDelegation.billId, delegation.billId)
+					)
+				)
+				.limit(1);
+
+			if (!next) break;
+			currentDelegateId = next.delegateId;
+			currentStatus = next.status;
+		}
+
+		// If the chain ended with a vote, look up the terminal voter's answer
+		if (currentStatus === 'voted') {
+			const [answer] = await db
+				.select({ score: table.userBillAnswer.score })
+				.from(table.userBillAnswer)
+				.where(
+					and(
+						eq(table.userBillAnswer.userId, currentDelegateId),
+						eq(table.userBillAnswer.billId, delegation.billId)
+					)
+				);
+
+			if (answer) {
+				result.set(delegation.billId, answer.score);
+			}
+		}
+	}
+
+	return result;
 }

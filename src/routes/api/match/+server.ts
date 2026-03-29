@@ -26,6 +26,7 @@ import {
 	type ClusterVectorData,
 	type MatchResult
 } from '$lib/server/matching.js';
+import { resolveDelegatedVotes } from '$lib/server/delegation-helpers.js';
 
 const execAsync = promisify(exec);
 
@@ -273,11 +274,26 @@ async function handleStart(
 				and(eq(userBillAnswer.userId, userId), inArray(userBillAnswer.billId, clusterData.billIds))
 			);
 
+		// Also resolve delegated votes for bills in this cluster
+		const delegatedVotes = await resolveDelegatedVotes(userId, clusterData.billIds);
+
 		console.log(
-			`[handleStart] cluster=${selectedLabel}, userId=${userId}, billIds count=${clusterData.billIds.length}, existingAnswers count=${existingAnswers.length}`
+			`[handleStart] cluster=${selectedLabel}, userId=${userId}, billIds count=${clusterData.billIds.length}, existingAnswers count=${existingAnswers.length}, delegatedVotes count=${delegatedVotes.size}`
 		);
 
-		if (existingAnswers.length > 0) {
+		// Merge direct + delegated answers
+		const allAnswers: { billId: number; score: number }[] = existingAnswers.map((a) => ({
+			billId: a.billId,
+			score: a.score
+		}));
+		for (const [billId, score] of delegatedVotes) {
+			// Only add if not already in direct answers
+			if (!allAnswers.some((a) => a.billId === billId)) {
+				allAnswers.push({ billId, score });
+			}
+		}
+
+		if (allAnswers.length > 0) {
 			// Build bill loadings map for vector updates
 			const billLoadingsMap = new Map<number, number[]>();
 			for (let i = 0; i < clusterData.billIds.length; i++) {
@@ -285,7 +301,7 @@ async function handleStart(
 			}
 
 			// Apply each existing answer to update the user vector
-			for (const answer of existingAnswers) {
+			for (const answer of allAnswers) {
 				const userAnswer: UserAnswer = { billId: answer.billId, score: answer.score };
 				const newState = updateMatchingState(state, userAnswer, billLoadingsMap);
 				state.userVector = newState.userVector;
@@ -444,7 +460,21 @@ async function handleResume(
 				and(eq(userBillAnswer.userId, userId), inArray(userBillAnswer.billId, clusterData.billIds))
 			);
 
-		if (existingAnswers.length > 0) {
+		// Also resolve delegated votes for bills in this cluster
+		const delegatedVotes = await resolveDelegatedVotes(userId, clusterData.billIds);
+
+		// Merge direct + delegated answers
+		const allAnswers: { billId: number; score: number }[] = existingAnswers.map((a) => ({
+			billId: a.billId,
+			score: a.score
+		}));
+		for (const [billId, score] of delegatedVotes) {
+			if (!allAnswers.some((a) => a.billId === billId)) {
+				allAnswers.push({ billId, score });
+			}
+		}
+
+		if (allAnswers.length > 0) {
 			// Build bill loadings map for vector updates
 			const billLoadingsMap = new Map<number, number[]>();
 			for (let i = 0; i < clusterData.billIds.length; i++) {
@@ -452,7 +482,7 @@ async function handleResume(
 			}
 
 			// Apply each existing answer to update the user vector
-			for (const answer of existingAnswers) {
+			for (const answer of allAnswers) {
 				const userAnswer: UserAnswer = { billId: answer.billId, score: answer.score };
 				const newState = updateMatchingState(state, userAnswer, billLoadingsMap);
 				state.userVector = newState.userVector;

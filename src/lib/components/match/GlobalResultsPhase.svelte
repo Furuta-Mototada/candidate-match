@@ -122,13 +122,14 @@
 		}
 	}
 
-	function getAnswerText(score: number): string {
-		if (score === 1) return '賛成';
-		if (score === -1) return '反対';
-		return 'どちらでもない';
+	function getAnswerText(score: number, source?: 'direct' | 'delegated'): string {
+		const label = score === 1 ? '賛成' : score === -1 ? '反対' : 'どちらでもない';
+		if (source === 'delegated') return `委任(${label})`;
+		return label;
 	}
 
-	function getAnswerColor(score: number): string {
+	function getAnswerColor(score: number, source?: 'direct' | 'delegated'): string {
+		if (source === 'delegated') return 'answer-delegated';
 		if (score === 1) return 'answer-agree';
 		if (score === -1) return 'answer-disagree';
 		return 'answer-neutral';
@@ -292,8 +293,8 @@
 										<ul class="answers-list">
 											{#each result.answeredBills as bill (bill.billId)}
 												<li class="answer-item">
-													<span class="answer-badge {getAnswerColor(bill.answer)}">
-														{getAnswerText(bill.answer)}
+													<span class="answer-badge {getAnswerColor(bill.answer, bill.source)}">
+														{getAnswerText(bill.answer, bill.source)}
 													</span>
 													<span class="bill-title">{bill.title}</span>
 												</li>
@@ -384,16 +385,16 @@
 											{formatSimilarity(member.globalScore)}
 										</td>
 										<!-- Cluster Scores -->
-									{#each clusterResults as result (result.clusterLabel)}
-										{@const score = member.clusterScores[result.clusterLabel] || 0}
-										<td class="score-cell cluster-cell {getSimilarityColor(score)}">
-											{(score * 100).toFixed(0)}%
-										</td>
-									{/each}
-								</tr>
-							{/each}
+										{#each clusterResults as result (result.clusterLabel)}
+											{@const score = member.clusterScores[result.clusterLabel] || 0}
+											<td class="score-cell cluster-cell {getSimilarityColor(score)}">
+												{(score * 100).toFixed(0)}%
+											</td>
+										{/each}
+									</tr>
+								{/each}
 
-							{#if filteredMembers.length === 0}
+								{#if filteredMembers.length === 0}
 									<tr>
 										<td colspan={4 + clusterResults.length} class="empty-state">
 											該当する議員が見つかりませんでした
@@ -775,6 +776,9 @@
 	}
 	.answer-neutral {
 		color: #6b7280;
+	}
+	.answer-delegated {
+		color: #8b5cf6;
 	}
 
 	.bill-title {

@@ -1,12 +1,20 @@
 <script lang="ts">
-	import { onMount, tick } from 'svelte';
+	import { onMount, tick, untrack } from 'svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { goto } from '$app/navigation';
 	import type { PageData } from './$types.js';
-	import type { SnapshotListItem, AnsweredBill, BillListItem } from '$lib/types/index.js';
+	import type {
+		SnapshotListItem,
+		AnsweredBill,
+		BillListItem,
+		SavedVectorInfo,
+		GlobalMemberScore,
+		BaseClusterResult
+	} from '$lib/types/index.js';
 	import DelegationModal from '$lib/components/match/DelegationModal.svelte';
 	import BillDetailModal from '$lib/components/match/BillDetailModal.svelte';
 	import DelegationFlowChart from '$lib/components/match/DelegationFlowChart.svelte';
+	import GlobalResultsPhase from '$lib/components/match/GlobalResultsPhase.svelte';
 	import {
 		ClipboardList,
 		Vote,
@@ -27,7 +35,8 @@
 		ThumbsUp,
 		ThumbsDown,
 		CircleQuestionMark,
-		User
+		User,
+		Activity
 	} from '@lucide/svelte';
 
 	type IncomingDelegation = {
@@ -85,6 +94,123 @@
 	let error: string | null = $state(null);
 	let mounted: boolean = $state(false);
 	let activeTab: 'snapshots' | 'answers' | 'delegations' = $state('snapshots');
+
+	// ── Live results state ──
+	let savedVectors: SavedVectorInfo[] = $state((data.savedVectors || []) as SavedVectorInfo[]);
+
+	// Group saved vectors by name+clusterId (same logic as /match page)
+	let groupedSavedVectors = $derived.by(() => {
+		const groups = new SvelteMap<
+			string,
+			{
+				key: string;
+				name: string;
+				clusterId: number;
+				clusterLabels: { label: number; labelName: string | null; billCount: number }[];
+			}
+		>();
+		for (const sv of savedVectors) {
+			const key = `${sv.name}|${sv.clusterId}`;
+			if (!groups.has(key)) {
+				groups.set(key, {
+					key,
+					name: sv.name,
+					clusterId: sv.clusterId,
+					clusterLabels: []
+				});
+			}
+			groups.get(key)!.clusterLabels.push({
+				label: sv.clusterLabel,
+				labelName: sv.clusterLabelName,
+				billCount: sv.billCount
+			});
+		}
+		return Array.from(groups.values());
+	});
+
+	let selectedVectorGroupKey: string | null = $state(null);
+	let liveImportanceWeights: Record<string, number> = $state({});
+	let liveGlobalScores: GlobalMemberScore[] = $state([]);
+	let liveClusterResults: BaseClusterResult[] = $state([]);
+	let liveTotalAnswered: number = $state(0);
+	let liveLoading: boolean = $state(false);
+	let liveError: string | null = $state(null);
+	let showLiveResult: boolean = $state(false);
+	let showAdvancedControls: boolean = $state(false);
+
+	let selectedVectorGroup = $derived(
+		groupedSavedVectors.find((g) => g.key === selectedVectorGroupKey) || null
+	);
+
+	// Auto-select first vector group when available
+	$effect(() => {
+		if (selectedVectorGroupKey === null && groupedSavedVectors.length > 0) {
+			selectedVectorGroupKey = groupedSavedVectors[0].key;
+		}
+	});
+	let liveTopMatch = $derived.by(() => {
+		if (liveGlobalScores.length === 0) return null;
+		return { name: liveGlobalScores[0].name, score: liveGlobalScores[0].globalScore };
+	});
+	let liveDelegatedCount = $derived.by(() => {
+		let count = 0;
+		for (const cr of liveClusterResults) {
+			for (const ab of cr.answeredBills || []) {
+				if (ab.source === 'delegated') count++;
+			}
+		}
+		return count;
+	});
+
+	function initWeightsForGroup(group: (typeof groupedSavedVectors)[number]) {
+		const weights: Record<string, number> = {};
+		for (const cl of group.clusterLabels) {
+			weights[String(cl.label)] = liveImportanceWeights[String(cl.label)] ?? 3;
+		}
+		liveImportanceWeights = weights;
+	}
+
+	// Auto-init weights when a group is selected (including initial auto-selection)
+	$effect(() => {
+		const group = selectedVectorGroup;
+		if (group) {
+			untrack(() => initWeightsForGroup(group));
+		}
+	});
+
+	async function fetchLiveResults() {
+		if (!selectedVectorGroupKey) return;
+
+		liveLoading = true;
+		liveError = null;
+
+		try {
+			const res = await fetch('/api/saved-sessions', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					action: 'live-results',
+					vectorGroupKey: selectedVectorGroupKey,
+					importanceWeights: liveImportanceWeights
+				})
+			});
+
+			const result = await res.json();
+
+			if (!res.ok || !result.success) {
+				throw new Error(result.error || 'ライブ結果の取得に失敗しました');
+			}
+
+			liveGlobalScores = result.globalScores;
+			liveClusterResults = result.clusterResults;
+			liveTotalAnswered = result.totalAnswered;
+			showLiveResult = true;
+		} catch (e) {
+			liveError = e instanceof Error ? e.message : '不明なエラーが発生しました';
+		} finally {
+			liveLoading = false;
+		}
+	}
 
 	// Lazy-load flags
 	let delegationsLoaded = $state(false);
@@ -779,12 +905,141 @@
 
 		<!-- Snapshots Tab -->
 		{#if activeTab === 'snapshots'}
+			<!-- Live Results Section -->
+			<section class="live-results-section animate-in" style="--delay: 0">
+				<div class="live-results-header">
+					<h2 class="section-title"><Activity size={18} class="inline-icon" /> リアルタイム結果</h2>
+					<p class="section-desc">保存済みの回答から、リアルタイムのマッチング結果を表示します。</p>
+				</div>
+
+				<div class="live-results-controls">
+					<div class="control-row">
+						<label class="control-label" for="vector-group-select">設定</label>
+						<select
+							id="vector-group-select"
+							class="control-select"
+							bind:value={selectedVectorGroupKey}
+							onchange={() => {
+								showLiveResult = false;
+								liveGlobalScores = [];
+								liveClusterResults = [];
+							}}
+						>
+							<option value={null}>選択してください</option>
+							{#each groupedSavedVectors as group (group.key)}
+								<option value={group.key}>{group.name}</option>
+							{/each}
+						</select>
+					</div>
+
+					{#if selectedVectorGroup}
+						<button
+							class="btn-advanced-toggle"
+							onclick={() => (showAdvancedControls = !showAdvancedControls)}
+						>
+							<span class="advanced-toggle-icon" class:open={showAdvancedControls}>›</span>
+							詳細設定
+						</button>
+
+						{#if showAdvancedControls}
+							<div class="importance-weights animate-in" style="--delay: 0">
+								<span class="control-label">カテゴリ重み</span>
+								<div class="weights-grid">
+									{#each selectedVectorGroup.clusterLabels as cl (cl.label)}
+										<div class="weight-item">
+											<label class="weight-label" for="weight-{cl.label}">
+												{cl.labelName || `クラスター${cl.label}`}
+												<span class="weight-bill-count">({cl.billCount}件)</span>
+											</label>
+											<div class="weight-control">
+												<input
+													id="weight-{cl.label}"
+													type="range"
+													min="1"
+													max="5"
+													step="1"
+													bind:value={liveImportanceWeights[String(cl.label)]}
+													class="weight-slider"
+												/>
+												<span class="weight-value">
+													{'★'.repeat(liveImportanceWeights[String(cl.label)] || 3)}{'☆'.repeat(
+														5 - (liveImportanceWeights[String(cl.label)] || 3)
+													)}
+												</span>
+											</div>
+										</div>
+									{/each}
+								</div>
+							</div>
+						{/if}
+
+						<button class="btn-compute" onclick={fetchLiveResults} disabled={liveLoading}>
+							{#if liveLoading}
+								<span class="loading-spinner-small"></span>
+								計算中...
+							{:else}
+								<RefreshCw size={16} />
+								結果を計算
+							{/if}
+						</button>
+					{/if}
+				</div>
+
+				{#if liveError}
+					<div class="error-alert animate-in">
+						<div class="error-icon"><TriangleAlert size={20} color="#f59e0b" /></div>
+						<div>
+							<span class="error-title">エラー</span>
+							<p class="error-message">{liveError}</p>
+						</div>
+					</div>
+				{/if}
+
+				{#if showLiveResult && liveGlobalScores.length > 0}
+					<div class="live-result-summary animate-in" style="--delay: 0">
+						<div class="snapshot-stats">
+							<div class="stat-row">
+								<span class="stat-label">回答数</span>
+								<span class="stat-value">
+									{liveTotalAnswered}件
+									{#if liveDelegatedCount > 0}
+										<span class="delegated-badge">（うち委任 {liveDelegatedCount}件）</span>
+									{/if}
+								</span>
+							</div>
+							{#if liveTopMatch}
+								<div class="stat-row">
+									<span class="stat-label">トップマッチ</span>
+									<span class="stat-value"
+										>{liveTopMatch.name} ({formatSimilarity(liveTopMatch.score)})</span
+									>
+								</div>
+							{/if}
+						</div>
+					</div>
+
+					<div class="live-result-detail animate-in" style="--delay: 1">
+						<GlobalResultsPhase
+							clusterResults={liveClusterResults}
+							globalScores={liveGlobalScores}
+							readonly={true}
+						/>
+					</div>
+				{:else if showLiveResult && liveTotalAnswered === 0}
+					<div class="empty-state animate-in" style="--delay: 0">
+						<div class="empty-icon"><Mailbox size={32} /></div>
+						<p class="empty-desc">この設定に対応する回答がまだありません。</p>
+						<a href="/match" class="btn-primary"> マッチングへ </a>
+					</div>
+				{/if}
+			</section>
+
+			<!-- Saved Snapshots -->
 			{#if snapshots.length === 0}
 				<div class="empty-state animate-in" style="--delay: 1">
-					<div class="empty-icon"><Mailbox size={32} /></div>
-					<h2 class="empty-title">スナップショットがありません</h2>
+					<div class="empty-icon"><Camera size={32} /></div>
+					<h2 class="empty-title">保存済みスナップショットがありません</h2>
 					<p class="empty-desc">マッチングでスナップショットを保存すると、ここに表示されます。</p>
-					<a href="/match" class="btn-primary"> マッチングへ </a>
 				</div>
 			{:else}
 				<div class="snapshots-grid">
@@ -1577,6 +1832,205 @@
 		border-color: #c4b5fd;
 	}
 
+	/* Live Results Section */
+	.live-results-section {
+		background: white;
+		border-radius: 16px;
+		padding: 1.5rem;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+		border: 2px solid #e0e7ff;
+		margin-bottom: 2rem;
+	}
+
+	.live-results-header {
+		margin-bottom: 1.25rem;
+	}
+
+	.section-title {
+		font-size: 1.15rem;
+		font-weight: 700;
+		color: #1f2937;
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin-bottom: 0.25rem;
+	}
+
+	.section-desc {
+		font-size: 0.9rem;
+		color: #6b7280;
+	}
+
+	.live-results-controls {
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+	}
+
+	.control-row {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+	}
+
+	.control-label {
+		font-size: 0.9rem;
+		font-weight: 600;
+		color: #374151;
+		white-space: nowrap;
+	}
+
+	.control-select {
+		flex: 1;
+		min-width: 200px;
+		padding: 0.5rem 0.75rem;
+		border: 1px solid #d1d5db;
+		border-radius: 8px;
+		font-size: 0.9rem;
+		color: #1f2937;
+		background: white;
+		cursor: pointer;
+	}
+
+	.control-select:focus {
+		outline: none;
+		border-color: #6366f1;
+		box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+	}
+
+	.btn-advanced-toggle {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0.4rem 0.6rem;
+		font-size: 0.82rem;
+		color: #6b7280;
+		background: none;
+		border: 1px solid #e5e7eb;
+		border-radius: 0.5rem;
+		cursor: pointer;
+		transition: all 0.15s ease;
+		align-self: flex-start;
+	}
+	.btn-advanced-toggle:hover {
+		color: #4b5563;
+		border-color: #d1d5db;
+		background: #f9fafb;
+	}
+	.advanced-toggle-icon {
+		display: inline-block;
+		transition: transform 0.2s ease;
+		font-size: 1rem;
+		line-height: 1;
+	}
+	.advanced-toggle-icon.open {
+		transform: rotate(90deg);
+	}
+
+	.importance-weights {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		padding: 1rem;
+		background: #f9fafb;
+		border-radius: 12px;
+	}
+
+	.weights-grid {
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+	}
+
+	.weight-item {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+	}
+
+	.weight-label {
+		font-size: 0.85rem;
+		color: #374151;
+		font-weight: 500;
+	}
+
+	.weight-bill-count {
+		font-weight: 400;
+		color: #9ca3af;
+		font-size: 0.8rem;
+	}
+
+	.weight-control {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+	}
+
+	.weight-slider {
+		flex: 1;
+		height: 6px;
+		accent-color: #6366f1;
+		cursor: pointer;
+	}
+
+	.weight-value {
+		font-size: 0.85rem;
+		color: #f59e0b;
+		white-space: nowrap;
+		min-width: 5em;
+	}
+
+	.btn-compute {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.5rem;
+		padding: 0.7rem 1.5rem;
+		background: linear-gradient(135deg, #6366f1, #8b5cf6);
+		color: white;
+		border-radius: 100px;
+		font-weight: 600;
+		font-size: 0.95rem;
+		border: none;
+		cursor: pointer;
+		transition: all 0.3s ease;
+		align-self: flex-start;
+	}
+
+	.btn-compute:hover:not(:disabled) {
+		transform: translateY(-1px);
+		box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+	}
+
+	.btn-compute:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
+	.loading-spinner-small {
+		width: 16px;
+		height: 16px;
+		border: 2px solid rgba(255, 255, 255, 0.3);
+		border-top-color: white;
+		border-radius: 50%;
+		animation: spin 0.8s linear infinite;
+	}
+
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+
+	.live-result-summary {
+		margin-top: 1rem;
+	}
+
+	.live-result-detail {
+		margin-top: 1rem;
+	}
+
 	.snapshot-header {
 		margin-bottom: 1rem;
 	}
@@ -1625,6 +2079,11 @@
 		font-size: 0.9rem;
 		font-weight: 600;
 		color: #1f2937;
+	}
+	.delegated-badge {
+		font-size: 0.78rem;
+		font-weight: 500;
+		color: #8b5cf6;
 	}
 
 	/* Actions */
