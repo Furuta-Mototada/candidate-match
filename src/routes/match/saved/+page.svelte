@@ -36,7 +36,8 @@
 		ThumbsDown,
 		CircleQuestionMark,
 		User,
-		Activity
+		Activity,
+		Save
 	} from '@lucide/svelte';
 
 	type IncomingDelegation = {
@@ -137,6 +138,10 @@
 	let liveError: string | null = $state(null);
 	let showLiveResult: boolean = $state(false);
 	let showAdvancedControls: boolean = $state(false);
+	let savingSnapshot: boolean = $state(false);
+	let snapshotSaved: boolean = $state(false);
+	let showSaveModal: boolean = $state(false);
+	let snapshotNameInput: string = $state('');
 
 	let selectedVectorGroup = $derived(
 		groupedSavedVectors.find((g) => g.key === selectedVectorGroupKey) || null
@@ -183,6 +188,7 @@
 
 		liveLoading = true;
 		liveError = null;
+		snapshotSaved = false;
 
 		try {
 			const res = await fetch('/api/saved-sessions', {
@@ -210,6 +216,61 @@
 		} finally {
 			liveLoading = false;
 		}
+	}
+
+	async function saveAsSnapshot() {
+		if (!selectedVectorGroup || liveGlobalScores.length === 0) return;
+
+		savingSnapshot = true;
+		snapshotSaved = false;
+
+		try {
+			const res = await fetch('/api/saved-sessions', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					action: 'snapshot',
+					name:
+						snapshotNameInput.trim() ||
+						`${selectedVectorGroup.name} — ${new Date().toLocaleDateString('ja-JP')}`,
+					clusterId: selectedVectorGroup.clusterId,
+					clusterResults: liveClusterResults.map((cr) => ({
+						clusterLabel: cr.clusterLabel,
+						clusterLabelName: cr.clusterLabelName,
+						importance: liveImportanceWeights[String(cr.clusterLabel)] ?? 3,
+						answeredCount: cr.answeredCount,
+						matches: cr.matches,
+						answeredBills: cr.answeredBills
+					}))
+				})
+			});
+
+			const result = await res.json();
+
+			if (!res.ok || !result.success) {
+				throw new Error(result.error || 'スナップショットの保存に失敗しました');
+			}
+
+			// Refresh snapshot list
+			const listRes = await fetch('/api/saved-sessions');
+			const listData = await listRes.json();
+			if (listData.success) {
+				snapshots = listData.snapshots;
+			}
+
+			showSaveModal = false;
+			snapshotSaved = true;
+		} catch (e) {
+			liveError = e instanceof Error ? e.message : 'スナップショットの保存に失敗しました';
+		} finally {
+			savingSnapshot = false;
+		}
+	}
+
+	function openSaveModal() {
+		if (!selectedVectorGroup) return;
+		snapshotNameInput = `${selectedVectorGroup.name} — ${new Date().toLocaleDateString('ja-JP')}`;
+		showSaveModal = true;
 	}
 
 	// Lazy-load flags
@@ -1016,6 +1077,16 @@
 								</div>
 							{/if}
 						</div>
+						<div class="live-result-actions">
+							{#if snapshotSaved}
+								<span class="snapshot-saved-badge"><CircleCheck size={16} /> 保存しました</span>
+							{:else}
+								<button class="btn-save-snapshot" onclick={openSaveModal}>
+									<Save size={16} />
+									スナップショットとして保存
+								</button>
+							{/if}
+						</div>
 					</div>
 
 					<div class="live-result-detail animate-in" style="--delay: 1">
@@ -1661,6 +1732,56 @@
 			onDelegated={onDelegatedFromBill}
 		/>
 	{/if}
+
+	<!-- Save snapshot modal -->
+	{#if showSaveModal}
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div
+			class="modal-overlay"
+			onclick={() => (showSaveModal = false)}
+			onkeydown={(e) => {
+				if (e.key === 'Escape') showSaveModal = false;
+			}}
+		>
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div class="modal-content save-modal" onclick={(e) => e.stopPropagation()}>
+				<h3 class="modal-title">スナップショットを保存</h3>
+				<label class="save-modal-label">
+					名前
+					<input
+						type="text"
+						class="save-modal-input"
+						bind:value={snapshotNameInput}
+						onkeydown={(e) => {
+							if (e.key === 'Enter' && !savingSnapshot) saveAsSnapshot();
+						}}
+					/>
+				</label>
+				<div class="save-modal-actions">
+					<button
+						class="btn-cancel"
+						onclick={() => (showSaveModal = false)}
+						disabled={savingSnapshot}
+					>
+						キャンセル
+					</button>
+					<button
+						class="btn-primary"
+						onclick={saveAsSnapshot}
+						disabled={savingSnapshot || !snapshotNameInput.trim()}
+					>
+						{#if savingSnapshot}
+							<RefreshCw size={16} class="spinning" />
+							保存中…
+						{:else}
+							<Save size={16} />
+							保存
+						{/if}
+					</button>
+				</div>
+			</div>
+		</div>
+	{/if}
 </div>
 
 <style>
@@ -2025,6 +2146,143 @@
 
 	.live-result-summary {
 		margin-top: 1rem;
+	}
+
+	.live-result-actions {
+		margin-top: 0.75rem;
+		display: flex;
+		justify-content: flex-end;
+	}
+
+	.btn-save-snapshot {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0.5rem 1rem;
+		font-size: 0.85rem;
+		font-weight: 500;
+		color: #fff;
+		background: #2563eb;
+		border: none;
+		border-radius: 0.5rem;
+		cursor: pointer;
+		transition:
+			background 0.15s,
+			opacity 0.15s;
+	}
+
+	.btn-save-snapshot:hover:not(:disabled) {
+		background: #1d4ed8;
+	}
+
+	.btn-save-snapshot:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
+	.btn-save-snapshot :global(.spinning) {
+		animation: spin 1s linear infinite;
+	}
+
+	.snapshot-saved-badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		font-size: 0.85rem;
+		font-weight: 500;
+		color: #16a34a;
+	}
+
+	/* Save snapshot modal */
+	.modal-overlay {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.5);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 1000;
+	}
+
+	.save-modal {
+		background: #fff;
+		border-radius: 0.75rem;
+		padding: 1.5rem;
+		width: min(400px, 90vw);
+		box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+	}
+
+	.modal-title {
+		font-size: 1.1rem;
+		font-weight: 600;
+		margin-bottom: 1rem;
+	}
+
+	.save-modal-label {
+		display: block;
+		font-size: 0.85rem;
+		font-weight: 500;
+		color: #374151;
+		margin-bottom: 1rem;
+	}
+
+	.save-modal-input {
+		display: block;
+		width: 100%;
+		margin-top: 0.35rem;
+		padding: 0.5rem 0.75rem;
+		font-size: 0.9rem;
+		border: 1px solid #d1d5db;
+		border-radius: 0.5rem;
+		outline: none;
+		transition: border-color 0.15s;
+	}
+
+	.save-modal-input:focus {
+		border-color: #2563eb;
+		box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+	}
+
+	.save-modal-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 0.5rem;
+	}
+
+	.save-modal-actions .btn-cancel {
+		padding: 0.5rem 1rem;
+		font-size: 0.85rem;
+		background: #f3f4f6;
+		border: 1px solid #d1d5db;
+		border-radius: 0.5rem;
+		cursor: pointer;
+	}
+
+	.save-modal-actions .btn-primary {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0.5rem 1rem;
+		font-size: 0.85rem;
+		font-weight: 500;
+		color: #fff;
+		background: #2563eb;
+		border: none;
+		border-radius: 0.5rem;
+		cursor: pointer;
+	}
+
+	.save-modal-actions .btn-primary:hover:not(:disabled) {
+		background: #1d4ed8;
+	}
+
+	.save-modal-actions .btn-primary:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
+	.save-modal-actions :global(.spinning) {
+		animation: spin 1s linear infinite;
 	}
 
 	.live-result-detail {

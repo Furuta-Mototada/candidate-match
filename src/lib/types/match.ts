@@ -120,7 +120,6 @@ export interface BillListItem {
 export interface ResultSnapshotData {
 	id: number;
 	clusterId: number;
-	nComponents: number;
 	name: string;
 	globalScores: GlobalMemberScore[];
 	clusterResults: SnapshotClusterResult[];
@@ -134,7 +133,6 @@ export interface SnapshotListItem {
 	id: number;
 	name: string;
 	clusterId: number;
-	nComponents: number;
 	totalAnswered: number;
 	topMatch: { name: string; score: number } | null;
 	createdAt: string;

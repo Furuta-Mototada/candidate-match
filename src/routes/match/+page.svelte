@@ -454,7 +454,6 @@
 					action: 'snapshot',
 					name,
 					clusterId,
-					nComponents,
 					clusterResults: clusterResults.map((cr) => ({
 						clusterLabel: cr.clusterLabel,
 						clusterLabelName: cr.clusterLabelName,

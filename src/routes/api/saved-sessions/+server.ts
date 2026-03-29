@@ -58,6 +58,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 
 		const snapshotList: SnapshotListItem[] = snapshots.map((s) => {
 			const globalScores: GlobalMemberScore[] = JSON.parse(s.globalScoresJson);
+			const clusterResults: Array<{ answeredCount: number }> = JSON.parse(s.clusterResultsJson);
 			const topMatch =
 				globalScores.length > 0
 					? { name: globalScores[0].name, score: globalScores[0].globalScore }
@@ -67,8 +68,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 				id: s.id,
 				name: s.name,
 				clusterId: s.clusterId,
-				nComponents: s.nComponents,
-				totalAnswered: s.totalAnswered,
+				totalAnswered: clusterResults.reduce((sum, cr) => sum + cr.answeredCount, 0),
 				topMatch,
 				createdAt: s.createdAt.toISOString()
 			};
@@ -112,11 +112,12 @@ async function getSnapshotDetails(snapshotId: number, userId: string) {
 			id: snapshot.id,
 			clusterId: snapshot.clusterId,
 			clusterName: cluster?.name || '',
-			nComponents: snapshot.nComponents,
 			name: snapshot.name,
 			globalScores: JSON.parse(snapshot.globalScoresJson),
 			clusterResults: JSON.parse(snapshot.clusterResultsJson),
-			totalAnswered: snapshot.totalAnswered,
+			totalAnswered: (
+				JSON.parse(snapshot.clusterResultsJson) as Array<{ answeredCount: number }>
+			).reduce((sum: number, cr: { answeredCount: number }) => sum + cr.answeredCount, 0),
 			createdAt: snapshot.createdAt.toISOString()
 		}
 	});
@@ -221,7 +222,6 @@ async function handleSnapshot(
 	body: {
 		name: string;
 		clusterId: number;
-		nComponents: number;
 		clusterResults: Array<{
 			clusterLabel: number;
 			clusterLabelName: string | null;
@@ -238,7 +238,7 @@ async function handleSnapshot(
 	},
 	userId: string
 ) {
-	const { name, clusterId, nComponents, clusterResults } = body;
+	const { name, clusterId, clusterResults } = body;
 
 	// Calculate global scores
 	const globalScores = calculateGlobalScores(clusterResults);
@@ -258,18 +258,14 @@ async function handleSnapshot(
 		answeredBills: cr.answeredBills || []
 	}));
 
-	const totalAnswered = clusterResults.reduce((sum, cr) => sum + cr.answeredCount, 0);
-
 	const [inserted] = await db
 		.insert(resultSnapshot)
 		.values({
 			userId,
 			clusterId,
-			nComponents,
 			name: name || `スナップショット ${new Date().toLocaleDateString('ja-JP')}`,
 			globalScoresJson: JSON.stringify(globalScores),
-			clusterResultsJson: JSON.stringify(clusterResultsData),
-			totalAnswered
+			clusterResultsJson: JSON.stringify(clusterResultsData)
 		})
 		.returning({ id: resultSnapshot.id });
 

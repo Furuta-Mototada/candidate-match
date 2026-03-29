@@ -439,11 +439,9 @@ export const resultSnapshot = pgTable('result_snapshot', {
 	clusterId: integer('cluster_id')
 		.notNull()
 		.references(() => billClusters.id),
-	nComponents: integer('n_components').notNull(),
 	name: text('name').notNull(),
 	globalScoresJson: text('global_scores_json').notNull(), // JSON: GlobalMemberScore[]
 	clusterResultsJson: text('cluster_results_json').notNull(), // JSON: summary of cluster results at this point
-	totalAnswered: integer('total_answered').notNull(),
 	createdAt: timestamp('created_at').notNull().defaultNow()
 });
 
