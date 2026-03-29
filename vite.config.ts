@@ -14,6 +14,9 @@ export default defineConfig({
 			outdir: './src/lib/paraglide'
 		})
 	],
+	ssr: {
+		noExternal: ['@xyflow/svelte']
+	},
 	test: {
 		expect: { requireAssertions: true },
 		projects: [

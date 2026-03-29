@@ -6,6 +6,9 @@ import type { RequestHandler } from './$types.js';
 import {
 	getDelegationChainDownstream,
 	getDelegationChainUpstream,
+	getDelegationTreeUpstream,
+	flattenUpstreamTree,
+	countTotalVotes,
 	checkFriendship,
 	detectDelegationCycle
 } from '$lib/server/delegation-helpers';
@@ -189,15 +192,37 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 		const outgoing = await Promise.all(
 			outgoingRaw.map(async (d: (typeof outgoingRaw)[number]) => {
 				const chain = await getDelegationChainDownstream(d.delegateId, d.billId);
-				return { ...d, chain, myVoteScore: myOutgoingVotesMap.get(d.billId) ?? null };
+				// Add vote counts for each person in the forward chain
+				const delegateVotes = await countTotalVotes(d.delegateId, d.billId);
+				const chainWithVotes = await Promise.all(
+					chain.map(async (link) => {
+						// Look up userId for this username to count their votes
+						const [u] = await db
+							.select({ id: table.user.id })
+							.from(table.user)
+							.where(eq(table.user.username, link.username))
+							.limit(1);
+						const votes = u ? await countTotalVotes(u.id, d.billId) : 1;
+						return { ...link, totalVotes: votes };
+					})
+				);
+				return {
+					...d,
+					chain: chainWithVotes,
+					delegateVotes,
+					myVoteScore: myOutgoingVotesMap.get(d.billId) ?? null
+				};
 			})
 		);
 
-		// Build upstream chain info for incoming delegations
+		// Build upstream paths for incoming delegations (full tree, all branches)
 		const incomingWithChain = await Promise.all(
 			incoming.map(async (d: (typeof incoming)[number]) => {
+				const tree = await getDelegationTreeUpstream(d.delegatorId, d.billId);
+				const upstreamPaths = flattenUpstreamTree(tree);
+				// Also keep the old linear chain for compatibility
 				const chain = await getDelegationChainUpstream(d.delegatorId, d.billId);
-				return { ...d, upstreamChain: chain };
+				return { ...d, upstreamChain: chain, upstreamPaths };
 			})
 		);
 

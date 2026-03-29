@@ -6,6 +6,7 @@
 	import type { SnapshotListItem, AnsweredBill, BillListItem } from '$lib/types/index.js';
 	import DelegationModal from '$lib/components/match/DelegationModal.svelte';
 	import BillDetailModal from '$lib/components/match/BillDetailModal.svelte';
+	import DelegationFlowChart from '$lib/components/match/DelegationFlowChart.svelte';
 	import {
 		ClipboardList,
 		Vote,
@@ -41,6 +42,7 @@
 		status: string;
 		myExistingScore: number | null;
 		upstreamChain: { username: string; status: string }[];
+		upstreamPaths: Array<Array<{ username: string; status: string }>>;
 		createdAt: string;
 		updatedAt: string;
 	};
@@ -56,7 +58,8 @@
 		billNumber: number;
 		status: string;
 		myVoteScore: number | null;
-		chain: { username: string; status: string }[];
+		chain: { username: string; status: string; totalVotes?: number }[];
+		delegateVotes?: number;
 		createdAt: string;
 		updatedAt: string;
 	};
@@ -464,8 +467,20 @@
 			const delegatorIds = new Set(
 				incomingDelegations.filter((d) => d.billId === delegation.billId).map((d) => d.delegatorId)
 			);
-			// Also exclude yourself (server would reject) and anyone in the upstream chain
-			const upstreamIds = new Set((delegation.upstreamChain || []).map((link) => link.username));
+			// Also exclude yourself (server would reject) and anyone in the upstream paths
+			const upstreamUsernames: string[] = [];
+			if (delegation.upstreamPaths) {
+				for (const path of delegation.upstreamPaths) {
+					for (const link of path) {
+						upstreamUsernames.push(link.username);
+					}
+				}
+			} else if (delegation.upstreamChain) {
+				for (const link of delegation.upstreamChain) {
+					upstreamUsernames.push(link.username);
+				}
+			}
+			const upstreamIds = new Set(upstreamUsernames);
 			redelegateFriends = (data.friends || []).filter(
 				(f: { friendId: string; friendUsername: string }) =>
 					!delegatorIds.has(f.friendId) && !upstreamIds.has(f.friendUsername)
@@ -1069,20 +1084,7 @@
 
 									<!-- Chain visualization for outgoing-only -->
 									{#if !hasIncoming && outgoing}
-										<div class="delegation-chain">
-											<span class="chain-label">委任経路:</span>
-											<span class="chain-path">
-												<span class="chain-node chain-node-me">あなた</span>
-												<span class="chain-arrow">→</span>
-												<span class="chain-node">{outgoing.delegateUsername}</span>
-												{#if outgoing.chain && outgoing.chain.length > 0}
-													{#each outgoing.chain as link, i (i)}
-														<span class="chain-arrow">→</span>
-														<span class="chain-node">{link.username}</span>
-													{/each}
-												{/if}
-											</span>
-										</div>
+										<DelegationFlowChart {incomingList} {outgoing} />
 										<div class="delegation-status-row">
 											<span class="delegation-status {getDelegationStatusClass(outgoing.status)}">
 												{getDelegationStatusLabel(outgoing.status)}
@@ -1097,42 +1099,7 @@
 
 									<!-- Combined chain visualization for incoming -->
 									{#if hasIncoming}
-										<div class="delegation-chain-combined">
-											<span class="chain-label">委任経路:</span>
-											<div class="chain-combined-layout">
-												<!-- Source branches (incoming delegators) -->
-												<div class="chain-sources">
-													{#each incomingList as incoming (incoming.id)}
-														<div class="chain-source-row">
-															{#if incoming.upstreamChain && incoming.upstreamChain.length > 0}
-																{#each incoming.upstreamChain as link, i (i)}
-																	<span class="chain-node chain-node-upstream">{link.username}</span
-																	>
-																	<span class="chain-arrow">→</span>
-																{/each}
-															{/if}
-															<span class="chain-node">{incoming.delegatorUsername}</span>
-															<span class="chain-arrow">→</span>
-														</div>
-													{/each}
-												</div>
-
-												<!-- Convergence point: あなた -->
-												<div class="chain-convergence">
-													<span class="chain-node chain-node-me">あなた</span>
-													{#if outgoing}
-														<span class="chain-arrow">→</span>
-														<span class="chain-node">{outgoing.delegateUsername}</span>
-														{#if outgoing.chain && outgoing.chain.length > 0}
-															{#each outgoing.chain as link, i (i)}
-																<span class="chain-arrow">→</span>
-																<span class="chain-node">{link.username}</span>
-															{/each}
-														{/if}
-													{/if}
-												</div>
-											</div>
-										</div>
+										<DelegationFlowChart {incomingList} {outgoing} />
 
 										<!-- Combined status row -->
 										<div class="delegation-status-row">
@@ -1991,97 +1958,6 @@
 	.status-redelegated {
 		background: #eff6ff;
 		color: #2563eb;
-	}
-
-	.delegation-chain {
-		display: flex;
-		align-items: center;
-		gap: 0.25rem;
-		margin: 0.5rem 0;
-		padding: 0.5rem 0.75rem;
-		background: #f0f9ff;
-		border-radius: 8px;
-		border: 1px solid #bae6fd;
-		font-size: 0.8rem;
-		flex-wrap: wrap;
-	}
-
-	.delegation-chain-combined {
-		margin: 0.5rem 0;
-		padding: 0.5rem 0.75rem;
-		background: #f0f9ff;
-		border-radius: 8px;
-		border: 1px solid #bae6fd;
-		font-size: 0.8rem;
-	}
-
-	.chain-combined-layout {
-		display: flex;
-		align-items: center;
-		gap: 0.25rem;
-		margin-top: 0.4rem;
-	}
-
-	.chain-sources {
-		display: flex;
-		flex-direction: column;
-		gap: 0.3rem;
-		border-right: 2px solid #93c5fd;
-		padding-right: 0.5rem;
-		margin-right: 0.25rem;
-	}
-
-	.chain-source-row {
-		display: flex;
-		align-items: center;
-		gap: 0.25rem;
-	}
-
-	.chain-convergence {
-		display: flex;
-		align-items: center;
-		gap: 0.25rem;
-	}
-
-	.chain-node-upstream {
-		background: #f3f4f6;
-		border-color: #d1d5db;
-		color: #6b7280;
-	}
-
-	.chain-label {
-		color: #0369a1;
-		font-weight: 600;
-		margin-right: 0.25rem;
-		flex-shrink: 0;
-	}
-
-	.chain-path {
-		display: flex;
-		align-items: center;
-		gap: 0.25rem;
-		flex-wrap: wrap;
-	}
-
-	.chain-node {
-		padding: 0.15rem 0.5rem;
-		background: white;
-		border: 1px solid #93c5fd;
-		border-radius: 12px;
-		color: #1e40af;
-		font-weight: 500;
-		white-space: nowrap;
-	}
-
-	.chain-node-me {
-		background: #6366f1;
-		border-color: #6366f1;
-		color: white;
-	}
-
-	.chain-arrow {
-		color: #93c5fd;
-		font-weight: 700;
 	}
 
 	.delegation-vote-result {

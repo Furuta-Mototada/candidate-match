@@ -86,6 +86,87 @@ export async function getDelegationChainUpstream(
 	return chain;
 }
 
+export type UpstreamNode = {
+	username: string;
+	status: string;
+	upstream: UpstreamNode[];
+};
+
+/**
+ * Build full upstream tree: find ALL people who delegated to this user for a bill,
+ * recursively including all their upstream delegators.
+ *
+ * Returns an array of UpstreamNode (each direct delegator, with their own upstream tree).
+ */
+export async function getDelegationTreeUpstream(
+	userId: string,
+	billId: number,
+	visited: Set<string> = new Set()
+): Promise<UpstreamNode[]> {
+	if (visited.has(userId)) return [];
+	visited.add(userId);
+
+	const upstreamDelegations = await db
+		.select({
+			delegatorId: table.voteDelegation.delegatorId,
+			delegatorUsername: table.user.username,
+			status: table.voteDelegation.status
+		})
+		.from(table.voteDelegation)
+		.innerJoin(table.user, eq(table.voteDelegation.delegatorId, table.user.id))
+		.where(
+			and(eq(table.voteDelegation.delegateId, userId), eq(table.voteDelegation.billId, billId))
+		);
+
+	const nodes: UpstreamNode[] = [];
+	for (const d of upstreamDelegations) {
+		const children = await getDelegationTreeUpstream(d.delegatorId, billId, visited);
+		nodes.push({
+			username: d.delegatorUsername,
+			status: d.status,
+			upstream: children
+		});
+	}
+	return nodes;
+}
+
+/**
+ * Flatten an upstream tree into an array of paths (each path from leaf to root).
+ * Each path is ordered leaf-first: [leaf, ..., directDelegator].
+ */
+export function flattenUpstreamTree(
+	nodes: UpstreamNode[]
+): Array<Array<{ username: string; status: string }>> {
+	const paths: Array<Array<{ username: string; status: string }>> = [];
+	for (const node of nodes) {
+		if (node.upstream.length === 0) {
+			paths.push([{ username: node.username, status: node.status }]);
+		} else {
+			const childPaths = flattenUpstreamTree(node.upstream);
+			for (const cp of childPaths) {
+				paths.push([...cp, { username: node.username, status: node.status }]);
+			}
+		}
+	}
+	return paths;
+}
+
+/**
+ * Count total votes a user controls for a bill.
+ * Returns 1 (own vote) + count of all upstream delegators in the tree.
+ */
+export async function countTotalVotes(userId: string, billId: number): Promise<number> {
+	const tree = await getDelegationTreeUpstream(userId, billId);
+	function countNodes(nodes: UpstreamNode[]): number {
+		let count = 0;
+		for (const n of nodes) {
+			count += 1 + countNodes(n.upstream);
+		}
+		return count;
+	}
+	return 1 + countNodes(tree);
+}
+
 /**
  * Check if two users are friends (accepted friend request in either direction)
  */
