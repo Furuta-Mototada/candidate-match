@@ -69,7 +69,7 @@
 		</div>
 	</header>
 
-	<main class="main-container animate-in" style="--delay: 0">
+	<main class="main-container">
 		<GlobalResultsPhase
 			clusterResults={snapshot.clusterResults || []}
 			globalScores={snapshot.globalScores || []}
@@ -86,7 +86,7 @@
 		}
 		to {
 			opacity: 1;
-			transform: translateY(0);
+			transform: none;
 		}
 	}
 

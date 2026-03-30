@@ -357,10 +357,13 @@ async function handleStart(
 				allAnswers.push({ billId, score, source: 'delegated' });
 			}
 		}
-		// Add pending delegated bills (not yet voted by delegate) as score 0 so they're skipped
+		// Add pending delegated bills (not yet voted by delegate) — mark as answered
+		// so they're skipped in question selection, but don't include in vector estimation
+		const pendingDelegatedBillIds = new Set<number>();
 		for (const billId of delegatedBillIds) {
 			if (!allAnswers.some((a) => a.billId === billId)) {
 				allAnswers.push({ billId, score: 0, source: 'delegated' });
+				pendingDelegatedBillIds.add(billId);
 			}
 		}
 
@@ -382,7 +385,14 @@ async function handleStart(
 			}
 
 			// Apply each existing answer to update the user vector
+			// Skip pending delegations — they have no meaningful score yet
 			for (const answer of allAnswers) {
+				if (pendingDelegatedBillIds.has(answer.billId)) {
+					// Still mark as answered for question skipping
+					state.answeredBills.push({ billId: answer.billId, score: 0 });
+					state.questionCount++;
+					continue;
+				}
 				const userAnswer: UserAnswer = { billId: answer.billId, score: answer.score };
 				const newState = updateMatchingState(state, userAnswer, billLoadingsMap);
 				state.userVector = newState.userVector;
@@ -390,6 +400,9 @@ async function handleStart(
 				state.questionCount = newState.questionCount;
 				state.uncertainty = newState.uncertainty;
 			}
+
+			// Store pending delegation IDs on state for future updateMatchingState calls
+			state.pendingDelegationBillIds = pendingDelegatedBillIds;
 		}
 	}
 
@@ -592,10 +605,12 @@ async function handleResume(
 				allAnswers.push({ billId, score, source: 'delegated' });
 			}
 		}
-		// Add pending delegated bills (not yet voted by delegate) as score 0 so they're skipped
+		// Add pending delegated bills — mark as answered but don't include in vector estimation
+		const resumePendingDelegatedBillIds = new Set<number>();
 		for (const billId of delegatedBillIds) {
 			if (!allAnswers.some((a) => a.billId === billId)) {
 				allAnswers.push({ billId, score: 0, source: 'delegated' });
+				resumePendingDelegatedBillIds.add(billId);
 			}
 		}
 
@@ -616,7 +631,14 @@ async function handleResume(
 			}
 
 			// Apply each existing answer to update the user vector
+			// Skip pending delegations — they have no meaningful score yet
 			for (const answer of allAnswers) {
+				if (resumePendingDelegatedBillIds.has(answer.billId)) {
+					// Still mark as answered for question skipping
+					state.answeredBills.push({ billId: answer.billId, score: 0 });
+					state.questionCount++;
+					continue;
+				}
 				const userAnswer: UserAnswer = { billId: answer.billId, score: answer.score };
 				const newState = updateMatchingState(state, userAnswer, billLoadingsMap);
 				state.userVector = newState.userVector;
@@ -624,6 +646,9 @@ async function handleResume(
 				state.questionCount = newState.questionCount;
 				state.uncertainty = newState.uncertainty;
 			}
+
+			// Store pending delegation IDs on state for future updateMatchingState calls
+			state.pendingDelegationBillIds = resumePendingDelegatedBillIds;
 		}
 	} else {
 		// Not logged in — use the provided existingUserVector and answeredBillIds

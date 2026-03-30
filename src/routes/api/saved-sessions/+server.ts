@@ -8,9 +8,10 @@ import {
 	bill,
 	billClusters,
 	clusterVectorResults,
-	billClusterLabelNames
+	billClusterLabelNames,
+	voteDelegation
 } from '$lib/server/db/schema.js';
-import { eq, desc, and, inArray } from 'drizzle-orm';
+import { eq, desc, and, inArray, sql } from 'drizzle-orm';
 import type { GlobalMemberScore, SnapshotListItem } from '$lib/types/index.js';
 import {
 	estimateUserVector,
@@ -88,7 +89,9 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 };
 
 /**
- * Get detailed snapshot info
+ * Get detailed snapshot info.
+ * When vectorGroupKey is stored, reconstructs full viz data (userVector, memberVectorsForViz,
+ * explainedVariance) from the cluster vector results so the Analysis tab works.
  */
 async function getSnapshotDetails(snapshotId: number, userId: string) {
 	const [snapshot] = await db
@@ -106,6 +109,13 @@ async function getSnapshotDetails(snapshotId: number, userId: string) {
 		.from(billClusters)
 		.where(eq(billClusters.id, snapshot.clusterId));
 
+	let clusterResults = JSON.parse(snapshot.clusterResultsJson);
+
+	// If vectorGroupKey is stored, reconstruct viz data
+	if (snapshot.vectorGroupKey) {
+		clusterResults = await enrichClusterResultsWithVizData(clusterResults, snapshot.vectorGroupKey);
+	}
+
 	return json({
 		success: true,
 		snapshot: {
@@ -114,13 +124,113 @@ async function getSnapshotDetails(snapshotId: number, userId: string) {
 			clusterName: cluster?.name || '',
 			name: snapshot.name,
 			globalScores: JSON.parse(snapshot.globalScoresJson),
-			clusterResults: JSON.parse(snapshot.clusterResultsJson),
-			totalAnswered: (
-				JSON.parse(snapshot.clusterResultsJson) as Array<{ answeredCount: number }>
-			).reduce((sum: number, cr: { answeredCount: number }) => sum + cr.answeredCount, 0),
+			clusterResults,
+			totalAnswered: (clusterResults as Array<{ answeredCount: number }>).reduce(
+				(sum: number, cr: { answeredCount: number }) => sum + cr.answeredCount,
+				0
+			),
 			createdAt: snapshot.createdAt.toISOString()
 		}
 	});
+}
+
+/**
+ * Enrich stored cluster results with visualization data by loading
+ * the cluster vector results from DB and re-estimating user vectors.
+ */
+async function enrichClusterResultsWithVizData(
+	clusterResults: Array<{
+		clusterLabel: number;
+		clusterLabelName: string | null;
+		importance: number;
+		answeredCount: number;
+		matches: Array<{ memberId: number; name: string; group: string | null; similarity: number }>;
+		answeredBills: Array<{ billId: number; title: string; answer: number }>;
+	}>,
+	vectorGroupKey: string
+) {
+	const separatorIndex = vectorGroupKey.lastIndexOf('|');
+	if (separatorIndex === -1) return clusterResults;
+
+	const vectorName = vectorGroupKey.substring(0, separatorIndex);
+	const clusterId = parseInt(vectorGroupKey.substring(separatorIndex + 1));
+	if (isNaN(clusterId)) return clusterResults;
+
+	// Load all saved vectors for this group
+	const savedVectors = await db
+		.select()
+		.from(clusterVectorResults)
+		.where(
+			and(eq(clusterVectorResults.clusterId, clusterId), eq(clusterVectorResults.name, vectorName))
+		);
+
+	const vectorsByLabel = new Map(savedVectors.map((sv) => [sv.clusterLabel, sv]));
+
+	const enriched = await Promise.all(
+		clusterResults.map(async (cr) => {
+			const sv = vectorsByLabel.get(cr.clusterLabel);
+			if (!sv)
+				return {
+					...cr,
+					userVector: [],
+					memberVectorsForViz: [],
+					explainedVariance: [],
+					userVectorHistory: [],
+					xDimension: 0,
+					yDimension: 1
+				};
+
+			const clusterData: ClusterVectorData = {
+				memberVectors: JSON.parse(sv.memberVectors),
+				memberNames: JSON.parse(sv.memberNames),
+				billLoadings: JSON.parse(sv.billLoadings),
+				billIds: JSON.parse(sv.billIds),
+				explainedVariance: JSON.parse(sv.explainedVariance),
+				dimensions: sv.dimensions,
+				memberCount: sv.memberCount,
+				billCount: sv.billCount
+			};
+
+			// Build bill loadings map
+			const billLoadingsMap = new Map<number, number[]>();
+			for (let i = 0; i < clusterData.billIds.length; i++) {
+				billLoadingsMap.set(clusterData.billIds[i], clusterData.billLoadings[i]);
+			}
+
+			// Re-estimate user vector from snapshot's stored answers
+			const answers: UserAnswer[] = (cr.answeredBills || []).map((ab) => ({
+				billId: ab.billId,
+				score: ab.answer
+			}));
+			const { vector: userVector } = estimateUserVector(
+				answers,
+				billLoadingsMap,
+				clusterData.dimensions
+			);
+
+			// Build memberVectorsForViz
+			const allMemberIds = Object.keys(clusterData.memberVectors).map((id) => parseInt(id));
+			const groupMap = await loadMemberGroups(allMemberIds);
+			const memberVectorsForViz = Object.entries(clusterData.memberVectors).map(([id, vector]) => ({
+				memberId: parseInt(id),
+				name: clusterData.memberNames[id] || `Member ${id}`,
+				group: groupMap.get(parseInt(id)) || null,
+				latentVector: vector
+			}));
+
+			return {
+				...cr,
+				userVector,
+				memberVectorsForViz,
+				explainedVariance: clusterData.explainedVariance,
+				userVectorHistory: [] as number[][],
+				xDimension: 0,
+				yDimension: 1
+			};
+		})
+	);
+
+	return enriched;
 }
 
 /**
@@ -244,6 +354,7 @@ async function handleSnapshot(
 	body: {
 		name: string;
 		clusterId: number;
+		vectorGroupKey?: string;
 		clusterResults: Array<{
 			clusterLabel: number;
 			clusterLabelName: string | null;
@@ -260,7 +371,7 @@ async function handleSnapshot(
 	},
 	userId: string
 ) {
-	const { name, clusterId, clusterResults } = body;
+	const { name, clusterId, clusterResults, vectorGroupKey } = body;
 
 	// Calculate global scores
 	const globalScores = calculateGlobalScores(clusterResults);
@@ -287,7 +398,8 @@ async function handleSnapshot(
 			clusterId,
 			name: name || `スナップショット ${new Date().toLocaleDateString('ja-JP')}`,
 			globalScoresJson: JSON.stringify(globalScores),
-			clusterResultsJson: JSON.stringify(clusterResultsData)
+			clusterResultsJson: JSON.stringify(clusterResultsData),
+			vectorGroupKey: vectorGroupKey || null
 		})
 		.returning({ id: resultSnapshot.id });
 
@@ -440,6 +552,21 @@ async function handleLiveResults(
 		}
 	}
 
+	// Load active (non-rejected) delegations to identify pending ones
+	const activeDelegations = await db
+		.select({ billId: voteDelegation.billId })
+		.from(voteDelegation)
+		.where(
+			and(eq(voteDelegation.delegatorId, userId), sql`${voteDelegation.status} != 'rejected'`)
+		);
+	const pendingDelegatedBillIds = new Set<number>();
+	for (const d of activeDelegations) {
+		if (!userAnswerMap.has(d.billId)) {
+			userAnswerMap.set(d.billId, { score: 0, source: 'delegated' });
+			pendingDelegatedBillIds.add(d.billId);
+		}
+	}
+
 	// Process each cluster
 	const clusterResultsList: Array<{
 		clusterLabel: number;
@@ -456,6 +583,17 @@ async function handleLiveResults(
 			submissionSession?: number;
 			billNumber?: number;
 		}>;
+		userVector: number[];
+		memberVectorsForViz: Array<{
+			memberId: number;
+			name: string;
+			group: string | null;
+			latentVector: number[];
+		}>;
+		explainedVariance: number[];
+		userVectorHistory: number[][];
+		xDimension: number;
+		yDimension: number;
 	}> = [];
 
 	// Collect all bill IDs for title lookups
@@ -498,9 +636,10 @@ async function handleLiveResults(
 			}
 		}
 
-		// Estimate user vector from answers
+		// Estimate user vector from answers (exclude pending delegations — no meaningful score)
+		const answersForVector = clusterAnswers.filter((a) => !pendingDelegatedBillIds.has(a.billId));
 		const { vector: userVector } = estimateUserVector(
-			clusterAnswers,
+			answersForVector,
 			billLoadingsMap,
 			clusterData.dimensions
 		);
@@ -508,9 +647,17 @@ async function handleLiveResults(
 		// Find matching members (return all, not just top N)
 		const matches = findMatchingMembers(userVector, clusterData, clusterData.memberCount);
 
-		// Load member groups
-		const memberIds = matches.map((m) => m.member.memberId);
-		const groupMap = await loadMemberGroups(memberIds);
+		// Load member groups (for all members in cluster, not just top matches)
+		const allMemberIds = Object.keys(clusterData.memberVectors).map((id) => parseInt(id));
+		const groupMap = await loadMemberGroups(allMemberIds);
+
+		// Build memberVectorsForViz from all members
+		const memberVectorsForViz = Object.entries(clusterData.memberVectors).map(([id, vector]) => ({
+			memberId: parseInt(id),
+			name: clusterData.memberNames[id] || `Member ${id}`,
+			group: groupMap.get(parseInt(id)) || null,
+			latentVector: vector
+		}));
 
 		clusterResultsList.push({
 			clusterLabel,
@@ -523,6 +670,12 @@ async function handleLiveResults(
 				group: groupMap.get(m.member.memberId) || null,
 				similarity: m.similarity
 			})),
+			userVector,
+			memberVectorsForViz,
+			explainedVariance: clusterData.explainedVariance,
+			userVectorHistory: [],
+			xDimension: 0,
+			yDimension: 1,
 			answeredBills: clusterAnswers.map((a) => ({
 				billId: a.billId,
 				title: '', // filled below

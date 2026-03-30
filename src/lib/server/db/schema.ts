@@ -443,6 +443,7 @@ export const resultSnapshot = pgTable('result_snapshot', {
 	name: text('name').notNull(),
 	globalScoresJson: text('global_scores_json').notNull(), // JSON: GlobalMemberScore[]
 	clusterResultsJson: text('cluster_results_json').notNull(), // JSON: summary of cluster results at this point
+	vectorGroupKey: text('vector_group_key'), // "vectorName|clusterId" — used to reconstruct full results with viz data
 	createdAt: timestamp('created_at').notNull().defaultNow()
 });
 

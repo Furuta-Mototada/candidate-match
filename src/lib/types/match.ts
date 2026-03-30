@@ -135,7 +135,7 @@ export interface ResultSnapshotData {
 	clusterId: number;
 	name: string;
 	globalScores: GlobalMemberScore[];
-	clusterResults: SnapshotClusterResult[];
+	clusterResults: (SnapshotClusterResult | ClusterResult)[];
 	totalAnswered: number;
 	createdAt: string;
 }

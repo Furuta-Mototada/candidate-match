@@ -263,9 +263,12 @@
 	}
 
 	function getAnswerText(score: number, source?: 'direct' | 'delegated'): string {
-		const label = score === 1 ? '賛成' : score === -1 ? '反対' : 'どちらでもない';
-		if (source === 'delegated') return `委任(${label})`;
-		return label;
+		if (source === 'delegated') {
+			if (score === 0) return '委任中';
+			const label = score === 1 ? '賛成' : score === -1 ? '反対' : 'どちらでもない';
+			return `委任(${label})`;
+		}
+		return score === 1 ? '賛成' : score === -1 ? '反対' : 'どちらでもない';
 	}
 
 	function getAnswerColor(score: number, source?: 'direct' | 'delegated'): string {
@@ -304,9 +307,9 @@
 <div class="results-container">
 	<!-- Simple Header -->
 	<div class="results-header fade-in-up">
-		<div class="header-top">
-			<h2 class="results-title">マッチング結果</h2>
-			{#if !isReadonly}
+		{#if !isReadonly}
+			<div class="header-top">
+				<h2 class="results-title">マッチング結果</h2>
 				<div class="header-actions">
 					{#if totalUnansweredBills > 0 && onContinue}
 						<button class="btn-continue" onclick={onContinue} disabled={isContinuing}>
@@ -339,8 +342,8 @@
 						</button>
 					{/if}
 				</div>
-			{/if}
-		</div>
+			</div>
+		{/if}
 
 		<div class="tabs-container">
 			<div class="tabs-nav">
@@ -861,6 +864,10 @@
 																→ {#if !memberHasData}<span class="comparison-nodata"
 																		>データなし</span
 																	>{:else if agrees}✓ 一致{:else}✗ 不一致{/if}
+															</span>
+														{:else if userAnswer === 0 && userSource === 'delegated'}
+															<span class="drawer-bill-comparison comparison-skip">
+																あなた: 委任中
 															</span>
 														{:else if userAnswer === 0}
 															<span class="drawer-bill-comparison comparison-skip">

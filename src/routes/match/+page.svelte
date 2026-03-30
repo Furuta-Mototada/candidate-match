@@ -513,6 +513,7 @@
 					action: 'snapshot',
 					name,
 					clusterId,
+					vectorGroupKey: selectedSavedVectorKey,
 					clusterResults: clusterResults.map((cr) => ({
 						clusterLabel: cr.clusterLabel,
 						clusterLabelName: cr.clusterLabelName,
@@ -1046,11 +1047,32 @@
 		error = null;
 
 		try {
+			// Fetch matches if we don't have them yet (first pass through a cluster)
+			let matchesToSave = currentClusterMatches;
+			if (matchesToSave.length === 0 && sessionId && answeredCount > 0) {
+				try {
+					const response = await fetch('/api/match', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							action: 'results',
+							sessionId: sessionId
+						})
+					});
+					const result = await response.json();
+					if (response.ok && result.success) {
+						matchesToSave = result.matches || [];
+					}
+				} catch (e) {
+					console.error('Failed to get matches for saving:', e);
+				}
+			}
+
 			// Save current cluster result
 			const newResult: ClusterResult = {
 				clusterLabel: currentClusterLabel!,
 				clusterLabelName: clusterLabelNameMap[currentClusterLabel!] || null,
-				matches: currentClusterMatches,
+				matches: matchesToSave,
 				answeredCount: answeredCount,
 				importance: pendingImportance,
 				userVector: [...userVector],

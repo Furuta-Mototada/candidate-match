@@ -1,0 +1,1 @@
+ALTER TABLE "result_snapshot" ADD COLUMN "vector_group_key" text;

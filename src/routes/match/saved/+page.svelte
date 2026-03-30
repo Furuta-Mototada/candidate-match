@@ -9,7 +9,8 @@
 		BillListItem,
 		SavedVectorInfo,
 		GlobalMemberScore,
-		BaseClusterResult
+		BaseClusterResult,
+		ClusterResult
 	} from '$lib/types/index.js';
 	import { formatBillRef } from '$lib/types/match.js';
 	import DelegationModal from '$lib/components/match/DelegationModal.svelte';
@@ -137,7 +138,7 @@
 	let selectedVectorGroupKey: string | null = $state(null);
 	let liveImportanceWeights: Record<string, number> = $state({});
 	let liveGlobalScores: GlobalMemberScore[] = $state([]);
-	let liveClusterResults: BaseClusterResult[] = $state([]);
+	let liveClusterResults: (BaseClusterResult | ClusterResult)[] = $state([]);
 	let liveTotalAnswered: number = $state(0);
 	let liveLoading: boolean = $state(false);
 	let liveError: string | null = $state(null);
@@ -240,6 +241,7 @@
 						snapshotNameInput.trim() ||
 						`${selectedVectorGroup.name} — ${new Date().toLocaleDateString('ja-JP')}`,
 					clusterId: selectedVectorGroup.clusterId,
+					vectorGroupKey: selectedVectorGroupKey,
 					clusterResults: liveClusterResults.map((cr) => ({
 						clusterLabel: cr.clusterLabel,
 						clusterLabelName: cr.clusterLabelName,
@@ -1104,7 +1106,7 @@
 						</div>
 					</div>
 
-					<div class="live-result-detail animate-in" style="--delay: 1">
+					<div class="live-result-detail">
 						<GlobalResultsPhase
 							clusterResults={liveClusterResults}
 							globalScores={liveGlobalScores}
@@ -1827,7 +1829,7 @@
 		}
 		to {
 			opacity: 1;
-			transform: translateY(0);
+			transform: none;
 		}
 	}
 

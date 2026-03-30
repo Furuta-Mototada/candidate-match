@@ -79,6 +79,7 @@ export interface MatchingState {
 	userVector: number[]; // Estimated user position
 	uncertainty: number[]; // Uncertainty per dimension
 	questionCount: number;
+	pendingDelegationBillIds?: Set<number>; // Bills with pending delegations (excluded from vector estimation)
 }
 
 export interface NextQuestion {
@@ -433,7 +434,15 @@ export function updateMatchingState(
 		newAnswers = [...state.answeredBills, answer];
 	}
 
-	const { vector, uncertainty } = estimateUserVector(newAnswers, billLoadings, state.dimensions);
+	// Exclude pending delegations from vector estimation (score=0 would bias toward neutral)
+	const answersForVector = state.pendingDelegationBillIds
+		? newAnswers.filter((a) => !state.pendingDelegationBillIds!.has(a.billId))
+		: newAnswers;
+	const { vector, uncertainty } = estimateUserVector(
+		answersForVector,
+		billLoadings,
+		state.dimensions
+	);
 
 	return {
 		...state,
