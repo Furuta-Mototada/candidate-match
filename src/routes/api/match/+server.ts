@@ -1048,8 +1048,8 @@ async function handleResults(sessionId: string) {
 
 	const { state, clusterData } = session;
 
-	// Get all matches
-	const matches = findMatchingMembers(state.userVector, clusterData, 50);
+	// Get all matches (no limit - include negative similarities too)
+	const matches = findMatchingMembers(state.userVector, clusterData, Infinity);
 
 	// Enrich with group info
 	const memberIds = matches.map((m: MatchResult) => m.member.memberId);

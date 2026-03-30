@@ -5,9 +5,10 @@
 	interface Props {
 		members: GlobalMemberScore[]; // Changed from single member to array
 		clusterResults: BaseClusterResult[];
+		onMemberClick?: (member: { memberId: number; name: string; group: string | null }) => void;
 	}
 
-	let { members, clusterResults }: Props = $props();
+	let { members, clusterResults, onMemberClick }: Props = $props();
 
 	// Take top 3
 	let topMembers = $derived(members.slice(0, 3));
@@ -25,11 +26,17 @@
 
 <div class="spotlight-container fade-in-up">
 	{#each topMembers as member, idx (member.memberId)}
+		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 		<div
 			class="spotlight-card"
 			class:gold={idx === 0}
 			class:silver={idx === 1}
 			class:bronze={idx === 2}
+			class:clickable={!!onMemberClick}
+			onclick={() =>
+				onMemberClick?.({ memberId: member.memberId, name: member.name, group: member.group })}
+			role={onMemberClick ? 'button' : undefined}
+			tabindex={onMemberClick ? 0 : undefined}
 		>
 			<div class="spotlight-header">
 				<div class="rank-badge-wrapper">
@@ -99,6 +106,17 @@
 		overflow: hidden;
 		border: 1px solid #e5e7eb;
 		transition: transform 0.2s;
+	}
+
+	.spotlight-card.clickable {
+		cursor: pointer;
+	}
+
+	.spotlight-card.clickable:hover {
+		transform: translateY(-2px);
+		box-shadow:
+			0 10px 15px -3px rgba(0, 0, 0, 0.1),
+			0 4px 6px -2px rgba(0, 0, 0, 0.05);
 	}
 
 	/* Highlight the #1 match a bit more */

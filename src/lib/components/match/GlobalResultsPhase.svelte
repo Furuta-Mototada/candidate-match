@@ -3,7 +3,23 @@
 	import TopMatchSpotlight from '$lib/components/match/TopMatchSpotlight.svelte';
 	import ClusterInsightCard from '$lib/components/match/ClusterInsightCard.svelte';
 	import type { ClusterResult, BaseClusterResult, GlobalMemberScore } from '$lib/types/index.js';
-	import { ClipboardList, Save, Lock, RefreshCw, Hourglass, Plus, Search } from '@lucide/svelte';
+	import {
+		ClipboardList,
+		Save,
+		Lock,
+		RefreshCw,
+		Hourglass,
+		Plus,
+		Search,
+		X,
+		ChevronLeft,
+		User,
+		Info,
+		ThumbsUp,
+		ThumbsDown,
+		CircleQuestionMark,
+		Handshake
+	} from '@lucide/svelte';
 
 	interface Props {
 		clusterResults: BaseClusterResult[];
@@ -57,6 +73,125 @@
 		return 'memberVectorsForViz' in result && 'userVector' in result;
 	}
 
+	// Per-cluster dimension state for axis selectors
+	let clusterDimensions = $state<Record<number, { x: number; y: number }>>({});
+
+	// Initialize dimensions from cluster data
+	$effect(() => {
+		for (const result of clusterResults) {
+			if (!(result.clusterLabel in clusterDimensions)) {
+				if (hasVizData(result)) {
+					clusterDimensions[result.clusterLabel] = {
+						x: result.xDimension ?? 0,
+						y: result.yDimension ?? 1
+					};
+				} else {
+					clusterDimensions[result.clusterLabel] = { x: 0, y: 1 };
+				}
+			}
+		}
+	});
+
+	// Member detail state
+	interface MemberDetail {
+		memberId: number;
+		names: string[];
+		nameReading: string | null;
+		partyHistory: Array<{
+			partyName: string;
+			chamber: string | null;
+			startDate: string | null;
+			endDate: string | null;
+		}>;
+		groupHistory: Array<{
+			groupName: string;
+			chamber: string | null;
+			startDate: string | null;
+			endDate: string | null;
+		}>;
+		billScoreRecords: Array<{
+			billId: number;
+			billTitle: string | null;
+			normalizedScore: number | null;
+			hasVoteRecord: boolean;
+			approved: boolean | null;
+		}>;
+	}
+
+	let selectedMember = $state<{ memberId: number; name: string; group: string | null } | null>(
+		null
+	);
+	let selectedMemberContext = $state<number | null>(null); // clusterLabel of context, or null for global
+	let memberDetail = $state<MemberDetail | null>(null);
+	let memberDetailLoading = $state(false);
+	let showPartyDisclaimer = $state(false);
+	let showGroupDisclaimer = $state(false);
+
+	// Track which clusters have expanded bill lists in 回答記録 tab
+	let expandedBillClusters = $state<Set<number>>(new Set());
+
+	// Get global score for selected member
+	let selectedMemberGlobalScore = $derived(
+		selectedMember
+			? (globalScores.find((m) => m.memberId === selectedMember!.memberId)?.globalScore ?? null)
+			: null
+	);
+
+	// Get per-cluster scores for selected member
+	let selectedMemberClusterScores = $derived(
+		selectedMember
+			? (globalScores.find((m) => m.memberId === selectedMember!.memberId)?.clusterScores ?? {})
+			: {}
+	);
+
+	async function loadMemberDetail(memberId: number) {
+		memberDetailLoading = true;
+		memberDetail = null;
+		try {
+			// Always load ALL bill IDs across all clusters for category grouping
+			let billIds: number[] = [];
+			for (const cr of clusterResults) {
+				if (cr.answeredBills) billIds.push(...cr.answeredBills.map((b) => b.billId));
+			}
+			let url = `/api/member-detail?memberId=${encodeURIComponent(String(memberId))}`;
+			if (billIds.length > 0) url += `&billIds=${encodeURIComponent(billIds.join(','))}`;
+			const res = await fetch(url);
+			if (res.ok) {
+				memberDetail = await res.json();
+			}
+		} catch (err) {
+			console.error('Failed to load member detail:', err);
+		} finally {
+			memberDetailLoading = false;
+		}
+	}
+
+	function handleMemberClick(
+		m: { memberId: number; name: string; group: string | null },
+		contextClusterLabel: number | null = null
+	) {
+		selectedMember = m;
+		selectedMemberContext = contextClusterLabel;
+		showPartyDisclaimer = false;
+		showGroupDisclaimer = false;
+		loadMemberDetail(m.memberId);
+	}
+
+	function closeMemberDetail() {
+		selectedMember = null;
+		selectedMemberContext = null;
+		memberDetail = null;
+	}
+
+	// Get ALL answered bills across all clusters (for bill score comparison in drawer)
+	let allAnsweredBills = $derived.by(() => {
+		const bills: NonNullable<BaseClusterResult['answeredBills']> = [];
+		for (const cr of clusterResults) {
+			if (cr.answeredBills) bills.push(...cr.answeredBills);
+		}
+		return bills;
+	});
+
 	let filteredMembers = $derived.by(() => {
 		let members = [...globalScores];
 
@@ -103,6 +238,7 @@
 	}
 
 	function getSimilarityColor(sim: number): string {
+		if (sim < 0) return 'negative';
 		if (sim >= 0.7) return 'high';
 		if (sim >= 0.5) return 'medium';
 		return 'low';
@@ -235,7 +371,11 @@
 			<!-- OVERVIEW TAB -->
 			<div class="overview-tab fade-in">
 				{#if topMembers.length > 0}
-					<TopMatchSpotlight members={topMembers} {clusterResults} />
+					<TopMatchSpotlight
+						members={topMembers}
+						{clusterResults}
+						onMemberClick={(m) => handleMemberClick(m)}
+					/>
 				{/if}
 
 				<h3 class="section-heading">分野別トップマッチ</h3>
@@ -262,44 +402,85 @@
 								<!-- Graph Column (only when viz data is available) -->
 								{#if hasVizData(result)}
 									<div class="viz-section">
-										<h4 class="subsection-title">あなたの立ち位置</h4>
-										<div class="viz-container">
-											<LatentSpaceVisualization
-												members={result.memberVectorsForViz}
-												explainedVariance={result.explainedVariance}
-												xDimension={result.xDimension}
-												yDimension={result.yDimension}
-												userVector={result.userVector}
-												userVectorHistory={result.userVectorHistory}
-												highlightedMembers={result.matches
-													.slice(0, 5)
-													.map((m) => ({ memberId: m.memberId, similarity: m.similarity }))}
-												width={400}
-												height={300}
-												showDimensionSelectors={false}
-												title=""
-												showLegend={true}
-												compact={true}
-												collapsible={false}
-											/>
+										<h4 class="subsection-title">
+											あなたの立ち位置 <span class="viz-click-hint">(議員をクリックで詳細)</span>
+										</h4>
+										<div class="viz-container-flush">
+											{#if clusterDimensions[result.clusterLabel]}
+												<LatentSpaceVisualization
+													members={result.memberVectorsForViz}
+													explainedVariance={result.explainedVariance}
+													bind:xDimension={clusterDimensions[result.clusterLabel].x}
+													bind:yDimension={clusterDimensions[result.clusterLabel].y}
+													userVector={result.userVector}
+													userVectorHistory={result.userVectorHistory}
+													highlightedMembers={result.matches
+														.slice(0, 5)
+														.map((m) => ({ memberId: m.memberId, similarity: m.similarity }))}
+													width={500}
+													height={380}
+													showDimensionSelectors={true}
+													title=""
+													showLegend={true}
+													compact={false}
+													collapsible={false}
+													onMemberClick={(m) => handleMemberClick(m, result.clusterLabel)}
+												/>
+											{/if}
 										</div>
 									</div>
 								{/if}
 
-								<!-- Answers Column -->
+								<!-- Answers Column: Card Collection -->
 								<div class="answers-section">
 									<h4 class="subsection-title">回答した法案</h4>
 									{#if result.answeredBills && result.answeredBills.length > 0}
-										<ul class="answers-list">
-											{#each result.answeredBills as bill (bill.billId)}
-												<li class="answer-item">
-													<span class="answer-badge {getAnswerColor(bill.answer, bill.source)}">
-														{getAnswerText(bill.answer, bill.source)}
-													</span>
-													<span class="bill-title">{bill.title}</span>
-												</li>
+										{@const maxVisible = 4}
+										{@const isExpanded = expandedBillClusters.has(result.clusterLabel)}
+										{@const visibleBills = isExpanded
+											? result.answeredBills
+											: result.answeredBills.slice(0, maxVisible)}
+										<div class="bill-collection-grid">
+											{#each visibleBills as bill (bill.billId)}
+												<div class="bill-collect-card {getAnswerColor(bill.answer, bill.source)}">
+													<div class="bill-card-accent"></div>
+													<div class="bill-card-icon">
+														{#if bill.source === 'delegated'}
+															<Handshake size={20} />
+														{:else if bill.answer === 1}
+															<ThumbsUp size={20} />
+														{:else if bill.answer === -1}
+															<ThumbsDown size={20} />
+														{:else}
+															<CircleQuestionMark size={20} />
+														{/if}
+													</div>
+													<div class="bill-card-title">{bill.title}</div>
+													<div class="bill-card-footer">
+														<span
+															class="bill-card-badge {getAnswerColor(bill.answer, bill.source)}"
+														>
+															{getAnswerText(bill.answer, bill.source)}
+														</span>
+													</div>
+												</div>
 											{/each}
-										</ul>
+										</div>
+										{#if result.answeredBills.length > maxVisible}
+											<button
+												class="see-more-btn"
+												onclick={() => {
+													const next = new Set(expandedBillClusters);
+													if (isExpanded) next.delete(result.clusterLabel);
+													else next.add(result.clusterLabel);
+													expandedBillClusters = next;
+												}}
+											>
+												{isExpanded
+													? '折りたたむ'
+													: `他${result.answeredBills.length - maxVisible}件を表示`}
+											</button>
+										{/if}
 									{:else}
 										<p class="no-answers">回答データがありません</p>
 									{/if}
@@ -369,7 +550,15 @@
 							</thead>
 							<tbody>
 								{#each filteredMembers as member, idx (member.memberId)}
-									<tr>
+									<tr
+										class="member-row-clickable"
+										onclick={() =>
+											handleMemberClick({
+												memberId: member.memberId,
+												name: member.name,
+												group: member.group
+											})}
+									>
 										<td class="rank-cell sticky-col">
 											{#if searchQuery === ''}
 												<span class="rank-num">{idx + 1}</span>
@@ -431,6 +620,242 @@
 					<RefreshCw size={14} class="inline-icon" /> 設定に戻る
 				</button>
 			{/if}
+		</div>
+	{/if}
+
+	<!-- Member Detail Panel -->
+	{#if selectedMember}
+		<!-- svelte-ignore a11y_click_events_have_key_events -->
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div class="member-detail-overlay" onclick={closeMemberDetail}></div>
+		<div class="member-detail-drawer">
+			<div class="drawer-header">
+				<button class="drawer-back" onclick={closeMemberDetail}>
+					<ChevronLeft size={16} />
+				</button>
+				<h3 class="drawer-title">{selectedMember.name}</h3>
+				<button class="drawer-close" onclick={closeMemberDetail}>
+					<X size={18} />
+				</button>
+			</div>
+
+			<div class="drawer-body">
+				<!-- Member Basic Info -->
+				<div class="drawer-member-header">
+					<div class="drawer-avatar">
+						<User size={28} />
+					</div>
+					<div class="drawer-member-info">
+						<span class="drawer-member-group">{selectedMember.group || '無所属'}</span>
+						{#if selectedMemberGlobalScore !== null}
+							<div class="drawer-match-info">
+								<span class="drawer-match-label">総合マッチ度</span>
+								<span class="drawer-match-value {getSimilarityColor(selectedMemberGlobalScore)}">
+									{formatSimilarity(selectedMemberGlobalScore)}
+								</span>
+							</div>
+						{/if}
+					</div>
+				</div>
+
+				<!-- Per-cluster scores -->
+				{#if Object.keys(selectedMemberClusterScores).length > 0}
+					<div class="drawer-section">
+						<h4 class="drawer-section-title">分野別マッチ度</h4>
+						<div class="drawer-cluster-scores">
+							{#each clusterResults as result (result.clusterLabel)}
+								{@const score = selectedMemberClusterScores[result.clusterLabel] || 0}
+								<div class="drawer-cluster-row">
+									<span class="drawer-cluster-name">
+										{result.clusterLabelName || `クラスター${result.clusterLabel}`}
+									</span>
+									<div class="drawer-score-bar-bg">
+										<div
+											class="drawer-score-bar-fill {getSimilarityColor(score)}-bg"
+											style="width: {Math.abs(score) * 100}%"
+										></div>
+									</div>
+									<span class="drawer-cluster-score {getSimilarityColor(score)}">
+										{formatSimilarity(score)}
+									</span>
+								</div>
+							{/each}
+						</div>
+					</div>
+				{/if}
+
+				{#if memberDetailLoading}
+					<div class="drawer-loading">
+						<Hourglass size={18} /> 読み込み中...
+					</div>
+				{:else if memberDetail}
+					<!-- Name variants -->
+					{#if memberDetail.names.length > 1}
+						<div class="drawer-section">
+							<h4 class="drawer-section-title">名前の表記</h4>
+							<div class="drawer-tags">
+								{#each memberDetail.names as name, i (i)}
+									<span class="drawer-tag">{name}</span>
+								{/each}
+							</div>
+							{#if memberDetail.nameReading}
+								<span class="drawer-reading">{memberDetail.nameReading}</span>
+							{/if}
+						</div>
+					{/if}
+
+					<!-- Party History -->
+					{#if memberDetail.partyHistory.length > 0}
+						<div class="drawer-section">
+							<h4 class="drawer-section-title">
+								政党歴
+								<button
+									class="drawer-disclaimer-btn"
+									onclick={() => (showPartyDisclaimer = !showPartyDisclaimer)}
+								>
+									<Info size={13} />
+								</button>
+							</h4>
+							{#if showPartyDisclaimer}
+								<div class="drawer-disclaimer">
+									政党所属期間は国会議員白書の各期データに基づいています。所属開始・終了日は議員の任期に対応しており、任期中の政党変更は反映されない場合があります。
+								</div>
+							{/if}
+							<div class="drawer-timeline">
+								{#each memberDetail.partyHistory as entry, i (i)}
+									<div class="drawer-timeline-entry">
+										<div class="drawer-timeline-dot"></div>
+										<div class="drawer-timeline-content">
+											<span class="drawer-timeline-label">{entry.partyName}</span>
+											<span class="drawer-timeline-meta">
+												{entry.chamber || ''}
+												{#if entry.startDate}
+													{entry.startDate}{entry.endDate ? ` ~ ${entry.endDate}` : ' ~ 現在'}
+												{/if}
+											</span>
+										</div>
+									</div>
+								{/each}
+							</div>
+						</div>
+					{/if}
+
+					<!-- Group History -->
+					{#if memberDetail.groupHistory.length > 0}
+						<div class="drawer-section">
+							<h4 class="drawer-section-title">
+								会派歴
+								<button
+									class="drawer-disclaimer-btn"
+									onclick={() => (showGroupDisclaimer = !showGroupDisclaimer)}
+								>
+									<Info size={13} />
+								</button>
+							</h4>
+							{#if showGroupDisclaimer}
+								<div class="drawer-disclaimer">
+									会派所属は国会議事録API（国立国会図書館）の発言記録から推定しています。所属開始・終了日は各会派での初回・最終発言日に基づくため、発言のない期間のデータは含まれません。
+								</div>
+							{/if}
+							<div class="drawer-timeline">
+								{#each memberDetail.groupHistory as entry, i (i)}
+									<div class="drawer-timeline-entry">
+										<div class="drawer-timeline-dot drawer-group-dot"></div>
+										<div class="drawer-timeline-content">
+											<span class="drawer-timeline-label">{entry.groupName}</span>
+											<span class="drawer-timeline-meta">
+												{entry.chamber || ''}
+												{#if entry.startDate}
+													{entry.startDate}{entry.endDate ? ` ~ ${entry.endDate}` : ' ~ 現在'}
+												{/if}
+											</span>
+										</div>
+									</div>
+								{/each}
+							</div>
+						</div>
+					{/if}
+
+					<!-- Bill Score Records (grouped by category) -->
+					{#if memberDetail.billScoreRecords.length > 0}
+						<div class="drawer-section">
+							<h4 class="drawer-section-title">回答済み法案へのスコア</h4>
+							{#each clusterResults as cluster (cluster.clusterLabel)}
+								{@const clusterBillIds = new Set(cluster.answeredBills?.map((b) => b.billId) ?? [])}
+								{@const clusterRecords = memberDetail.billScoreRecords.filter((r) =>
+									clusterBillIds.has(r.billId)
+								)}
+								{#if clusterRecords.length > 0}
+									<div class="drawer-bill-category">
+										<h5 class="drawer-bill-category-title">
+											{cluster.clusterLabelName || `クラスター${cluster.clusterLabel}`}
+										</h5>
+										<div class="drawer-bill-list">
+											{#each clusterRecords as record (record.billId)}
+												{@const userBill = allAnsweredBills.find((b) => b.billId === record.billId)}
+												{@const userAnswer = userBill?.answer}
+												{@const userSource = userBill?.source}
+												{@const score = record.normalizedScore}
+												{@const memberHasData = score !== null || record.approved !== null}
+												{@const isPositive = score !== null ? score >= 0 : record.approved}
+												{@const agrees =
+													memberHasData && userAnswer !== undefined && userAnswer !== 0
+														? score !== null
+															? (userAnswer === 1 && score > 0) || (userAnswer === -1 && score < 0)
+															: record.approved !== null &&
+																((userAnswer === 1 && record.approved) ||
+																	(userAnswer === -1 && !record.approved))
+														: null}
+												<div
+													class="drawer-bill-item"
+													class:vote-match={agrees === true}
+													class:vote-mismatch={agrees === false}
+												>
+													<div
+														class="drawer-bill-stance"
+														class:approved={isPositive}
+														class:no-data={!memberHasData}
+													>
+														{#if score !== null}
+															<span class="drawer-bill-score"
+																>{score >= 0 ? '+' : ''}{score.toFixed(2)}</span
+															>
+														{:else if record.approved !== null}
+															<span class="drawer-bill-score">{record.approved ? '+1' : '-1'}</span>
+															{record.approved ? '賛成' : '反対'}
+														{:else}
+															<span class="drawer-bill-score">N/A</span>
+														{/if}
+													</div>
+													<div class="drawer-bill-info">
+														<span class="drawer-bill-title">
+															{record.billTitle || userBill?.title || `法案 #${record.billId}`}
+														</span>
+														{#if userAnswer !== undefined && userAnswer !== 0}
+															<span class="drawer-bill-comparison">
+																あなた: {userSource === 'delegated' ? '委任 ' : ''}{userAnswer === 1
+																	? '賛成'
+																	: '反対'}
+																→ {#if !memberHasData}<span class="comparison-nodata"
+																		>データなし</span
+																	>{:else if agrees}✓ 一致{:else}✗ 不一致{/if}
+															</span>
+														{:else if userAnswer === 0}
+															<span class="drawer-bill-comparison comparison-skip">
+																あなた: スキップ
+															</span>
+														{/if}
+													</div>
+												</div>
+											{/each}
+										</div>
+									</div>
+								{/if}
+							{/each}
+						</div>
+					{/if}
+				{/if}
+			</div>
 		</div>
 	{/if}
 
@@ -732,58 +1157,118 @@
 		flex-direction: column;
 	}
 
-	.viz-container {
-		width: 100%;
-		border: 1px solid #f3f4f6;
-		border-radius: 8px;
+	.viz-click-hint {
+		font-size: 0.7rem;
+		font-weight: 400;
+		color: #9ca3af;
+	}
+
+	/* Bill Collection Cards (matching QuestioningPhase design) */
+	.bill-collection-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+		gap: 0.75rem;
+	}
+
+	.bill-collect-card {
+		position: relative;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		padding: 0.75rem 0.75rem 0.75rem 1rem;
+		background: white;
+		border: 1px solid #e5e7eb;
+		border-radius: 10px;
+		font-size: 0.8125rem;
+		transition: all 0.15s ease;
 		overflow: hidden;
 	}
 
-	.answers-list {
-		list-style: none;
-		padding: 0;
-		margin: 0;
-		display: flex;
-		flex-direction: column;
-		gap: 0.75rem;
+	.bill-collect-card:hover {
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 	}
 
-	.answer-item {
-		display: flex;
-		align-items: flex-start;
-		gap: 0.75rem;
-		padding: 0.75rem;
-		background: #f9fafb;
-		border-radius: 8px;
-		font-size: 0.875rem;
+	.bill-card-accent {
+		position: absolute;
+		left: 0;
+		top: 0;
+		bottom: 0;
+		width: 4px;
+		border-radius: 4px 0 0 4px;
 	}
 
-	.answer-badge {
-		flex-shrink: 0;
+	.bill-collect-card.answer-agree .bill-card-accent {
+		background: #22c55e;
+	}
+
+	.bill-collect-card.answer-disagree .bill-card-accent {
+		background: #ef4444;
+	}
+
+	.bill-collect-card.answer-neutral .bill-card-accent {
+		background: #9ca3af;
+	}
+
+	.bill-collect-card.answer-delegated .bill-card-accent {
+		background: #8b5cf6;
+	}
+
+	.bill-card-icon {
+		color: #6b7280;
+	}
+
+	.bill-collect-card.answer-agree .bill-card-icon {
+		color: #22c55e;
+	}
+
+	.bill-collect-card.answer-disagree .bill-card-icon {
+		color: #ef4444;
+	}
+
+	.bill-collect-card.answer-delegated .bill-card-icon {
+		color: #8b5cf6;
+	}
+
+	.bill-card-title {
+		font-weight: 500;
+		color: #1f2937;
+		line-height: 1.4;
+		display: -webkit-box;
+		-webkit-line-clamp: 3;
+		line-clamp: 3;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+		flex: 1;
+	}
+
+	.bill-card-footer {
+		display: flex;
+		align-items: center;
+	}
+
+	.bill-card-badge {
 		font-weight: 700;
-		font-size: 0.75rem;
+		font-size: 0.6875rem;
 		padding: 0.125rem 0.5rem;
 		border-radius: 4px;
 		background: white;
 		border: 1px solid currentColor;
 	}
 
-	.answer-agree {
+	.bill-card-badge.answer-agree {
 		color: #059669;
 	}
-	.answer-disagree {
+
+	.bill-card-badge.answer-disagree {
 		color: #dc2626;
 	}
-	.answer-neutral {
+
+	.bill-card-badge.answer-neutral {
 		color: #6b7280;
 	}
-	.answer-delegated {
-		color: #8b5cf6;
-	}
 
-	.bill-title {
-		color: #1f2937;
-		line-height: 1.4;
+	.bill-card-badge.answer-delegated {
+		color: #8b5cf6;
 	}
 
 	.no-answers {
@@ -795,6 +1280,9 @@
 	@media (max-width: 768px) {
 		.cluster-content-grid {
 			grid-template-columns: 1fr;
+		}
+		.bill-collection-grid {
+			grid-template-columns: 1fr 1fr;
 		}
 	}
 
@@ -1190,6 +1678,407 @@
 		cursor: not-allowed;
 	}
 
+	/* CLICKABLE TABLE ROWS */
+	.member-row-clickable {
+		cursor: pointer;
+		transition: background 0.15s;
+	}
+
+	.member-row-clickable:hover {
+		background: #eef2ff !important;
+	}
+
+	.member-row-clickable:hover .sticky-col {
+		background: #eef2ff !important;
+	}
+
+	/* MEMBER DETAIL DRAWER */
+	.member-detail-overlay {
+		position: fixed;
+		top: 0;
+		left: 0;
+		width: 100%;
+		height: 100%;
+		background: rgba(0, 0, 0, 0.3);
+		backdrop-filter: blur(2px);
+		z-index: 900;
+	}
+
+	.member-detail-drawer {
+		position: fixed;
+		top: 0;
+		right: 0;
+		width: 420px;
+		max-width: 90vw;
+		height: 100%;
+		background: white;
+		z-index: 910;
+		display: flex;
+		flex-direction: column;
+		box-shadow: -4px 0 24px rgba(0, 0, 0, 0.12);
+		animation: slideInRight 0.25s ease both;
+	}
+
+	@keyframes slideInRight {
+		from {
+			transform: translateX(100%);
+		}
+		to {
+			transform: translateX(0);
+		}
+	}
+
+	.drawer-header {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		padding: 1rem 1.25rem;
+		border-bottom: 1px solid #e5e7eb;
+		background: #f9fafb;
+		flex-shrink: 0;
+	}
+
+	.drawer-back,
+	.drawer-close {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 32px;
+		height: 32px;
+		border-radius: 8px;
+		background: #f3f4f6;
+		border: none;
+		cursor: pointer;
+		color: #4b5563;
+		transition: all 0.15s;
+	}
+
+	.drawer-back:hover,
+	.drawer-close:hover {
+		background: #e5e7eb;
+		color: #1f2937;
+	}
+
+	.drawer-title {
+		flex: 1;
+		font-size: 1.125rem;
+		font-weight: 700;
+		color: #1f2937;
+		margin: 0;
+	}
+
+	.drawer-body {
+		flex: 1;
+		overflow-y: auto;
+		padding: 1.25rem;
+	}
+
+	.drawer-member-header {
+		display: flex;
+		gap: 1rem;
+		align-items: flex-start;
+		margin-bottom: 1.5rem;
+		padding-bottom: 1rem;
+		border-bottom: 1px solid #f3f4f6;
+	}
+
+	.drawer-avatar {
+		width: 48px;
+		height: 48px;
+		border-radius: 50%;
+		background: #f3f4f6;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: #9ca3af;
+		flex-shrink: 0;
+	}
+
+	.drawer-member-info {
+		flex: 1;
+	}
+
+	.drawer-member-group {
+		display: block;
+		font-size: 0.875rem;
+		color: #6b7280;
+		margin-bottom: 0.5rem;
+	}
+
+	.drawer-match-info {
+		display: flex;
+		align-items: baseline;
+		gap: 0.5rem;
+	}
+
+	.drawer-match-label {
+		font-size: 0.75rem;
+		color: #9ca3af;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+	}
+
+	.drawer-match-value {
+		font-size: 1.25rem;
+		font-weight: 800;
+	}
+
+	.drawer-section {
+		margin-bottom: 1.25rem;
+	}
+
+	.drawer-section-title {
+		font-size: 0.8125rem;
+		font-weight: 600;
+		color: #6b7280;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		margin-bottom: 0.5rem;
+		display: flex;
+		align-items: center;
+		gap: 0.375rem;
+	}
+
+	/* Cluster scores in drawer */
+	.drawer-cluster-scores {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.drawer-cluster-row {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		font-size: 0.8125rem;
+	}
+
+	.drawer-cluster-name {
+		min-width: 100px;
+		color: #374151;
+		font-weight: 500;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.drawer-score-bar-bg {
+		flex: 1;
+		height: 6px;
+		background: #f3f4f6;
+		border-radius: 3px;
+		overflow: hidden;
+	}
+
+	.drawer-score-bar-fill {
+		height: 100%;
+		border-radius: 3px;
+		transition: width 0.5s ease;
+	}
+
+	.drawer-score-bar-fill.high-bg {
+		background: #10b981;
+	}
+
+	.drawer-score-bar-fill.medium-bg {
+		background: #3b82f6;
+	}
+
+	.drawer-score-bar-fill.low-bg {
+		background: #ef4444;
+	}
+
+	.drawer-cluster-score {
+		min-width: 50px;
+		text-align: right;
+		font-weight: 700;
+		font-feature-settings: 'tnum';
+	}
+
+	.drawer-loading {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 2rem 0;
+		justify-content: center;
+		color: #6b7280;
+		font-size: 0.875rem;
+	}
+
+	.drawer-tags {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.375rem;
+	}
+
+	.drawer-tag {
+		display: inline-block;
+		padding: 0.25rem 0.625rem;
+		background: #f3f4f6;
+		border-radius: 6px;
+		font-size: 0.8125rem;
+		color: #374151;
+	}
+
+	.drawer-reading {
+		display: block;
+		font-size: 0.8125rem;
+		color: #9ca3af;
+		margin-top: 0.375rem;
+	}
+
+	.drawer-disclaimer-btn {
+		background: none;
+		border: none;
+		cursor: pointer;
+		color: #9ca3af;
+		padding: 0;
+		display: inline-flex;
+	}
+
+	.drawer-disclaimer-btn:hover {
+		color: #6b7280;
+	}
+
+	.drawer-disclaimer {
+		font-size: 0.75rem;
+		color: #9ca3af;
+		background: #f9fafb;
+		padding: 0.5rem 0.75rem;
+		border-radius: 6px;
+		margin-bottom: 0.5rem;
+		line-height: 1.5;
+	}
+
+	.drawer-timeline {
+		display: flex;
+		flex-direction: column;
+		gap: 0.375rem;
+		padding-left: 0.5rem;
+	}
+
+	.drawer-timeline-entry {
+		display: flex;
+		align-items: flex-start;
+		gap: 0.75rem;
+	}
+
+	.drawer-timeline-dot {
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: #6366f1;
+		margin-top: 0.375rem;
+		flex-shrink: 0;
+	}
+
+	.drawer-timeline-dot.drawer-group-dot {
+		background: #10b981;
+	}
+
+	.drawer-timeline-content {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.drawer-timeline-label {
+		font-size: 0.8125rem;
+		font-weight: 600;
+		color: #1f2937;
+	}
+
+	.drawer-timeline-meta {
+		font-size: 0.75rem;
+		color: #9ca3af;
+	}
+
+	/* Bill score records in drawer */
+	.drawer-bill-list {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.drawer-bill-item {
+		display: flex;
+		align-items: flex-start;
+		gap: 0.75rem;
+		padding: 0.625rem 0.75rem;
+		border-radius: 8px;
+		background: #f9fafb;
+		border: 1px solid #f3f4f6;
+		font-size: 0.8125rem;
+	}
+
+	.drawer-bill-item.vote-match {
+		background: #f0fdf4;
+		border-color: #bbf7d0;
+	}
+
+	.drawer-bill-item.vote-mismatch {
+		background: #fef2f2;
+		border-color: #fecaca;
+	}
+
+	.drawer-bill-stance {
+		flex-shrink: 0;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		min-width: 40px;
+		padding: 0.25rem;
+		border-radius: 4px;
+		font-size: 0.6875rem;
+		text-align: center;
+		color: #059669;
+	}
+
+	.drawer-bill-stance.approved {
+		color: #059669;
+	}
+
+	.drawer-bill-stance:not(.approved):not(.no-data) {
+		color: #dc2626;
+	}
+
+	.drawer-bill-stance.no-data {
+		color: #9ca3af;
+	}
+
+	.drawer-bill-score {
+		font-weight: 700;
+		font-size: 0.8125rem;
+	}
+
+	.drawer-bill-info {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		gap: 0.125rem;
+	}
+
+	.drawer-bill-title {
+		font-weight: 500;
+		color: #1f2937;
+		line-height: 1.4;
+	}
+
+	.drawer-bill-comparison {
+		font-size: 0.75rem;
+		color: #6b7280;
+	}
+
+	.drawer-bill-comparison .comparison-nodata {
+		color: #9ca3af;
+		font-style: italic;
+	}
+
+	.drawer-bill-comparison.comparison-skip {
+		color: #9ca3af;
+		font-style: italic;
+	}
+
 	/* UTILS */
 	.high {
 		color: #059669;
@@ -1199,6 +2088,58 @@
 	}
 	.low {
 		color: #dc2626;
+	}
+	.negative {
+		color: #991b1b;
+	}
+
+	/* Viz flush container (no card border) */
+	.viz-container-flush {
+		width: 100%;
+		overflow: hidden;
+	}
+
+	/* See more button for bill collections */
+	.see-more-btn {
+		display: block;
+		width: 100%;
+		padding: 0.5rem;
+		margin-top: 0.5rem;
+		background: #f9fafb;
+		border: 1px dashed #d1d5db;
+		border-radius: 8px;
+		color: #6b7280;
+		font-size: 0.8125rem;
+		font-weight: 500;
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+
+	.see-more-btn:hover {
+		background: #f3f4f6;
+		color: #374151;
+		border-color: #9ca3af;
+	}
+
+	/* Bill category headers in drawer */
+	.drawer-bill-category {
+		margin-bottom: 1rem;
+	}
+
+	.drawer-bill-category-title {
+		font-size: 0.75rem;
+		font-weight: 700;
+		color: #4f46e5;
+		margin: 0 0 0.5rem 0;
+		padding: 0.25rem 0.5rem;
+		background: #eef2ff;
+		border-radius: 4px;
+		display: inline-block;
+	}
+
+	/* Negative score bar */
+	.drawer-score-bar-fill.negative-bg {
+		background: #991b1b;
 	}
 
 	.fade-in-up {
