@@ -13,13 +13,14 @@
 		Hourglass,
 		Handshake,
 		TriangleAlert,
-		ChartColumn,
 		Search,
 		User,
 		ChevronLeft,
+		ChevronRight,
 		Info,
 		Maximize2,
-		Minimize2
+		Minimize2,
+		Star
 	} from '@lucide/svelte';
 	import type {
 		Bill,
@@ -57,9 +58,13 @@
 		onSkipQuestion: () => void;
 		onDelegateBill: (billId: number) => void;
 		isLoggedIn: boolean;
-		onFinishCluster: () => void;
 		onSelectBillToEdit: (bill: AnsweredBill) => void;
 		onCancelEditing: () => void;
+		onAdvanceCluster: () => void;
+		pendingImportance: number;
+		confidence: number;
+		isLastClusterInSession: boolean;
+		nextClusterDisplayName: string | null;
 	}
 
 	let {
@@ -80,12 +85,21 @@
 		onSkipQuestion,
 		onDelegateBill,
 		isLoggedIn = false,
-		onFinishCluster,
 		onSelectBillToEdit,
 		onCancelEditing,
+		onAdvanceCluster,
+		pendingImportance = $bindable(),
+		confidence = 0,
+		isLastClusterInSession = false,
+		nextClusterDisplayName = null,
 		...rest
 	}: Props = $props();
 	void rest; // Consume unused props (currentClusterDisplayName, currentClusterBillCount)
+
+	function getImportanceLabel(importance: number): string {
+		const labels = ['', 'あまり重要ではない', '少し重要', '普通に重要', 'かなり重要', '最も重要'];
+		return labels[importance] || '';
+	}
 
 	// Enrichment data cache
 	let enrichmentCache = $state<Record<number, EnrichedBillData>>({});
@@ -565,16 +579,9 @@
 			<p>
 				<CircleCheck size={16} class="inline-icon" color="#22c55e" /> このクラスターの質問が完了しました
 			</p>
-			<p class="empty-question-hint">下の回答済みリストから回答を変更できます</p>
-			<div class="empty-question-actions">
-				<button onclick={onFinishCluster} disabled={isLoading} class="action-btn-primary">
-					{#if isLoading}
-						<Hourglass size={14} class="inline-icon" /> 読み込み中...
-					{:else}
-						次のクラスターに進む →
-					{/if}
-				</button>
-			</div>
+			<p class="empty-question-hint">
+				下の回答済みリストから回答を変更するか、右の矢印で次に進めます
+			</p>
 		</div>
 	{/if}
 
@@ -640,31 +647,54 @@
 	{/if}
 </div>
 
-<!-- Interim Results Toggle Button -->
-{#if topMatches.length > 0 && answeredCount >= 2}
-	<button
-		class="interim-toggle-btn"
-		class:panel-open={showInterimPanel}
-		class:panel-full={panelMode === 'full'}
-		onclick={togglePanel}
-	>
-		<ChartColumn size={16} />
-		<span class="interim-toggle-label">暫定結果</span>
-	</button>
-{/if}
+<!-- Right Side Navigation Arrow -->
+<div
+	class="cluster-nav cluster-nav-right"
+	class:panel-open={showInterimPanel}
+	class:panel-full={panelMode === 'full'}
+>
+	{#if answeredCount >= 2}
+		<button
+			class="cluster-nav-circle"
+			class:confidence-high={confidence >= 70}
+			class:confidence-mid={confidence >= 40 && confidence < 70}
+			class:confidence-low={confidence > 0 && confidence < 40}
+			class:active={showInterimPanel}
+			onclick={togglePanel}
+			disabled={isLoading && !showInterimPanel}
+			title={isLastClusterInSession
+				? '重要度を確認する'
+				: nextClusterDisplayName
+					? `${nextClusterDisplayName}に進む`
+					: '次へ'}
+		>
+			<ChevronRight size={24} />
+		</button>
+		<span class="cluster-nav-label">
+			{#if isLastClusterInSession}
+				重要度確認へ
+			{:else if nextClusterDisplayName}
+				{nextClusterDisplayName}
+			{:else}
+				次へ
+			{/if}
+		</span>
+	{:else}
+		<button class="cluster-nav-circle" disabled title="質問に回答すると次の分野へ進めます">
+			<ChevronRight size={24} />
+		</button>
+		<span class="cluster-nav-label cluster-nav-hint">
+			質問に回答して<br />次の分野へ
+		</span>
+	{/if}
+</div>
 
 <!-- Interim Results Right Panel -->
 {#if showInterimPanel}
 	<div class="interim-overlay" onclick={closePanel} role="presentation"></div>
 	<div class="interim-panel" class:panel-full={panelMode === 'full'}>
 		<div class="interim-panel-header">
-			{#if selectedMember}
-				<button class="interim-back-btn" onclick={closeMemberDetail}>
-					<ChevronLeft size={16} /> 一覧に戻る
-				</button>
-			{:else}
-				<h3 class="interim-panel-title">暫定マッチング結果</h3>
-			{/if}
+			<h3 class="interim-panel-title">暫定マッチング結果</h3>
 			<div class="interim-panel-header-actions">
 				<button
 					class="interim-panel-expand"
@@ -681,6 +711,47 @@
 					<X size={18} />
 				</button>
 			</div>
+		</div>
+
+		<!-- Importance & Advance Bar -->
+		<div class="panel-action-bar">
+			<div class="panel-importance">
+				<span class="panel-importance-label">重要度</span>
+				<div class="panel-star-rating">
+					{#each [1, 2, 3, 4, 5] as star (star)}
+						<button
+							onclick={() => (pendingImportance = star)}
+							class="panel-star-btn"
+							class:selected={star <= pendingImportance}
+						>
+							<Star
+								size={16}
+								fill={star <= pendingImportance ? '#fbbf24' : 'none'}
+								color={star <= pendingImportance ? '#fbbf24' : '#d1d5db'}
+							/>
+						</button>
+					{/each}
+				</div>
+				<span class="panel-importance-text">{getImportanceLabel(pendingImportance)}</span>
+			</div>
+			<button
+				class="panel-advance-btn"
+				onclick={() => {
+					closePanel();
+					onAdvanceCluster();
+				}}
+				disabled={isLoading}
+			>
+				{#if isLoading}
+					<Hourglass size={14} /> 読み込み中...
+				{:else if isLastClusterInSession}
+					重要度を確認する <ChevronRight size={14} />
+				{:else if nextClusterDisplayName}
+					「{nextClusterDisplayName}」分野へ <ChevronRight size={14} />
+				{:else}
+					次の分野へ <ChevronRight size={14} />
+				{/if}
+			</button>
 		</div>
 
 		<div class="interim-panel-body">
@@ -783,6 +854,9 @@
 				{#if selectedMember}
 					<div class="interim-detail-panel">
 						<div class="interim-detail-panel-header">
+							<button class="interim-detail-back" onclick={closeMemberDetail}>
+								<ChevronLeft size={14} />
+							</button>
 							<h4 class="interim-detail-panel-name">{selectedMember.name}</h4>
 							<button class="interim-detail-panel-close" onclick={closeMemberDetail}>
 								<X size={14} />
@@ -1427,55 +1501,201 @@
 		font-size: 1rem;
 	}
 
-	/* ===== Interim Results Toggle Button ===== */
-	.interim-toggle-btn {
+	/* ===== Right Navigation Circle (mirrors left circle in +page.svelte) ===== */
+	.cluster-nav {
 		position: fixed;
-		right: 0;
 		top: 50%;
 		transform: translateY(-50%);
-		z-index: 200;
+		z-index: 90;
 		display: flex;
+		flex-direction: column;
 		align-items: center;
 		gap: 0.375rem;
-		padding: 0.625rem 0.75rem;
-		background: white;
-		border: 1.5px solid #e5e7eb;
-		border-right: none;
-		border-radius: 10px 0 0 10px;
-		box-shadow: -2px 2px 12px rgba(0, 0, 0, 0.08);
-		cursor: pointer;
-		transition: all 0.25s ease;
-		writing-mode: vertical-rl;
-		text-orientation: mixed;
-		font-size: 0.8rem;
-		font-weight: 600;
-		color: #6366f1;
 	}
 
-	.interim-toggle-btn:hover {
-		background: #f5f3ff;
-		border-color: #a5b4fc;
-		box-shadow: -4px 2px 16px rgba(99, 102, 241, 0.15);
+	.cluster-nav-right {
+		right: 2rem;
+		transition: right 0.3s ease;
 	}
 
-	.interim-toggle-btn.panel-open {
-		right: 560px;
-		background: #6366f1;
-		color: white;
-		border-color: #6366f1;
+	.cluster-nav-right.panel-open {
+		right: calc(560px + 2rem);
 	}
 
-	.interim-toggle-btn.panel-full {
-		right: 100vw;
+	.cluster-nav-right.panel-full {
 		display: none;
 	}
 
-	.interim-toggle-btn.panel-open:hover {
-		background: #4f46e5;
+	.cluster-nav-circle {
+		width: 56px;
+		height: 56px;
+		border-radius: 50%;
+		border: 2px solid #d1d5db;
+		background: rgba(255, 255, 255, 0.95);
+		backdrop-filter: blur(8px);
+		color: #6b7280;
+		cursor: pointer;
+		transition: all 0.2s ease;
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+		display: flex;
+		align-items: center;
+		justify-content: center;
 	}
 
-	.interim-toggle-label {
-		letter-spacing: 0.05em;
+	.cluster-nav-circle:hover:not(:disabled) {
+		transform: scale(1.1);
+		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+	}
+
+	.cluster-nav-circle:disabled {
+		opacity: 0.3;
+		cursor: not-allowed;
+	}
+
+	.cluster-nav-circle.confidence-high {
+		border-color: #22c55e;
+		background: rgba(34, 197, 94, 0.1);
+		color: #15803d;
+	}
+
+	.cluster-nav-circle.confidence-high:hover:not(:disabled) {
+		background: rgba(34, 197, 94, 0.2);
+		box-shadow: 0 4px 16px rgba(34, 197, 94, 0.3);
+	}
+
+	.cluster-nav-circle.confidence-mid {
+		border-color: #f59e0b;
+		background: rgba(245, 158, 11, 0.1);
+		color: #b45309;
+	}
+
+	.cluster-nav-circle.confidence-mid:hover:not(:disabled) {
+		background: rgba(245, 158, 11, 0.2);
+		box-shadow: 0 4px 16px rgba(245, 158, 11, 0.3);
+	}
+
+	.cluster-nav-circle.confidence-low {
+		border-color: #ef4444;
+		background: rgba(239, 68, 68, 0.08);
+		color: #dc2626;
+	}
+
+	.cluster-nav-circle.confidence-low:hover:not(:disabled) {
+		background: rgba(239, 68, 68, 0.15);
+		box-shadow: 0 4px 16px rgba(239, 68, 68, 0.3);
+	}
+
+	.cluster-nav-circle.active {
+		background: #6366f1;
+		border-color: #6366f1;
+		color: white;
+	}
+
+	.cluster-nav-circle.active:hover:not(:disabled) {
+		background: #4f46e5;
+		box-shadow: 0 4px 16px rgba(99, 102, 241, 0.4);
+	}
+
+	.cluster-nav-label {
+		font-size: 0.7rem;
+		font-weight: 500;
+		color: #6b7280;
+		max-width: 80px;
+		text-align: center;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.cluster-nav-hint {
+		white-space: normal;
+		overflow: visible;
+		max-width: 90px;
+		font-size: 0.65rem;
+		color: #9ca3af;
+		line-height: 1.3;
+	}
+
+	/* ===== Panel Action Bar ===== */
+	.panel-action-bar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		padding: 0.625rem 1.25rem;
+		background: linear-gradient(135deg, #fefce8, #fef3c7);
+		border-bottom: 1px solid #fde68a;
+		flex-shrink: 0;
+	}
+
+	.panel-importance {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.panel-importance-label {
+		font-size: 0.75rem;
+		font-weight: 600;
+		color: #92400e;
+		white-space: nowrap;
+	}
+
+	.panel-star-rating {
+		display: flex;
+		gap: 0.125rem;
+	}
+
+	.panel-star-btn {
+		background: none;
+		border: none;
+		cursor: pointer;
+		padding: 0.125rem;
+		display: flex;
+		align-items: center;
+		border-radius: 4px;
+		transition: transform 0.15s ease;
+	}
+
+	.panel-star-btn:hover {
+		transform: scale(1.2);
+	}
+
+	.panel-star-btn.selected {
+		filter: drop-shadow(0 0 2px rgba(251, 191, 36, 0.5));
+	}
+
+	.panel-importance-text {
+		font-size: 0.7rem;
+		color: #b45309;
+		white-space: nowrap;
+	}
+
+	.panel-advance-btn {
+		display: flex;
+		align-items: center;
+		gap: 0.375rem;
+		padding: 0.5rem 1rem;
+		border: none;
+		border-radius: 8px;
+		font-size: 0.8rem;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 0.2s ease;
+		background: #059669;
+		color: white;
+		white-space: nowrap;
+		flex-shrink: 0;
+	}
+
+	.panel-advance-btn:hover {
+		background: #047857;
+		box-shadow: 0 2px 8px rgba(5, 150, 105, 0.3);
+	}
+
+	.panel-advance-btn:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
 	}
 
 	/* ===== Interim Results Panel ===== */
@@ -1713,27 +1933,6 @@
 		color: #9ca3af;
 	}
 
-	/* ===== Back button in header ===== */
-	.interim-back-btn {
-		display: flex;
-		align-items: center;
-		gap: 0.25rem;
-		padding: 0.375rem 0.75rem;
-		border-radius: 8px;
-		border: 1px solid #e5e7eb;
-		background: #f9fafb;
-		color: #374151;
-		font-size: 0.85rem;
-		font-weight: 600;
-		cursor: pointer;
-		transition: all 0.15s;
-	}
-
-	.interim-back-btn:hover {
-		background: #f3f4f6;
-		border-color: #d1d5db;
-	}
-
 	/* ===== Searchable Member Table ===== */
 	.interim-search-section {
 		background: white;
@@ -1950,12 +2149,32 @@
 
 	.interim-detail-panel-header {
 		display: flex;
-		justify-content: space-between;
 		align-items: center;
+		gap: 0.375rem;
 		padding: 0.625rem 0.75rem;
 		background: #6366f1;
 		color: white;
 		flex-shrink: 0;
+	}
+
+	.interim-detail-back {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 24px;
+		height: 24px;
+		border: none;
+		border-radius: 6px;
+		background: rgba(255, 255, 255, 0.15);
+		color: white;
+		cursor: pointer;
+		padding: 0;
+		flex-shrink: 0;
+		transition: background 0.15s;
+	}
+
+	.interim-detail-back:hover {
+		background: rgba(255, 255, 255, 0.25);
 	}
 
 	.interim-detail-panel-name {
@@ -1965,6 +2184,7 @@
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
+		flex: 1;
 	}
 
 	.interim-detail-panel-close {
@@ -2606,8 +2826,22 @@
 			width: 100vw;
 		}
 
-		.interim-toggle-btn.panel-open {
+		.cluster-nav-right.panel-open {
 			display: none;
+		}
+
+		.cluster-nav-label {
+			display: none;
+		}
+
+		.cluster-nav-circle {
+			width: 44px;
+			height: 44px;
+		}
+
+		.panel-action-bar {
+			flex-direction: column;
+			gap: 0.5rem;
 		}
 
 		.interim-viz-row {

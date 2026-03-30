@@ -90,6 +90,7 @@ export type MatchingPhase =
 	| 'setup'
 	| 'questioning'
 	| 'rating'
+	| 'importance-review'
 	| 'cluster-results'
 	| 'global-results';
 

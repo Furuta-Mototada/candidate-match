@@ -4,11 +4,18 @@
 	import { SvelteSet } from 'svelte/reactivity';
 	import { goto } from '$app/navigation';
 	import type { PageData } from './$types.js';
-	import { Vote, CircleCheck, TriangleAlert } from '@lucide/svelte';
+	import {
+		Vote,
+		CircleCheck,
+		TriangleAlert,
+		ChevronLeft,
+		Info,
+		Star,
+		PartyPopper
+	} from '@lucide/svelte';
 	import {
 		SetupPhase,
 		QuestioningPhase,
-		ClusterReviewPhase,
 		GlobalResultsPhase,
 		ExplanationModal
 	} from '$lib/components/index.js';
@@ -79,6 +86,8 @@
 	// Rating state
 	let pendingImportance: number = $state(3);
 	let showExplanationModal: boolean = $state(false);
+	let showConfidenceTooltip: boolean = $state(false);
+	let reviewLoading: boolean = $state(false);
 
 	// 2D Visualization state
 	let memberVectorsForViz: MemberVectorForViz[] = $state([]);
@@ -131,6 +140,11 @@
 			? clusterLabelNameMap[currentClusterLabel] || `クラスター${currentClusterLabel}`
 			: null
 	);
+	let nextClusterDisplayName = $derived.by(() => {
+		if (currentClusterIndex >= clusterLabelsToProcess.length - 1) return null;
+		const nextLabel = clusterLabelsToProcess[currentClusterIndex + 1];
+		return clusterLabelNameMap[nextLabel] || `クラスター${nextLabel}`;
+	});
 	// Current cluster progress (answered or delegated / total in cluster)
 	let clusterProgress = $derived.by(() => {
 		if (currentClusterBillCount === 0) return 0;
@@ -208,6 +222,12 @@
 	 */
 	function getClusterDisplayName(clusterLabel: number): string {
 		return clusterLabelNameMap[clusterLabel] || `クラスター${clusterLabel}`;
+	}
+
+	function goToPreviousCluster() {
+		if (currentClusterIndex > 0) {
+			navigateToCluster(currentClusterIndex - 1);
+		}
 	}
 
 	/**
@@ -972,10 +992,10 @@
 				currentClusterIndex = targetIndex;
 				sessionId = result.sessionId;
 				currentQuestion = result.nextQuestion;
-				answeredCount = 0;
+				answeredCount = result.preExistingAnswerCount || 0;
 				currentClusterBillCount = vectorInfo.billCount;
-				currentClusterAnsweredBills = [];
-				topMatches = [];
+				currentClusterAnsweredBills = result.preExistingAnsweredBills || [];
+				topMatches = result.topMatches || [];
 				uncertainty = result.uncertainty || [];
 				userVector = result.userVector || [];
 				memberVectorsForViz = result.memberVectors || [];
@@ -990,46 +1010,6 @@
 			phase = 'questioning';
 			isEditingAnswer = false;
 			previousQuestion = null;
-		} catch (e) {
-			error = e instanceof Error ? e.message : '不明なエラーが発生しました';
-		} finally {
-			isLoading = false;
-		}
-	}
-
-	/**
-	 * Finish current cluster early and get results
-	 */
-	async function finishCurrentCluster() {
-		if (!sessionId) return;
-
-		isLoading = true;
-		error = null;
-
-		try {
-			const response = await fetch('/api/match', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					action: 'results',
-					sessionId: sessionId
-				})
-			});
-
-			const result = await response.json();
-
-			if (!response.ok || !result.success) {
-				throw new Error(result.error || '結果の取得に失敗しました');
-			}
-
-			currentClusterMatches = result.matches || [];
-			userVector = result.userVector || [];
-
-			// In resume mode, use existing importance if available
-			const existingResult = clusterResults.find((cr) => cr.clusterLabel === currentClusterLabel);
-			pendingImportance = existingResult?.importance ?? 3;
-
-			phase = 'rating';
 		} catch (e) {
 			error = e instanceof Error ? e.message : '不明なエラーが発生しました';
 		} finally {
@@ -1078,6 +1058,9 @@
 				clusterResults = [...clusterResults, newResult];
 			}
 
+			// Reset importance to default for next cluster
+			pendingImportance = 3;
+
 			// Move to next cluster or show results
 			if (currentClusterIndex < clusterLabelsToProcess.length - 1) {
 				const nextIndex = currentClusterIndex + 1;
@@ -1085,11 +1068,43 @@
 				// Only update the index after successful start
 				currentClusterIndex = nextIndex;
 			} else {
-				// Fill in any missing cluster results before showing global results
-				await populateMissingClusterResults();
-				calculateGlobalScores();
-				phase = 'global-results';
+				// Go to importance review phase immediately, load missing clusters in background
+				phase = 'importance-review';
+				reviewLoading = true;
+				populateMissingClusterResults().finally(() => {
+					reviewLoading = false;
+				});
 			}
+		} catch (e) {
+			error = e instanceof Error ? e.message : '不明なエラーが発生しました';
+		} finally {
+			isLoading = false;
+		}
+	}
+
+	/**
+	 * Update importance for a cluster during importance review
+	 */
+	function updateClusterImportance(clusterLabel: number, importance: number) {
+		clusterResults = clusterResults.map((cr) =>
+			cr.clusterLabel === clusterLabel ? { ...cr, importance } : cr
+		);
+	}
+
+	/**
+	 * Confirm importance review and go to global results
+	 */
+	async function confirmImportanceReview() {
+		isLoading = true;
+		error = null;
+		try {
+			// Ensure any background loading is complete
+			if (reviewLoading) {
+				await populateMissingClusterResults();
+				reviewLoading = false;
+			}
+			calculateGlobalScores();
+			phase = 'global-results';
 		} catch (e) {
 			error = e instanceof Error ? e.message : '不明なエラーが発生しました';
 		} finally {
@@ -1308,6 +1323,9 @@
 						{@const hasAnswers =
 							clusterResults.some((cr) => cr.clusterLabel === label && cr.answeredCount > 0) ||
 							(label === currentClusterLabel && answeredCount > 0)}
+						{@const savedImportance = clusterResults.find(
+							(cr) => cr.clusterLabel === label
+						)?.importance}
 						<button
 							class="cluster-chip"
 							class:completed={hasAnswers && idx !== currentClusterIndex}
@@ -1324,6 +1342,11 @@
 								<span class="chip-icon">✓</span>
 							{/if}
 							{displayName}
+							{#if savedImportance}
+								<span class="chip-importance" title="重要度: {savedImportance}"
+									>{'★'.repeat(savedImportance)}</span
+								>
+							{/if}
 						</button>
 					{/each}
 				</div>
@@ -1357,15 +1380,40 @@
 								<span class="stat-badge stat-pending">未回答 {unansweredCount}</span>
 							{/if}
 						</div>
-						<button
-							onclick={finishCurrentCluster}
-							disabled={isLoading || answeredCount < 2}
-							class="btn-next-cluster"
-						>
-							{answeredCount >= 2
-								? '次のクラスターに進む →'
-								: `あと${2 - answeredCount}問回答してください`}
-						</button>
+						{#if confidence > 0}
+							<span
+								class="confidence-badge"
+								class:confidence-high={confidence >= 70}
+								class:confidence-mid={confidence >= 40 && confidence < 70}
+								class:confidence-low={confidence < 40}
+							>
+								確信度 {confidence.toFixed(0)}%
+								<button
+									class="confidence-info-btn"
+									onclick={(e) => {
+										e.stopPropagation();
+										showConfidenceTooltip = !showConfidenceTooltip;
+									}}
+									title="確信度について"
+								>
+									<Info size={12} />
+								</button>
+								{#if showConfidenceTooltip}
+									<div class="confidence-tooltip">
+										<p class="confidence-tooltip-title">確信度とは？</p>
+										<p>回答数が増えるほど、マッチング結果の信頼性が高まります。</p>
+										<div class="confidence-thresholds">
+											<span class="threshold-item threshold-high">● 70%以上: 高信頼</span>
+											<span class="threshold-item threshold-mid">● 40〜70%: 中程度</span>
+											<span class="threshold-item threshold-low">● 40%未満: 低信頼</span>
+										</div>
+										<p class="confidence-tooltip-hint">
+											より多くの法案に回答すると確信度が上がります。
+										</p>
+									</div>
+								{/if}
+							</span>
+						{/if}
 					</div>
 				{/if}
 			</div>
@@ -1401,29 +1449,79 @@
 				onSkipQuestion={skipQuestion}
 				onDelegateBill={handleDelegateBill}
 				isLoggedIn={!!data.user}
-				onFinishCluster={finishCurrentCluster}
 				onSelectBillToEdit={selectBillToEdit}
 				onCancelEditing={cancelEditing}
-			/>
-		{:else if phase === 'rating'}
-			<!-- Cluster Review Phase (Rating + Results) -->
-			<ClusterReviewPhase
-				{currentClusterDisplayName}
-				{currentClusterMatches}
+				onAdvanceCluster={saveImportanceAndContinue}
 				bind:pendingImportance
-				{currentClusterIndex}
-				totalClusters={clusterLabelsToProcess.length}
+				{confidence}
 				{isLastClusterInSession}
-				{isLoading}
-				{memberVectorsForViz}
-				{explainedVariance}
-				bind:xDimension
-				bind:yDimension
-				{userVector}
-				{userVectorHistory}
-				onSetImportance={(importance) => (pendingImportance = importance)}
-				onSaveAndContinue={saveImportanceAndContinue}
+				{nextClusterDisplayName}
 			/>
+		{:else if phase === 'importance-review'}
+			<!-- Importance Review Phase -->
+			<div class="importance-review">
+				<div class="importance-review-header">
+					<h2 class="importance-review-title">分野の重要度を確認</h2>
+					<p class="importance-review-desc">
+						各分野の重要度を最終確認してください。重要度が高い分野ほど、総合マッチング結果に大きく反映されます。
+					</p>
+				</div>
+
+				<div class="importance-review-list">
+					{#each clusterResults as result (result.clusterLabel)}
+						{@const displayName = result.clusterLabelName || `クラスター${result.clusterLabel}`}
+						<div class="importance-review-item">
+							<div class="importance-review-item-info">
+								<span class="importance-review-item-name">{displayName}</span>
+								<span class="importance-review-item-count">回答 {result.answeredCount}件</span>
+							</div>
+							<div class="importance-review-stars">
+								{#each [1, 2, 3, 4, 5] as star (star)}
+									<button
+										class="importance-review-star"
+										class:selected={star <= result.importance}
+										onclick={() => updateClusterImportance(result.clusterLabel, star)}
+									>
+										<Star
+											size={20}
+											fill={star <= result.importance ? '#fbbf24' : 'none'}
+											color={star <= result.importance ? '#fbbf24' : '#d1d5db'}
+										/>
+									</button>
+								{/each}
+							</div>
+						</div>
+					{/each}
+					{#if reviewLoading}
+						<div class="importance-review-loading">
+							<span class="review-loading-spinner"></span>
+							<span class="review-loading-text">未読み込みの分野を取得中...</span>
+						</div>
+					{/if}
+				</div>
+
+				<div class="importance-review-actions">
+					<button
+						class="importance-review-back"
+						onclick={() => {
+							phase = 'questioning';
+						}}
+					>
+						<ChevronLeft size={16} /> 質問に戻る
+					</button>
+					<button
+						class="importance-review-confirm"
+						onclick={confirmImportanceReview}
+						disabled={isLoading || reviewLoading}
+					>
+						{#if isLoading || reviewLoading}
+							読み込み中...
+						{:else}
+							総合結果を見る <PartyPopper size={16} />
+						{/if}
+					</button>
+				</div>
+			</div>
 		{:else if phase === 'global-results'}
 			<!-- Global Results Phase -->
 			<GlobalResultsPhase
@@ -1441,6 +1539,26 @@
 			/>
 		{/if}
 	</main>
+
+	<!-- Cluster Navigation: Left Arrow -->
+	{#if phase === 'questioning' && currentClusterIndex > 0}
+		<div class="cluster-nav cluster-nav-left">
+			<button
+				class="cluster-nav-circle"
+				class:confidence-high={confidence >= 70}
+				class:confidence-mid={confidence >= 40 && confidence < 70}
+				class:confidence-low={confidence > 0 && confidence < 40}
+				onclick={goToPreviousCluster}
+				disabled={isLoading}
+				title="{getClusterDisplayName(clusterLabelsToProcess[currentClusterIndex - 1])}に戻る"
+			>
+				<ChevronLeft size={24} />
+			</button>
+			<span class="cluster-nav-label"
+				>{getClusterDisplayName(clusterLabelsToProcess[currentClusterIndex - 1])}</span
+			>
+		</div>
+	{/if}
 
 	<!-- Floating Help Button -->
 	<button
@@ -1633,6 +1751,8 @@
 		max-width: 800px;
 		margin-left: auto;
 		margin-right: auto;
+		position: relative;
+		z-index: 51;
 	}
 
 	.progress-bar-row {
@@ -1694,32 +1814,6 @@
 		flex-wrap: wrap;
 	}
 
-	.btn-next-cluster {
-		padding: 0.375rem 0.875rem;
-		border-radius: 100px;
-		font-weight: 600;
-		font-size: 0.75rem;
-		cursor: pointer;
-		transition: all 0.2s ease;
-		border: 1.5px solid #6366f1;
-		background: white;
-		color: #6366f1;
-		white-space: nowrap;
-		flex-shrink: 0;
-	}
-
-	.btn-next-cluster:hover:not(:disabled) {
-		background: #6366f1;
-		color: white;
-	}
-
-	.btn-next-cluster:disabled {
-		opacity: 0.4;
-		cursor: not-allowed;
-		border-color: #9ca3af;
-		color: #9ca3af;
-	}
-
 	.stat-badge {
 		font-size: 0.75rem;
 		font-weight: 600;
@@ -1751,6 +1845,109 @@
 	.stat-pending {
 		background: rgba(107, 114, 128, 0.1);
 		color: #6b7280;
+	}
+
+	.confidence-badge {
+		font-size: 0.75rem;
+		font-weight: 600;
+		padding: 0.25rem 0.625rem;
+		border-radius: 100px;
+		font-variant-numeric: tabular-nums;
+		position: relative;
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25rem;
+	}
+
+	.confidence-badge.confidence-high {
+		background: rgba(34, 197, 94, 0.12);
+		color: #15803d;
+	}
+
+	.confidence-badge.confidence-mid {
+		background: rgba(245, 158, 11, 0.12);
+		color: #b45309;
+	}
+
+	.confidence-badge.confidence-low {
+		background: rgba(239, 68, 68, 0.1);
+		color: #dc2626;
+	}
+
+	.confidence-info-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 16px;
+		height: 16px;
+		border: none;
+		border-radius: 50%;
+		background: rgba(0, 0, 0, 0.08);
+		color: inherit;
+		cursor: pointer;
+		padding: 0;
+		opacity: 0.7;
+		transition: opacity 0.15s;
+	}
+
+	.confidence-info-btn:hover {
+		opacity: 1;
+		background: rgba(0, 0, 0, 0.15);
+	}
+
+	.confidence-tooltip {
+		position: absolute;
+		top: calc(100% + 8px);
+		right: 0;
+		width: 240px;
+		padding: 0.75rem;
+		background: white;
+		border: 1px solid #e5e7eb;
+		border-radius: 10px;
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+		z-index: 300;
+		font-size: 0.75rem;
+		color: #374151;
+		line-height: 1.5;
+	}
+
+	.confidence-tooltip-title {
+		font-weight: 700;
+		margin-bottom: 0.25rem;
+		color: #1a1a2e;
+	}
+
+	.confidence-thresholds {
+		display: flex;
+		flex-direction: column;
+		gap: 0.125rem;
+		margin: 0.5rem 0;
+		padding: 0.375rem 0.5rem;
+		background: #f9fafb;
+		border-radius: 6px;
+	}
+
+	.threshold-item {
+		font-size: 0.7rem;
+		font-weight: 600;
+	}
+
+	.threshold-high {
+		color: #15803d;
+	}
+
+	.threshold-mid {
+		color: #b45309;
+	}
+
+	.threshold-low {
+		color: #dc2626;
+	}
+
+	.confidence-tooltip-hint {
+		font-size: 0.7rem;
+		color: #6b7280;
+		margin-top: 0.25rem;
 	}
 
 	/* ===== CLUSTER CHIPS ===== */
@@ -1824,6 +2021,21 @@
 		font-size: 0.75rem;
 	}
 
+	.chip-importance {
+		font-size: 0.6rem;
+		color: #d97706;
+		letter-spacing: -0.5px;
+		margin-left: 0.125rem;
+	}
+
+	.cluster-chip.completed .chip-importance {
+		color: #a16207;
+	}
+
+	.cluster-chip.active .chip-importance {
+		color: #fbbf24;
+	}
+
 	/* ===== RESPONSIVE ===== */
 	@media (max-width: 768px) {
 		.hero {
@@ -1842,6 +2054,183 @@
 		.stats-badges {
 			justify-content: center;
 			flex: 1;
+		}
+	}
+
+	/* ===== IMPORTANCE REVIEW PHASE ===== */
+	.importance-review {
+		max-width: 640px;
+		margin: 0 auto;
+		animation: fadeInUp 0.4s ease both;
+	}
+
+	@keyframes fadeInUp {
+		from {
+			opacity: 0;
+			transform: translateY(20px);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
+	}
+
+	.importance-review-header {
+		text-align: center;
+		margin-bottom: 2rem;
+	}
+
+	.importance-review-title {
+		font-size: 1.5rem;
+		font-weight: 700;
+		color: #1a1a2e;
+		margin-bottom: 0.5rem;
+	}
+
+	.importance-review-desc {
+		font-size: 0.9rem;
+		color: #6b7280;
+		line-height: 1.6;
+	}
+
+	.importance-review-list {
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+		margin-bottom: 2rem;
+	}
+
+	.importance-review-item {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		background: white;
+		padding: 1rem 1.25rem;
+		border-radius: 12px;
+		border: 1px solid #e5e7eb;
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+		transition: border-color 0.2s;
+	}
+
+	.importance-review-item:hover {
+		border-color: #d1d5db;
+	}
+
+	.importance-review-item-info {
+		display: flex;
+		flex-direction: column;
+		gap: 0.125rem;
+	}
+
+	.importance-review-item-name {
+		font-size: 0.95rem;
+		font-weight: 600;
+		color: #1a1a2e;
+	}
+
+	.importance-review-item-count {
+		font-size: 0.75rem;
+		color: #9ca3af;
+	}
+
+	.importance-review-stars {
+		display: flex;
+		gap: 0.125rem;
+	}
+
+	.importance-review-star {
+		background: none;
+		border: none;
+		cursor: pointer;
+		padding: 0.25rem;
+		border-radius: 4px;
+		transition: transform 0.15s;
+		display: flex;
+		align-items: center;
+	}
+
+	.importance-review-star:hover {
+		transform: scale(1.2);
+	}
+
+	.importance-review-actions {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 1rem;
+	}
+
+	.importance-review-back {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+		padding: 0.625rem 1.25rem;
+		background: #f3f4f6;
+		color: #374151;
+		border: 1px solid #e5e7eb;
+		border-radius: 10px;
+		font-size: 0.9rem;
+		font-weight: 500;
+		cursor: pointer;
+		transition: all 0.2s;
+	}
+
+	.importance-review-back:hover {
+		background: #e5e7eb;
+		border-color: #d1d5db;
+	}
+
+	.importance-review-confirm {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.75rem 1.5rem;
+		background: linear-gradient(135deg, #6366f1, #8b5cf6);
+		color: white;
+		border: none;
+		border-radius: 10px;
+		font-size: 0.95rem;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 0.2s;
+		box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+	}
+
+	.importance-review-confirm:hover:not(:disabled) {
+		transform: translateY(-1px);
+		box-shadow: 0 4px 16px rgba(99, 102, 241, 0.4);
+	}
+
+	.importance-review-confirm:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
+	.importance-review-loading {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		padding: 0.875rem 1.25rem;
+		background: #f9fafb;
+		border: 1px dashed #d1d5db;
+		border-radius: 12px;
+		color: #6b7280;
+		font-size: 0.85rem;
+	}
+
+	.review-loading-spinner {
+		width: 18px;
+		height: 18px;
+		border: 2px solid #e5e7eb;
+		border-top-color: #6366f1;
+		border-radius: 50%;
+		animation: reviewSpin 0.7s linear infinite;
+		flex-shrink: 0;
+	}
+
+	@keyframes reviewSpin {
+		to {
+			transform: rotate(360deg);
 		}
 	}
 
@@ -1884,6 +2273,104 @@
 			animation-duration: 0.01ms !important;
 			animation-iteration-count: 1 !important;
 			transition-duration: 0.01ms !important;
+		}
+	}
+
+	/* ===== CLUSTER NAVIGATION ===== */
+	.cluster-nav {
+		position: fixed;
+		top: 50%;
+		transform: translateY(-50%);
+		z-index: 90;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.375rem;
+	}
+
+	.cluster-nav-left {
+		left: 2rem;
+	}
+
+	.cluster-nav-circle {
+		width: 56px;
+		height: 56px;
+		border-radius: 50%;
+		border: 2px solid #d1d5db;
+		background: rgba(255, 255, 255, 0.95);
+		backdrop-filter: blur(8px);
+		color: #6b7280;
+		cursor: pointer;
+		transition: all 0.2s ease;
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.cluster-nav-circle:hover:not(:disabled) {
+		transform: scale(1.1);
+		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+	}
+
+	.cluster-nav-circle:disabled {
+		opacity: 0.3;
+		cursor: not-allowed;
+	}
+
+	.cluster-nav-circle.confidence-high {
+		border-color: #22c55e;
+		background: rgba(34, 197, 94, 0.1);
+		color: #15803d;
+	}
+
+	.cluster-nav-circle.confidence-high:hover:not(:disabled) {
+		background: rgba(34, 197, 94, 0.2);
+		box-shadow: 0 4px 16px rgba(34, 197, 94, 0.3);
+	}
+
+	.cluster-nav-circle.confidence-mid {
+		border-color: #f59e0b;
+		background: rgba(245, 158, 11, 0.1);
+		color: #b45309;
+	}
+
+	.cluster-nav-circle.confidence-mid:hover:not(:disabled) {
+		background: rgba(245, 158, 11, 0.2);
+		box-shadow: 0 4px 16px rgba(245, 158, 11, 0.3);
+	}
+
+	.cluster-nav-circle.confidence-low {
+		border-color: #ef4444;
+		background: rgba(239, 68, 68, 0.08);
+		color: #dc2626;
+	}
+
+	.cluster-nav-circle.confidence-low:hover:not(:disabled) {
+		background: rgba(239, 68, 68, 0.15);
+		box-shadow: 0 4px 16px rgba(239, 68, 68, 0.3);
+	}
+
+	.cluster-nav-label {
+		font-size: 0.7rem;
+		font-weight: 500;
+		color: #6b7280;
+		max-width: 80px;
+		text-align: center;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	/* ===== RESPONSIVE: Hide arrow labels on small screens ===== */
+	@media (max-width: 768px) {
+		.cluster-nav-label {
+			display: none;
+		}
+
+		.cluster-nav-circle {
+			width: 44px;
+			height: 44px;
 		}
 	}
 </style>
