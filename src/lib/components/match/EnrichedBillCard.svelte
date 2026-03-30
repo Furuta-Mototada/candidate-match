@@ -13,6 +13,7 @@
 		onLoadEnrichment: () => void;
 		detailLevel?: number;
 		onDetailLevelChange?: (level: number) => void;
+		billRef?: string | null;
 	}
 
 	let {
@@ -25,6 +26,7 @@
 		onLoadEnrichment,
 		detailLevel: externalDetailLevel,
 		onDetailLevelChange,
+		billRef = null,
 		...restProps
 	}: Props = $props();
 	void restProps;
@@ -104,6 +106,9 @@
 
 	<!-- Title -->
 	<h2 class="bill-title">{title}</h2>
+	{#if billRef}
+		<span class="bill-ref">{billRef}</span>
+	{/if}
 
 	<!-- Level 1: Basic Info -->
 	<div class="level-1">
@@ -198,8 +203,19 @@
 		font-size: 1.25rem;
 		font-weight: 700;
 		color: #1f2937;
-		margin: 0 0 1rem 0;
+		margin: 0 0 0.25rem 0;
 		line-height: 1.4;
+	}
+
+	.bill-ref {
+		display: inline-block;
+		font-size: 0.75rem;
+		color: #6b7280;
+		background: #f3f4f6;
+		padding: 0.125rem 0.5rem;
+		border-radius: 4px;
+		margin-bottom: 0.75rem;
+		font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
 	}
 
 	.summary-short {

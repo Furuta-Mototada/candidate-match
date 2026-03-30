@@ -11,6 +11,7 @@
 		GlobalMemberScore,
 		BaseClusterResult
 	} from '$lib/types/index.js';
+	import { formatBillRef } from '$lib/types/match.js';
 	import DelegationModal from '$lib/components/match/DelegationModal.svelte';
 	import BillDetailModal from '$lib/components/match/BillDetailModal.svelte';
 	import DelegationFlowChart from '$lib/components/match/DelegationFlowChart.svelte';
@@ -758,7 +759,12 @@
 	}
 
 	function openDelegateFromBill(b: BillListItem) {
-		delegatingBill = { billId: b.id, title: b.title, hasExistingVote: b.answerScore !== null };
+		delegatingBill = {
+			billId: b.id,
+			title: b.title,
+			hasExistingVote: b.answerScore !== null,
+			billRef: formatBillRef(b.type, b.submissionSession, b.number)
+		};
 	}
 
 	async function handleModalVote(billId: number, score: number) {
@@ -796,8 +802,12 @@
 	}
 
 	// Delegate-from-bill-list modal
-	let delegatingBill: { billId: number; title: string; hasExistingVote: boolean } | null =
-		$state(null);
+	let delegatingBill: {
+		billId: number;
+		title: string;
+		hasExistingVote: boolean;
+		billRef: string | null;
+	} | null = $state(null);
 
 	async function onDelegatedFromBill() {
 		if (delegatingBill) {
@@ -1579,6 +1589,15 @@
 					</p>
 					<p class="vote-modal-bill">
 						法案: <strong>{votingDelegation.billTitle || `#${votingDelegation.billId}`}</strong>
+						{#if formatBillRef(votingDelegation.billType, votingDelegation.billSubmissionSession, votingDelegation.billNumber)}
+							<span class="bill-ref-inline"
+								>{formatBillRef(
+									votingDelegation.billType,
+									votingDelegation.billSubmissionSession,
+									votingDelegation.billNumber
+								)}</span
+							>
+						{/if}
 					</p>
 					<div class="vote-modal-buttons">
 						<button
@@ -1638,6 +1657,15 @@
 						法案: <strong
 							>{redelegatingDelegation.billTitle || `#${redelegatingDelegation.billId}`}</strong
 						>
+						{#if formatBillRef(redelegatingDelegation.billType, redelegatingDelegation.billSubmissionSession, redelegatingDelegation.billNumber)}
+							<span class="bill-ref-inline"
+								>{formatBillRef(
+									redelegatingDelegation.billType,
+									redelegatingDelegation.billSubmissionSession,
+									redelegatingDelegation.billNumber
+								)}</span
+							>
+						{/if}
 					</p>
 					{#if redelegateLoading}
 						<p>読み込み中...</p>
@@ -1732,6 +1760,7 @@
 			show={true}
 			billId={delegatingBill.billId}
 			billTitle={delegatingBill.title}
+			billRef={delegatingBill.billRef}
 			hasExistingVote={delegatingBill.hasExistingVote}
 			onClose={() => (delegatingBill = null)}
 			onDelegated={onDelegatedFromBill}
@@ -2944,6 +2973,18 @@
 		font-size: 0.9rem;
 		color: #6b7280;
 		margin-bottom: 1.5rem;
+	}
+
+	.bill-ref-inline {
+		display: inline-block;
+		font-family: 'SF Mono', 'Fira Code', monospace;
+		font-size: 0.75rem;
+		color: #6b7280;
+		background: #f3f4f6;
+		padding: 0.1rem 0.4rem;
+		border-radius: 4px;
+		margin-left: 0.4rem;
+		vertical-align: middle;
 	}
 
 	.vote-modal-buttons {

@@ -450,7 +450,10 @@ async function handleStart(
 					passed: nextQuestion.bill.passed,
 					result: nextQuestion.bill.result,
 					reason: nextQuestion.reason,
-					dimensionTarget: nextQuestion.dimensionTarget
+					dimensionTarget: nextQuestion.dimensionTarget,
+					billType: nextQuestion.bill.billType,
+					submissionSession: nextQuestion.bill.submissionSession,
+					billNumber: nextQuestion.bill.billNumber
 				}
 			: null,
 		uncertainty: state.uncertainty,
@@ -472,6 +475,9 @@ async function handleStart(
 				title: info?.title || `法案 #${ab.billId}`,
 				answer: ab.score,
 				source,
+				billType: info?.billType,
+				submissionSession: info?.submissionSession,
+				billNumber: info?.billNumber,
 				...(source === 'delegated' && {
 					delegationStatus: delegationStatusMap.get(ab.billId) || 'pending',
 					delegateId: delegateIdMap.get(ab.billId)
@@ -685,7 +691,10 @@ async function handleResume(
 					passed: nextQuestion.bill.passed,
 					result: nextQuestion.bill.result,
 					reason: nextQuestion.reason,
-					dimensionTarget: nextQuestion.dimensionTarget
+					dimensionTarget: nextQuestion.dimensionTarget,
+					billType: nextQuestion.bill.billType,
+					submissionSession: nextQuestion.bill.submissionSession,
+					billNumber: nextQuestion.bill.billNumber
 				}
 			: null,
 		uncertainty: state.uncertainty,
@@ -700,6 +709,9 @@ async function handleResume(
 				title: info?.title || `法案 #${ab.billId}`,
 				answer: ab.score,
 				source,
+				billType: info?.billType,
+				submissionSession: info?.submissionSession,
+				billNumber: info?.billNumber,
 				...(source === 'delegated' && {
 					delegationStatus: resumeDelegationStatusMap.get(ab.billId) || 'pending',
 					delegateId: resumeDelegateIdMap.get(ab.billId)
@@ -833,7 +845,10 @@ async function handleAnswer(
 					passed: nextQuestion.bill.passed,
 					result: nextQuestion.bill.result,
 					reason: nextQuestion.reason,
-					dimensionTarget: nextQuestion.dimensionTarget
+					dimensionTarget: nextQuestion.dimensionTarget,
+					billType: nextQuestion.bill.billType,
+					submissionSession: nextQuestion.bill.submissionSession,
+					billNumber: nextQuestion.bill.billNumber
 				}
 			: null,
 		uncertainty: newState.uncertainty,
@@ -922,7 +937,10 @@ async function handleSkip(sessionId: string, billId: number, userId: string | nu
 					passed: nextQuestion.bill.passed,
 					result: nextQuestion.bill.result,
 					reason: nextQuestion.reason,
-					dimensionTarget: nextQuestion.dimensionTarget
+					dimensionTarget: nextQuestion.dimensionTarget,
+					billType: nextQuestion.bill.billType,
+					submissionSession: nextQuestion.bill.submissionSession,
+					billNumber: nextQuestion.bill.billNumber
 				}
 			: null,
 		uncertainty: newState.uncertainty,

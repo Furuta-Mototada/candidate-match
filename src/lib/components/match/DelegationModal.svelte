@@ -12,6 +12,7 @@
 		show: boolean;
 		billId: number;
 		billTitle: string;
+		billRef?: string | null;
 		hasExistingVote?: boolean;
 		currentDelegateId?: string | null;
 		currentDelegationStatus?: 'pending' | 'voted' | null;
@@ -23,6 +24,7 @@
 		show,
 		billId,
 		billTitle,
+		billRef = null,
 		hasExistingVote = false,
 		currentDelegateId = null,
 		currentDelegationStatus = null,
@@ -170,6 +172,9 @@
 			<div class="modal-bill-info">
 				<span class="bill-label">対象法案:</span>
 				<span class="bill-name">{billTitle}</span>
+				{#if billRef}
+					<span class="bill-ref">{billRef}</span>
+				{/if}
 			</div>
 
 			{#if error}
@@ -349,6 +354,13 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+
+	.bill-ref {
+		display: block;
+		font-size: 0.7rem;
+		color: #9ca3af;
+		font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
 	}
 
 	.modal-body {

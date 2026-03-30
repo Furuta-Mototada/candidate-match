@@ -54,6 +54,9 @@ export interface BillInfo {
 	result: string | null;
 	loading: number[]; // Bill's loading on each latent dimension
 	memberVariance: number; // How much members disagree on this bill
+	billType?: string;
+	submissionSession?: number;
+	billNumber?: number;
 }
 
 export interface MemberInfo {
@@ -457,7 +460,10 @@ export async function loadBillInfo(billIds: number[]): Promise<Map<number, Parti
 		.select({
 			id: bill.id,
 			result: bill.result,
-			title: bill.title
+			title: bill.title,
+			type: bill.type,
+			submissionSession: bill.submissionSession,
+			number: bill.number
 		})
 		.from(bill)
 		.where(inArray(bill.id, billIds));
@@ -469,7 +475,10 @@ export async function loadBillInfo(billIds: number[]): Promise<Map<number, Parti
 			title: b.title || `法案 ${b.id}`,
 			description: null,
 			passed: b.result === '可決',
-			result: b.result
+			result: b.result,
+			billType: b.type,
+			submissionSession: b.submissionSession,
+			billNumber: b.number
 		});
 	}
 
@@ -544,7 +553,10 @@ export function buildBillInfoMap(
 			passed: dbInfo.passed || false,
 			result: dbInfo.result || null,
 			loading,
-			memberVariance: variance
+			memberVariance: variance,
+			billType: dbInfo.billType,
+			submissionSession: dbInfo.submissionSession,
+			billNumber: dbInfo.billNumber
 		});
 	}
 

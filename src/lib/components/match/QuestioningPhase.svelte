@@ -28,6 +28,7 @@
 		MemberVectorForViz,
 		EnrichedBillData
 	} from '$lib/types/index.js';
+	import { formatBillRef } from '$lib/types/index.js';
 
 	interface AnsweredBill {
 		billId: number;
@@ -36,6 +37,9 @@
 		source?: 'direct' | 'delegated';
 		delegationStatus?: 'pending' | 'voted';
 		delegateId?: string;
+		billType?: string;
+		submissionSession?: number;
+		billNumber?: number;
 	}
 
 	interface Props {
@@ -266,6 +270,9 @@
 		billScoreRecords: Array<{
 			billId: number;
 			billTitle: string | null;
+			billType: string | null;
+			submissionSession: number | null;
+			billNumber: number | null;
 			normalizedScore: number | null;
 			hasVoteRecord: boolean;
 			approved: boolean | null;
@@ -459,6 +466,11 @@
 						onLoadEnrichment={() => loadEnrichment(currentQuestion.billId)}
 						detailLevel={billDetailLevel}
 						onDetailLevelChange={handleDetailLevelChange}
+						billRef={formatBillRef(
+							currentQuestion.billType,
+							currentQuestion.submissionSession,
+							currentQuestion.billNumber
+						)}
 					/>
 
 					<!-- Vote Buttons -->
@@ -597,21 +609,26 @@
 					{@const isBeingEdited = isEditingAnswer && currentQuestion?.billId === bill.billId}
 					<div class="collect-card {getAnswerClass(bill)}" class:card-editing={isBeingEdited}>
 						<div class="card-accent"></div>
-						<div class="card-icon">
-							{#if bill.source === 'delegated'}
-								<Handshake size={20} />
-							{:else if bill.answer === 1}
-								<ThumbsUp size={20} />
-							{:else if bill.answer === -1}
-								<ThumbsDown size={20} />
-							{:else}
-								<CircleQuestionMark size={20} />
-							{/if}
-						</div>
-						<div class="card-title">{bill.title}</div>
-						<div class="card-footer">
+						<div class="card-top-row">
+							<span class="card-icon-sm">
+								{#if bill.source === 'delegated'}
+									<Handshake size={14} />
+								{:else if bill.answer === 1}
+									<ThumbsUp size={14} />
+								{:else if bill.answer === -1}
+									<ThumbsDown size={14} />
+								{:else}
+									<CircleQuestionMark size={14} />
+								{/if}
+							</span>
 							<span class="card-badge {getAnswerClass(bill)}">{getAnswerLabel(bill)}</span>
 						</div>
+						{#if formatBillRef(bill.billType, bill.submissionSession, bill.billNumber)}
+							<div class="card-ref">
+								{formatBillRef(bill.billType, bill.submissionSession, bill.billNumber)}
+							</div>
+						{/if}
+						<div class="card-title">{bill.title}</div>
 						{#if isBeingEdited}
 							<div class="card-editing-label">
 								<Pencil size={11} /> 変更中
@@ -1022,6 +1039,15 @@
 																userBill?.title ||
 																`法案 #${record.billId}`}</span
 														>
+														{#if formatBillRef(record.billType, record.submissionSession, record.billNumber)}
+															<span class="bill-vote-ref"
+																>{formatBillRef(
+																	record.billType,
+																	record.submissionSession,
+																	record.billNumber
+																)}</span
+															>
+														{/if}
 														{#if userAnswer !== undefined && userAnswer !== 0}
 															<span class="bill-vote-comparison">
 																あなた: {userAnswer === 1 ? '+1 賛成' : '-1 反対'}
@@ -1054,6 +1080,11 @@
 		show={showDelegationModal}
 		billId={currentQuestion.billId}
 		billTitle={currentQuestion.title}
+		billRef={formatBillRef(
+			currentQuestion.billType,
+			currentQuestion.submissionSession,
+			currentQuestion.billNumber
+		)}
 		hasExistingVote={currentClusterAnsweredBills.some(
 			(b) => b.billId === currentQuestion?.billId && b.answer !== 0
 		)}
@@ -1070,6 +1101,11 @@
 		show={true}
 		billId={delegatingBill.billId}
 		billTitle={delegatingBill.title}
+		billRef={formatBillRef(
+			delegatingBill.billType,
+			delegatingBill.submissionSession,
+			delegatingBill.billNumber
+		)}
 		hasExistingVote={delegatingBill.answer !== 0}
 		onClose={closeDelegationForBill}
 		onDelegated={handleDelegatedForBill}
@@ -2469,6 +2505,14 @@
 		line-height: 1.35;
 	}
 
+	.bill-vote-ref {
+		display: block;
+		font-size: 0.65rem;
+		color: #9ca3af;
+		font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+		margin-top: 0.0625rem;
+	}
+
 	.bill-vote-comparison {
 		font-size: 0.7rem;
 		color: #6b7280;
@@ -2573,7 +2617,7 @@
 	.collect-card.answer-agree .card-accent {
 		background: linear-gradient(90deg, #22c55e, #4ade80);
 	}
-	.collect-card.answer-agree .card-icon {
+	.collect-card.answer-agree .card-icon-sm {
 		color: #16a34a;
 	}
 
@@ -2583,7 +2627,7 @@
 	.collect-card.answer-disagree .card-accent {
 		background: linear-gradient(90deg, #ef4444, #f87171);
 	}
-	.collect-card.answer-disagree .card-icon {
+	.collect-card.answer-disagree .card-icon-sm {
 		color: #dc2626;
 	}
 
@@ -2593,7 +2637,7 @@
 	.collect-card.answer-neutral .card-accent {
 		background: linear-gradient(90deg, #94a3b8, #cbd5e1);
 	}
-	.collect-card.answer-neutral .card-icon {
+	.collect-card.answer-neutral .card-icon-sm {
 		color: #64748b;
 	}
 
@@ -2603,7 +2647,7 @@
 	.collect-card.answer-delegated-voted .card-accent {
 		background: linear-gradient(90deg, #8b5cf6, #a78bfa);
 	}
-	.collect-card.answer-delegated-voted .card-icon {
+	.collect-card.answer-delegated-voted .card-icon-sm {
 		color: #7c3aed;
 	}
 
@@ -2613,33 +2657,44 @@
 	.collect-card.answer-delegated-pending .card-accent {
 		background: linear-gradient(90deg, #f59e0b, #fbbf24);
 	}
-	.collect-card.answer-delegated-pending .card-icon {
+	.collect-card.answer-delegated-pending .card-icon-sm {
 		color: #d97706;
 	}
 
-	.card-icon {
+	.card-top-row {
 		display: flex;
 		align-items: center;
-		justify-content: center;
-		padding: 0.625rem 0.75rem 0;
+		gap: 0.375rem;
+		padding: 0.5rem 0.625rem 0;
+	}
+
+	.card-icon-sm {
+		display: flex;
+		align-items: center;
 	}
 
 	.card-title {
 		flex: 1;
-		padding: 0.375rem 0.75rem;
-		font-size: 0.8rem;
+		padding: 0.25rem 0.625rem 0.5rem;
+		font-size: 0.78rem;
 		font-weight: 500;
 		color: var(--text-primary);
 		line-height: 1.35;
 		display: -webkit-box;
-		-webkit-line-clamp: 2;
-		line-clamp: 2;
+		-webkit-line-clamp: 3;
+		line-clamp: 3;
 		-webkit-box-orient: vertical;
 		overflow: hidden;
 	}
 
-	.card-footer {
-		padding: 0 0.75rem 0.625rem;
+	.card-ref {
+		padding: 0.125rem 0.625rem 0;
+		font-size: 0.6rem;
+		color: #9ca3af;
+		font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 
 	.card-badge {

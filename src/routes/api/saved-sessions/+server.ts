@@ -152,27 +152,49 @@ async function getAnswers(userId: string, clusterId: number | null) {
 							: eq(userBillAnswer.userId, userId)
 					);
 
-	// Get bill titles
+	// Get bill titles and metadata
 	const answeredBillIds = answers.filter((a) => a.answer !== 'delegated').map((a) => a.billId);
 	const billTitles =
 		answeredBillIds.length > 0
 			? await db
-					.select({ id: bill.id, title: bill.title })
+					.select({
+						id: bill.id,
+						title: bill.title,
+						type: bill.type,
+						submissionSession: bill.submissionSession,
+						number: bill.number
+					})
 					.from(bill)
 					.where(inArray(bill.id, answeredBillIds))
 			: [];
-	const billTitleMap = new Map(billTitles.map((b) => [b.id, b.title || '']));
+	const billInfoMap = new Map(
+		billTitles.map((b) => [
+			b.id,
+			{
+				title: b.title || '',
+				type: b.type,
+				submissionSession: b.submissionSession,
+				number: b.number
+			}
+		])
+	);
 
 	return json({
 		success: true,
 		totalAnswers: answeredBillIds.length,
 		answers: answers
 			.filter((a) => a.answer !== 'delegated')
-			.map((a) => ({
-				billId: a.billId,
-				title: billTitleMap.get(a.billId) || '',
-				answer: answerToScore(a.answer)
-			}))
+			.map((a) => {
+				const info = billInfoMap.get(a.billId);
+				return {
+					billId: a.billId,
+					title: info?.title || '',
+					answer: answerToScore(a.answer),
+					billType: info?.type,
+					submissionSession: info?.submissionSession,
+					billNumber: info?.number
+				};
+			})
 	});
 }
 
@@ -430,6 +452,9 @@ async function handleLiveResults(
 			title: string;
 			answer: number;
 			source: 'direct' | 'delegated';
+			billType?: string;
+			submissionSession?: number;
+			billNumber?: number;
 		}>;
 	}> = [];
 
@@ -502,26 +527,49 @@ async function handleLiveResults(
 				billId: a.billId,
 				title: '', // filled below
 				answer: a.score,
-				source: a.source
+				source: a.source,
+				billType: undefined as string | undefined,
+				submissionSession: undefined as number | undefined,
+				billNumber: undefined as number | undefined
 			}))
 		});
 	}
 
-	// Load bill titles
+	// Load bill titles and metadata
 	const billIdsArr = Array.from(allBillIds);
 	const billTitles =
 		billIdsArr.length > 0
 			? await db
-					.select({ id: bill.id, title: bill.title })
+					.select({
+						id: bill.id,
+						title: bill.title,
+						type: bill.type,
+						submissionSession: bill.submissionSession,
+						number: bill.number
+					})
 					.from(bill)
 					.where(inArray(bill.id, billIdsArr))
 			: [];
-	const billTitleMap = new Map(billTitles.map((b) => [b.id, b.title || '']));
+	const billInfoMap2 = new Map(
+		billTitles.map((b) => [
+			b.id,
+			{
+				title: b.title || '',
+				type: b.type,
+				submissionSession: b.submissionSession,
+				number: b.number
+			}
+		])
+	);
 
-	// Fill in bill titles
+	// Fill in bill titles and metadata
 	for (const cr of clusterResultsList) {
 		for (const ab of cr.answeredBills) {
-			ab.title = billTitleMap.get(ab.billId) || `法案 #${ab.billId}`;
+			const info = billInfoMap2.get(ab.billId);
+			ab.title = info?.title || `法案 #${ab.billId}`;
+			ab.billType = info?.type;
+			ab.submissionSession = info?.submissionSession;
+			ab.billNumber = info?.number;
 		}
 	}
 

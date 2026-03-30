@@ -37,6 +37,9 @@
 		result: string | null;
 		reason: string;
 		dimensionTarget: number;
+		billType?: string;
+		submissionSession?: number;
+		billNumber?: number;
 	}
 
 	let { data }: { data: PageData } = $props();
@@ -79,6 +82,9 @@
 		source?: 'direct' | 'delegated';
 		delegationStatus?: 'pending' | 'voted';
 		delegateId?: string;
+		billType?: string;
+		submissionSession?: number;
+		billNumber?: number;
 	}[] = $state([]);
 	let isEditingAnswer: boolean = $state(false);
 	let previousQuestion: NextQuestion | null = $state(null); // Store previous question for cancel editing
@@ -604,7 +610,10 @@
 			billId: currentQuestion.billId,
 			title: currentQuestion.title,
 			answer: score,
-			source: 'direct' as const
+			source: 'direct' as const,
+			billType: currentQuestion.billType,
+			submissionSession: currentQuestion.submissionSession,
+			billNumber: currentQuestion.billNumber
 		};
 
 		isLoading = true;
@@ -680,7 +689,10 @@
 			billId: currentQuestion.billId,
 			title: currentQuestion.title,
 			answer: 0, // 0 for skip/neutral
-			source: 'direct' as const
+			source: 'direct' as const,
+			billType: currentQuestion.billType,
+			submissionSession: currentQuestion.submissionSession,
+			billNumber: currentQuestion.billNumber
 		};
 
 		isLoading = true;
@@ -747,6 +759,9 @@
 		answer: number;
 		source?: 'direct' | 'delegated';
 		delegationStatus?: 'pending' | 'voted';
+		billType?: string;
+		submissionSession?: number;
+		billNumber?: number;
 	}) {
 		// Store the current question so we can restore it on cancel
 		previousQuestion = currentQuestion;
@@ -759,7 +774,10 @@
 			passed: true, // We don't have this info, but it's not critical for editing
 			result: null,
 			reason: '回答を変更中',
-			dimensionTarget: 0
+			dimensionTarget: 0,
+			billType: bill.billType,
+			submissionSession: bill.submissionSession,
+			billNumber: bill.billNumber
 		};
 		isEditingAnswer = true;
 	}
@@ -789,7 +807,10 @@
 			title: billTitle,
 			answer: 0,
 			source: 'delegated' as const,
-			delegationStatus: 'pending' as const
+			delegationStatus: 'pending' as const,
+			billType: existingBill?.billType || currentQuestion?.billType,
+			submissionSession: existingBill?.submissionSession || currentQuestion?.submissionSession,
+			billNumber: existingBill?.billNumber || currentQuestion?.billNumber
 		};
 
 		isLoading = true;

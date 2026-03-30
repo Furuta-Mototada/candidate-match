@@ -3,6 +3,7 @@
 	import TopMatchSpotlight from '$lib/components/match/TopMatchSpotlight.svelte';
 	import ClusterInsightCard from '$lib/components/match/ClusterInsightCard.svelte';
 	import type { ClusterResult, BaseClusterResult, GlobalMemberScore } from '$lib/types/index.js';
+	import { formatBillRef } from '$lib/types/index.js';
 	import {
 		ClipboardList,
 		Save,
@@ -112,6 +113,9 @@
 		billScoreRecords: Array<{
 			billId: number;
 			billTitle: string | null;
+			billType: string | null;
+			submissionSession: number | null;
+			billNumber: number | null;
 			normalizedScore: number | null;
 			hasVoteRecord: boolean;
 			approved: boolean | null;
@@ -444,25 +448,34 @@
 											{#each visibleBills as bill (bill.billId)}
 												<div class="bill-collect-card {getAnswerColor(bill.answer, bill.source)}">
 													<div class="bill-card-accent"></div>
-													<div class="bill-card-icon">
-														{#if bill.source === 'delegated'}
-															<Handshake size={20} />
-														{:else if bill.answer === 1}
-															<ThumbsUp size={20} />
-														{:else if bill.answer === -1}
-															<ThumbsDown size={20} />
-														{:else}
-															<CircleQuestionMark size={20} />
-														{/if}
-													</div>
-													<div class="bill-card-title">{bill.title}</div>
-													<div class="bill-card-footer">
+													<div class="bill-card-top-row">
+														<span class="bill-card-icon">
+															{#if bill.source === 'delegated'}
+																<Handshake size={14} />
+															{:else if bill.answer === 1}
+																<ThumbsUp size={14} />
+															{:else if bill.answer === -1}
+																<ThumbsDown size={14} />
+															{:else}
+																<CircleQuestionMark size={14} />
+															{/if}
+														</span>
 														<span
 															class="bill-card-badge {getAnswerColor(bill.answer, bill.source)}"
 														>
 															{getAnswerText(bill.answer, bill.source)}
 														</span>
+														{#if formatBillRef(bill.billType, bill.submissionSession, bill.billNumber)}
+															<span class="bill-card-ref">
+																{formatBillRef(
+																	bill.billType,
+																	bill.submissionSession,
+																	bill.billNumber
+																)}
+															</span>
+														{/if}
 													</div>
+													<div class="bill-card-title">{bill.title}</div>
 												</div>
 											{/each}
 										</div>
@@ -831,6 +844,15 @@
 														<span class="drawer-bill-title">
 															{record.billTitle || userBill?.title || `法案 #${record.billId}`}
 														</span>
+														{#if formatBillRef(record.billType, record.submissionSession, record.billNumber)}
+															<span class="drawer-bill-ref"
+																>{formatBillRef(
+																	record.billType,
+																	record.submissionSession,
+																	record.billNumber
+																)}</span
+															>
+														{/if}
 														{#if userAnswer !== undefined && userAnswer !== 0}
 															<span class="drawer-bill-comparison">
 																あなた: {userSource === 'delegated' ? '委任 ' : ''}{userAnswer === 1
@@ -1213,7 +1235,16 @@
 		background: #8b5cf6;
 	}
 
+	.bill-card-top-row {
+		display: flex;
+		align-items: center;
+		gap: 0.375rem;
+		flex-wrap: wrap;
+	}
+
 	.bill-card-icon {
+		display: flex;
+		align-items: center;
 		color: #6b7280;
 	}
 
@@ -1241,9 +1272,12 @@
 		flex: 1;
 	}
 
-	.bill-card-footer {
-		display: flex;
-		align-items: center;
+	.bill-card-ref {
+		font-size: 0.6rem;
+		color: #9ca3af;
+		font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+		margin-left: auto;
+		white-space: nowrap;
 	}
 
 	.bill-card-badge {
@@ -2062,6 +2096,14 @@
 		font-weight: 500;
 		color: #1f2937;
 		line-height: 1.4;
+	}
+
+	.drawer-bill-ref {
+		display: block;
+		font-size: 0.65rem;
+		color: #9ca3af;
+		font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+		margin-top: 0.0625rem;
 	}
 
 	.drawer-bill-comparison {

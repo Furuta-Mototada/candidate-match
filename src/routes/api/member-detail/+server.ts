@@ -75,6 +75,9 @@ export const GET: RequestHandler = async ({ url }) => {
 		let billScoreRecords: Array<{
 			billId: number;
 			billTitle: string | null;
+			billType: string | null;
+			submissionSession: number | null;
+			billNumber: number | null;
 			normalizedScore: number | null;
 			hasVoteRecord: boolean;
 			approved: boolean | null;
@@ -98,28 +101,48 @@ export const GET: RequestHandler = async ({ url }) => {
 				voteMap.set(row.billId, row.approved);
 			}
 
-			// Get bill titles
+			// Get bill titles and metadata
 			const billRows = await db
-				.select({ id: bill.id, title: bill.title })
+				.select({
+					id: bill.id,
+					title: bill.title,
+					type: bill.type,
+					submissionSession: bill.submissionSession,
+					number: bill.number
+				})
 				.from(bill)
 				.where(inArray(bill.id, billIds));
 
-			const titleMap = new Map<number, string | null>();
+			const billInfoMap = new Map<
+				number,
+				{ title: string | null; type: string; submissionSession: number; number: number }
+			>();
 			for (const row of billRows) {
-				titleMap.set(row.id, row.title);
+				billInfoMap.set(row.id, {
+					title: row.title,
+					type: row.type,
+					submissionSession: row.submissionSession,
+					number: row.number
+				});
 			}
 
 			// Get normalized legislation scores for ALL requested bills
 			const scoreMap = getMemberBillScores(memberId, billIds);
 
 			// Build record for every requested bill
-			billScoreRecords = billIds.map((billId) => ({
-				billId,
-				billTitle: titleMap.get(billId) ?? null,
-				normalizedScore: scoreMap.get(billId) ?? null,
-				hasVoteRecord: voteMap.has(billId),
-				approved: voteMap.get(billId) ?? null
-			}));
+			billScoreRecords = billIds.map((billId) => {
+				const info = billInfoMap.get(billId);
+				return {
+					billId,
+					billTitle: info?.title ?? null,
+					billType: info?.type ?? null,
+					submissionSession: info?.submissionSession ?? null,
+					billNumber: info?.number ?? null,
+					normalizedScore: scoreMap.get(billId) ?? null,
+					hasVoteRecord: voteMap.has(billId),
+					approved: voteMap.get(billId) ?? null
+				};
+			});
 		}
 
 		return json({
