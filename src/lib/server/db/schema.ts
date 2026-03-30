@@ -653,6 +653,8 @@ export const notificationTypeEnum = pgEnum('notification_type', [
 	'delegation_redelegated',
 	'delegation_voted',
 	'delegation_retracted',
+	'delegation_vote_changed',
+	'delegation_overridden',
 	// System
 	'welcome'
 ]);

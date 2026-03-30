@@ -18,7 +18,8 @@ import {
 	notifyDelegationRejected,
 	notifyDelegationRedelegated,
 	notifyDelegationVoted,
-	notifyDelegationRetracted
+	notifyDelegationRetracted,
+	notifyUpstreamDelegatorsVoted
 } from '$lib/server/notifications';
 
 /**
@@ -357,7 +358,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			}
 
 			const billTitle = await getBillTitle(billId);
-			await notifyDelegationReceived(delegateId, currentUsername, existing.id, billId, billTitle);
+			await notifyDelegationReceived(
+				delegateId,
+				userId,
+				currentUsername,
+				existing.id,
+				billId,
+				billTitle
+			);
 
 			return json({ success: true, message: '委任を送信しました' });
 		}
@@ -419,7 +427,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		}
 
 		const billTitle = await getBillTitle(billId);
-		await notifyDelegationReceived(delegateId, currentUsername, inserted.id, billId, billTitle);
+		await notifyDelegationReceived(
+			delegateId,
+			userId,
+			currentUsername,
+			inserted.id,
+			billId,
+			billTitle
+		);
 
 		return json({ success: true, message: '委任を送信しました' });
 	}
@@ -508,11 +523,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				.where(eq(table.voteDelegation.id, d.id));
 		}
 
-		// Notify all delegators
+		// Notify all direct delegators
 		const billTitle = await getBillTitle(delegation.billId);
 		for (const d of allPending) {
 			await notifyDelegationVoted(
 				d.delegatorId,
+				userId,
 				currentUsername,
 				d.id,
 				delegation.billId,
@@ -520,6 +536,16 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				score
 			);
 		}
+
+		// Notify all upstream delegators in redelegation chains
+		await notifyUpstreamDelegatorsVoted(
+			userId,
+			userId,
+			currentUsername,
+			delegation.billId,
+			billTitle,
+			score
+		);
 
 		return json({
 			success: true,
@@ -649,6 +675,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		if (outDelegationId) {
 			await notifyDelegationReceived(
 				newDelegateId,
+				userId,
 				currentUsername,
 				outDelegationId,
 				delegation.billId,
@@ -669,6 +696,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		for (const d of redelegatedUpstream) {
 			await notifyDelegationRedelegated(
 				d.delegatorId,
+				userId,
 				currentUsername,
 				d.id,
 				delegation.billId,
@@ -744,6 +772,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		for (const d of allPendingForBill) {
 			await notifyDelegationRejected(
 				d.delegatorId,
+				userId,
 				currentUsername,
 				d.id,
 				delegation.billId,
@@ -802,6 +831,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		const billTitle = await getBillTitle(delegation.billId);
 		await notifyDelegationRetracted(
 			delegation.delegateId,
+			userId,
 			currentUsername,
 			delegationId,
 			delegation.billId,

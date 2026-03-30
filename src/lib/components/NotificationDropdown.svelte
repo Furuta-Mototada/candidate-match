@@ -9,7 +9,9 @@
 		ArrowUpRight,
 		Vote,
 		Undo2,
-		PartyPopper
+		PartyPopper,
+		RefreshCw,
+		Ban
 	} from '@lucide/svelte';
 
 	interface Notification {
@@ -140,6 +142,10 @@
 		<Vote size={16} />
 	{:else if type === 'delegation_retracted'}
 		<Undo2 size={16} />
+	{:else if type === 'delegation_vote_changed'}
+		<RefreshCw size={16} />
+	{:else if type === 'delegation_overridden'}
+		<Ban size={16} />
 	{:else if type === 'welcome'}
 		<PartyPopper size={16} />
 	{:else}

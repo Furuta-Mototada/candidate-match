@@ -10,7 +10,9 @@ import {
 	billClusterLabelNames,
 	member,
 	userBillAnswer,
-	voteDelegation
+	voteDelegation,
+	bill as billTable,
+	user as userTable
 } from '$lib/server/db/schema.js';
 import { eq, inArray, desc, and, sql } from 'drizzle-orm';
 import {
@@ -28,6 +30,11 @@ import {
 	type ClusterVectorData,
 	type MatchResult
 } from '$lib/server/matching.js';
+import {
+	notifyDelegationOverridden,
+	notifyDelegationVoteChanged,
+	notifyUpstreamDelegatorsVoteChanged
+} from '$lib/server/notifications.js';
 import { resolveDelegatedVotes } from '$lib/server/delegation-helpers.js';
 
 const execAsync = promisify(exec);
@@ -777,7 +784,7 @@ async function handleAnswer(
 	// But skip if user has an active outgoing delegation for this bill (delegate decides)
 	if (userId) {
 		const [activeDelegation] = await db
-			.select({ id: voteDelegation.id })
+			.select({ id: voteDelegation.id, delegateId: voteDelegation.delegateId })
 			.from(voteDelegation)
 			.where(
 				and(
@@ -789,20 +796,81 @@ async function handleAnswer(
 			.limit(1);
 
 		if (!activeDelegation) {
+			// Check if user's vote changed and they are a delegate with voted incoming delegations
+			const [existingAnswer] = await db
+				.select({ answer: userBillAnswer.answer })
+				.from(userBillAnswer)
+				.where(and(eq(userBillAnswer.userId, userId), eq(userBillAnswer.billId, billId)));
+
+			const oldAnswer = existingAnswer?.answer;
+			const newAnswer = scoreToAnswer(normalizedScore);
+			const voteChanged = oldAnswer && oldAnswer !== 'delegated' && oldAnswer !== newAnswer;
+
 			await db
 				.insert(userBillAnswer)
 				.values({
 					userId,
 					billId,
-					answer: scoreToAnswer(normalizedScore)
+					answer: newAnswer
 				})
 				.onConflictDoUpdate({
 					target: [userBillAnswer.userId, userBillAnswer.billId],
 					set: {
-						answer: scoreToAnswer(normalizedScore),
+						answer: newAnswer,
 						updatedAt: sql`now()`
 					}
 				});
+
+			// If vote changed and user has accepted (voted) incoming delegations, notify delegators
+			if (voteChanged) {
+				const votedIncoming = await db
+					.select({
+						id: voteDelegation.id,
+						delegatorId: voteDelegation.delegatorId
+					})
+					.from(voteDelegation)
+					.where(
+						and(
+							eq(voteDelegation.delegateId, userId),
+							eq(voteDelegation.billId, billId),
+							eq(voteDelegation.status, 'voted')
+						)
+					);
+
+				if (votedIncoming.length > 0) {
+					const [billInfo] = await db
+						.select({ title: billTable.title })
+						.from(billTable)
+						.where(eq(billTable.id, billId));
+					const [userInfo] = await db
+						.select({ username: userTable.username })
+						.from(userTable)
+						.where(eq(userTable.id, userId));
+					const billTitle = billInfo?.title ?? null;
+					const username = userInfo?.username ?? 'ユーザー';
+
+					for (const d of votedIncoming) {
+						await notifyDelegationVoteChanged(
+							d.delegatorId,
+							userId,
+							username,
+							d.id,
+							billId,
+							billTitle,
+							normalizedScore
+						);
+					}
+					// Notify upstream delegators through redelegation chains
+					await notifyUpstreamDelegatorsVoteChanged(
+						userId,
+						userId,
+						username,
+						billId,
+						billTitle,
+						normalizedScore
+					);
+				}
+			}
 		} else {
 			// User is overriding a delegation with a direct vote — retract the delegation
 			await db
@@ -829,6 +897,24 @@ async function handleAnswer(
 						updatedAt: sql`now()`
 					}
 				});
+
+			// Notify the delegate that the delegator overrode the delegation
+			const [billInfo] = await db
+				.select({ title: billTable.title })
+				.from(billTable)
+				.where(eq(billTable.id, billId));
+			const [userInfo] = await db
+				.select({ username: userTable.username })
+				.from(userTable)
+				.where(eq(userTable.id, userId));
+			await notifyDelegationOverridden(
+				activeDelegation.delegateId,
+				userId,
+				userInfo?.username ?? 'ユーザー',
+				activeDelegation.id,
+				billId,
+				billInfo?.title ?? null
+			);
 		}
 	}
 
