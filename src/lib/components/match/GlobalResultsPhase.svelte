@@ -125,7 +125,6 @@
 	let selectedMember = $state<{ memberId: number; name: string; group: string | null } | null>(
 		null
 	);
-	let selectedMemberContext = $state<number | null>(null); // clusterLabel of context, or null for global
 	let memberDetail = $state<MemberDetail | null>(null);
 	let memberDetailLoading = $state(false);
 	let showPartyDisclaimer = $state(false);
@@ -170,12 +169,8 @@
 		}
 	}
 
-	function handleMemberClick(
-		m: { memberId: number; name: string; group: string | null },
-		contextClusterLabel: number | null = null
-	) {
+	function handleMemberClick(m: { memberId: number; name: string; group: string | null }) {
 		selectedMember = m;
-		selectedMemberContext = contextClusterLabel;
 		showPartyDisclaimer = false;
 		showGroupDisclaimer = false;
 		loadMemberDetail(m.memberId);
@@ -183,7 +178,6 @@
 
 	function closeMemberDetail() {
 		selectedMember = null;
-		selectedMemberContext = null;
 		memberDetail = null;
 	}
 
@@ -332,7 +326,7 @@
 					{:else if !isLoggedIn}
 						<button class="btn-login-to-save" onclick={onLoginToSave}>
 							<span><Lock size={14} /></span>
-							ログインして保存
+							新規登録して保存
 						</button>
 					{/if}
 					{#if onReset}
@@ -431,7 +425,7 @@
 													showLegend={true}
 													compact={false}
 													collapsible={false}
-													onMemberClick={(m) => handleMemberClick(m, result.clusterLabel)}
+													onMemberClick={(m) => handleMemberClick(m)}
 												/>
 											{/if}
 										</div>
@@ -628,7 +622,7 @@
 				</button>
 			{:else if !isLoggedIn}
 				<button onclick={onLoginToSave} class="save-button">
-					<Lock size={14} class="inline-icon" /> ログインして保存
+					<Lock size={14} class="inline-icon" /> 新規登録して保存
 				</button>
 			{/if}
 			{#if onReset}

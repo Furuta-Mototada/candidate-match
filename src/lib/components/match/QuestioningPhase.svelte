@@ -59,7 +59,6 @@
 		highlightedMembersForViz: Array<{ memberId: number; similarity: number }>;
 		currentClusterAnsweredBills: AnsweredBill[];
 		onSubmitAnswer: (vote: number) => void;
-		onSkipQuestion: () => void;
 		onDelegateBill: (billId: number) => void;
 		isLoggedIn: boolean;
 		onSelectBillToEdit: (bill: AnsweredBill) => void;
@@ -86,7 +85,6 @@
 		highlightedMembersForViz,
 		currentClusterAnsweredBills = [],
 		onSubmitAnswer,
-		onSkipQuestion,
 		onDelegateBill,
 		isLoggedIn = false,
 		onSelectBillToEdit,
@@ -561,10 +559,6 @@
 							>
 								<Handshake size={14} class="inline-icon" />
 								{currentBillDelegation ? '委任先を変える' : 'フレンドに委任'}
-							</button>
-						{:else if !isEditingAnswer}
-							<button onclick={onSkipQuestion} disabled={isLoading} class="action-btn-secondary">
-								スキップ →
 							</button>
 						{/if}
 					</div>
@@ -1453,7 +1447,6 @@
 		flex-direction: column;
 	}
 
-	.action-btn-secondary,
 	.action-btn-primary {
 		padding: 0.875rem 1.5rem;
 		border-radius: 10px;
@@ -1461,15 +1454,6 @@
 		cursor: pointer;
 		transition: all 0.3s ease;
 		border: none;
-	}
-
-	.action-btn-secondary {
-		background: #f3f4f6;
-		color: #4b5563;
-	}
-
-	.action-btn-secondary:hover:not(:disabled) {
-		background: #e5e7eb;
 	}
 
 	.action-btn-delegate {

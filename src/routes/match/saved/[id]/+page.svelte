@@ -95,16 +95,6 @@
 		background: #fafbfc;
 	}
 
-	.animate-in {
-		opacity: 0;
-		transform: translateY(20px);
-	}
-
-	.page.mounted .animate-in {
-		animation: fadeInUp 0.6s ease forwards;
-		animation-delay: calc(var(--delay, 0) * 0.1s);
-	}
-
 	.page-header {
 		background: white;
 		border-bottom: 1px solid #e5e7eb;

@@ -18,6 +18,7 @@ import {
 	findMatchingMembers,
 	loadMemberGroups,
 	answerToScore,
+	scoreToAnswer,
 	type ClusterVectorData,
 	type UserAnswer
 } from '$lib/server/matching.js';
@@ -335,6 +336,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			case 'live-results':
 				return await handleLiveResults(body, locals.user.id);
 
+			case 'backfill-answers':
+				return await handleBackfillAnswers(body, locals.user.id);
+
 			default:
 				return json({ error: 'Invalid action' }, { status: 400 });
 		}
@@ -407,6 +411,36 @@ async function handleSnapshot(
 		success: true,
 		snapshotId: inserted.id
 	});
+}
+
+/**
+ * Backfill user_bill_answer for new accounts that completed matching while logged out
+ */
+async function handleBackfillAnswers(
+	body: { answeredBills: Array<{ billId: number; answer: number }> },
+	userId: string
+) {
+	const { answeredBills } = body;
+
+	if (!answeredBills || answeredBills.length === 0) {
+		return json({ success: true, backfilledCount: 0 });
+	}
+
+	for (const ab of answeredBills) {
+		await db
+			.insert(userBillAnswer)
+			.values({
+				userId,
+				billId: ab.billId,
+				answer: scoreToAnswer(ab.answer)
+			})
+			.onConflictDoUpdate({
+				target: [userBillAnswer.userId, userBillAnswer.billId],
+				set: { answer: scoreToAnswer(ab.answer), updatedAt: sql`now()` }
+			});
+	}
+
+	return json({ success: true, backfilledCount: answeredBills.length });
 }
 
 /**

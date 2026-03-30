@@ -70,6 +70,7 @@ export const actions: Actions = {
 		const session = await auth.createSession(sessionToken, userId);
 		auth.setSessionTokenCookie(event, sessionToken, session.expiresAt);
 
-		throw redirect(302, redirectTo);
+		const separator = redirectTo.includes('?') ? '&' : '?';
+		throw redirect(302, `${redirectTo}${separator}via=register`);
 	}
 };

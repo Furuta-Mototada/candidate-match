@@ -62,13 +62,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			output: stdout,
 			message: 'Clustering generated successfully'
 		});
-	} catch (error: any) {
+	} catch (error: unknown) {
 		console.error('Error generating clustering:', error);
+		const err = error as { message?: string; stderr?: string; stdout?: string };
 		return json(
 			{
 				error: 'Failed to generate clustering',
-				message: error.message,
-				details: error.stderr || error.stdout
+				message: err.message,
+				details: err.stderr || err.stdout
 			},
 			{ status: 500 }
 		);

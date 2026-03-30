@@ -680,78 +680,6 @@
 	}
 
 	/**
-	 * Skip current question
-	 */
-	async function skipQuestion() {
-		if (!sessionId || !currentQuestion) return;
-
-		// Capture info before update
-		const billInfo = {
-			billId: currentQuestion.billId,
-			title: currentQuestion.title,
-			answer: 0, // 0 for skip/neutral
-			source: 'direct' as const,
-			billType: currentQuestion.billType,
-			submissionSession: currentQuestion.submissionSession,
-			billNumber: currentQuestion.billNumber
-		};
-
-		isLoading = true;
-		error = null;
-
-		try {
-			const response = await fetch('/api/match', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					action: 'skip',
-					sessionId: sessionId,
-					billId: currentQuestion.billId
-				})
-			});
-
-			const result = await response.json();
-
-			if (!response.ok || !result.success) {
-				throw new Error(result.error || 'スキップに失敗しました');
-			}
-
-			// Record or update answer in currentClusterAnsweredBills
-			const existingIndex = currentClusterAnsweredBills.findIndex(
-				(b) => b.billId === billInfo.billId
-			);
-			if (existingIndex >= 0) {
-				// Update existing answer
-				currentClusterAnsweredBills = currentClusterAnsweredBills.map((b, i) =>
-					i === existingIndex ? billInfo : b
-				);
-			} else {
-				// Add new answer
-				currentClusterAnsweredBills = [...currentClusterAnsweredBills, billInfo];
-			}
-
-			uncertainty = result.uncertainty || [];
-			userVector = result.userVector || [];
-			topMatches = result.topMatches || [];
-
-			// Handle next question based on whether we were editing
-			if (isEditingAnswer) {
-				// After editing, go back to showing new questions (or null if cluster is complete)
-				isEditingAnswer = false;
-				currentQuestion = result.nextQuestion;
-			} else {
-				currentQuestion = result.nextQuestion;
-				// Don't auto-advance when all questions are answered
-				// User can manually finish the cluster or navigate to other clusters
-			}
-		} catch (e) {
-			error = e instanceof Error ? e.message : '不明なエラーが発生しました';
-		} finally {
-			isLoading = false;
-		}
-	}
-
-	/**
 	 * Select a previously answered bill to edit the answer
 	 */
 	function selectBillToEdit(bill: {
@@ -1255,28 +1183,64 @@
 		// Check for pending save after login/register
 		const pendingSave = sessionStorage.getItem('pendingSaveData');
 		if (pendingSave && data.user) {
-			try {
-				const parsed = JSON.parse(pendingSave);
+			const urlParams = new URLSearchParams(window.location.search);
+			const via = urlParams.get('via');
+
+			if (via === 'register') {
+				// New account — restore state, backfill answers, allow save
+				try {
+					const parsed = JSON.parse(pendingSave);
+					sessionStorage.removeItem('pendingSaveData');
+					// Restore matching state
+					selectedSavedVectorKey = parsed.selectedSavedVectorKey;
+					clusterId = parsed.clusterId;
+					nComponents = parsed.nComponents;
+					clusterResults = parsed.clusterResults;
+					globalScores = parsed.globalScores;
+					clusterLabelsToProcess = parsed.clusterLabelsToProcess;
+					clusterLabelNameMap = parsed.clusterLabelNameMap;
+					phase = 'global-results';
+					showPendingSavePrompt = true;
+
+					// Backfill user_bill_answer immediately for the new account
+					const allAnsweredBills: Array<{ billId: number; answer: number }> = [];
+					for (const cr of parsed.clusterResults) {
+						if (cr.answeredBills) {
+							for (const ab of cr.answeredBills) {
+								allAnsweredBills.push({ billId: ab.billId, answer: ab.answer });
+							}
+						}
+					}
+					if (allAnsweredBills.length > 0) {
+						fetch('/api/saved-sessions', {
+							method: 'POST',
+							headers: { 'Content-Type': 'application/json' },
+							body: JSON.stringify({
+								action: 'backfill-answers',
+								answeredBills: allAnsweredBills
+							})
+						}).catch((err) => console.error('Failed to backfill answers:', err));
+					}
+				} catch {
+					sessionStorage.removeItem('pendingSaveData');
+				}
+			} else {
+				// Existing account login — warn and don't allow save
 				sessionStorage.removeItem('pendingSaveData');
-				// Restore matching state
-				selectedSavedVectorKey = parsed.selectedSavedVectorKey;
-				clusterId = parsed.clusterId;
-				nComponents = parsed.nComponents;
-				clusterResults = parsed.clusterResults;
-				globalScores = parsed.globalScores;
-				clusterLabelsToProcess = parsed.clusterLabelsToProcess;
-				clusterLabelNameMap = parsed.clusterLabelNameMap;
-				phase = 'global-results';
-				// Auto-open save after a short delay so UI renders
-				showPendingSavePrompt = true;
-			} catch {
-				sessionStorage.removeItem('pendingSaveData');
+				showExistingAccountWarning = true;
+			}
+
+			// Clean up URL params
+			if (via) {
+				const cleanUrl = window.location.pathname;
+				window.history.replaceState({}, '', cleanUrl);
 			}
 		}
 	});
 
 	// Pending save prompt state
 	let showPendingSavePrompt = $state(false);
+	let showExistingAccountWarning = $state(false);
 
 	/**
 	 * Store matching state and redirect to login for saving
@@ -1305,7 +1269,7 @@
 			clusterLabelNameMap
 		};
 		sessionStorage.setItem('pendingSaveData', JSON.stringify(saveData));
-		goto('/auth/login?redirect=/match');
+		goto('/auth/register?redirect=/match');
 	}
 </script>
 
@@ -1341,7 +1305,18 @@
 			<div class="success-alert animate-in" style="margin-bottom: 1rem;">
 				<div style="display: flex; align-items: center; gap: 0.5rem;">
 					<span><CircleCheck size={16} color="#22c55e" /></span>
-					<span>ログインしました。マッチング結果を保存できます。</span>
+					<span>アカウントを作成しました。マッチング結果を保存できます。</span>
+				</div>
+			</div>
+		{/if}
+
+		{#if showExistingAccountWarning}
+			<div class="warning-alert animate-in" style="margin-bottom: 1rem;">
+				<div style="display: flex; align-items: center; gap: 0.5rem;">
+					<span><TriangleAlert size={16} color="#f59e0b" /></span>
+					<span
+						>既存アカウントでログインしたため、未ログイン中のマッチング結果は保存できません。ログイン状態で再度マッチングを行ってください。</span
+					>
 				</div>
 			</div>
 		{/if}
@@ -1489,7 +1464,6 @@
 				{highlightedMembersForViz}
 				{currentClusterAnsweredBills}
 				onSubmitAnswer={submitAnswer}
-				onSkipQuestion={skipQuestion}
 				onDelegateBill={handleDelegateBill}
 				isLoggedIn={!!data.user}
 				onSelectBillToEdit={selectBillToEdit}
@@ -1758,6 +1732,32 @@
 	}
 
 	/* ===== ERROR ALERT ===== */
+	.success-alert {
+		display: flex;
+		align-items: flex-start;
+		gap: 0.75rem;
+		background: linear-gradient(135deg, #dcfce7, #bbf7d0);
+		border: 1px solid #86efac;
+		border-radius: 12px;
+		padding: 1rem 1.5rem;
+		box-shadow: 0 4px 12px rgba(34, 197, 94, 0.1);
+		color: #166534;
+		font-size: 0.95rem;
+	}
+
+	.warning-alert {
+		display: flex;
+		align-items: flex-start;
+		gap: 0.75rem;
+		background: linear-gradient(135deg, #fef9c3, #fef08a);
+		border: 1px solid #fde047;
+		border-radius: 12px;
+		padding: 1rem 1.5rem;
+		box-shadow: 0 4px 12px rgba(234, 179, 8, 0.1);
+		color: #854d0e;
+		font-size: 0.95rem;
+	}
+
 	.error-alert {
 		display: flex;
 		align-items: flex-start;
