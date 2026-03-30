@@ -10,6 +10,6 @@ export { default as SetupPhase } from './match/SetupPhase.svelte';
 export { default as QuestioningPhase } from './match/QuestioningPhase.svelte';
 export { default as ClusterReviewPhase } from './match/ClusterReviewPhase.svelte';
 export { default as GlobalResultsPhase } from './match/GlobalResultsPhase.svelte';
-export { default as ExplanationModal } from './match/ExplanationModal.svelte';
+export { default as MatchTutorial } from './match/MatchTutorial.svelte';
 export { default as EnrichedBillCard } from './match/EnrichedBillCard.svelte';
 export { default as BillDetailPanel } from './match/BillDetailPanel.svelte';

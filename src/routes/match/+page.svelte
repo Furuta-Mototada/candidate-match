@@ -17,7 +17,7 @@
 		SetupPhase,
 		QuestioningPhase,
 		GlobalResultsPhase,
-		ExplanationModal
+		MatchTutorial
 	} from '$lib/components/index.js';
 	import type {
 		SavedVectorInfo,
@@ -91,7 +91,8 @@
 
 	// Rating state
 	let pendingImportance: number = $state(3);
-	let showExplanationModal: boolean = $state(false);
+	let showTutorial: boolean = $state(false);
+	let tutorialInitialTab: 'tutorial' | 'explanation' = $state('tutorial');
 	let showConfidenceTooltip: boolean = $state(false);
 	let reviewLoading: boolean = $state(false);
 
@@ -275,6 +276,14 @@
 
 		clusterLabelsToProcess = labels;
 		currentClusterIndex = 0;
+
+		// Show tutorial while loading (only first time)
+		const hasSeenTutorial =
+			typeof localStorage !== 'undefined' && localStorage.getItem('match-tutorial-seen');
+		if (!hasSeenTutorial) {
+			tutorialInitialTab = 'tutorial';
+			showTutorial = true;
+		}
 
 		// Start with the first cluster using its saved vector
 		await startClusterSessionWithSavedVector(labels[0]);
@@ -1580,15 +1589,29 @@
 	<!-- Floating Help Button -->
 	<button
 		class="floating-help-btn"
-		onclick={() => (showExplanationModal = true)}
+		onclick={() => {
+			tutorialInitialTab = 'explanation';
+			showTutorial = true;
+		}}
 		aria-label="マッチングの仕組みを見る"
 	>
 		<span class="help-icon">?</span>
 		<span class="help-text">仕組み</span>
 	</button>
 
-	<!-- Explanation Modal -->
-	<ExplanationModal show={showExplanationModal} onClose={() => (showExplanationModal = false)} />
+	<!-- Tutorial / Explanation Overlay -->
+	<MatchTutorial
+		show={showTutorial}
+		{isLoading}
+		initialTab={tutorialInitialTab}
+		clusterNames={Object.values(clusterLabelNameMap)}
+		onDismiss={() => {
+			showTutorial = false;
+			if (typeof localStorage !== 'undefined') {
+				localStorage.setItem('match-tutorial-seen', '1');
+			}
+		}}
+	/>
 </div>
 
 <style>
