@@ -74,6 +74,7 @@
 
 	let {
 		answeredCount,
+		currentClusterDisplayName = null,
 		currentQuestion,
 		isLoading,
 		isEditingAnswer = false,
@@ -99,7 +100,7 @@
 		interimPartyScores = null,
 		...rest
 	}: Props = $props();
-	void rest; // Consume unused props (currentClusterDisplayName, currentClusterBillCount)
+	void rest; // Consume unused props (currentClusterBillCount)
 
 	function getImportanceLabel(importance: number): string {
 		const labels = ['', 'あまり重要ではない', '少し重要', '普通に重要', 'かなり重要', '最も重要'];
@@ -725,7 +726,7 @@
 	<div class="interim-overlay" onclick={closePanel} role="presentation"></div>
 	<div class="interim-panel" class:panel-full={panelMode === 'full'}>
 		<div class="interim-panel-header">
-			<h3 class="interim-panel-title">暫定マッチング結果</h3>
+			<h3 class="interim-panel-title">{currentClusterDisplayName || '分野'}</h3>
 			<div class="interim-panel-header-actions">
 				<button
 					class="interim-panel-expand"
@@ -744,195 +745,209 @@
 			</div>
 		</div>
 
-		<!-- Importance & Advance Bar -->
-		<div class="panel-action-bar">
-			<div class="panel-importance">
-				<span class="panel-importance-label">重要度</span>
-				<div class="panel-star-rating">
-					{#each [1, 2, 3, 4, 5] as star (star)}
-						<button
-							onclick={() => (pendingImportance = star)}
-							class="panel-star-btn"
-							class:selected={star <= pendingImportance}
-						>
-							<Star
-								size={16}
-								fill={star <= pendingImportance ? '#fbbf24' : 'none'}
-								color={star <= pendingImportance ? '#fbbf24' : '#d1d5db'}
-							/>
-						</button>
-					{/each}
-				</div>
-				<span class="panel-importance-text">{getImportanceLabel(pendingImportance)}</span>
-			</div>
-			<button
-				class="panel-advance-btn"
-				onclick={() => {
-					closePanel();
-					onAdvanceCluster();
-				}}
-				disabled={isLoading}
-			>
-				{#if isLoading}
-					<Hourglass size={14} /> 読み込み中...
-				{:else if isLastClusterInSession}
-					重要度を確認する <ChevronRight size={14} />
-				{:else if nextClusterDisplayName}
-					「{nextClusterDisplayName}」分野へ <ChevronRight size={14} />
-				{:else}
-					次の分野へ <ChevronRight size={14} />
-				{/if}
-			</button>
-		</div>
-
 		<div class="interim-panel-body">
-			<!-- Top 3 Spotlight -->
-			<div class="interim-spotlight">
-				{#each topMatches.slice(0, 3) as match, idx (match.memberId)}
-					<button
-						class="spotlight-member"
-						class:rank-gold={idx === 0}
-						class:rank-silver={idx === 1}
-						class:rank-bronze={idx === 2}
-						class:active={selectedMember?.memberId === match.memberId}
-						onclick={() => handleMemberClick(match)}
-					>
-						<div class="spotlight-rank">{idx + 1}</div>
-						<div class="spotlight-info">
-							<span class="spotlight-name">{match.name}</span>
-							<span class="spotlight-group">{match.group || '無所属'}</span>
-						</div>
-						<div class="spotlight-score">{(match.similarity * 100).toFixed(1)}%</div>
-					</button>
-				{/each}
+			<!-- Importance & Advance Card -->
+			<div class="panel-action-card">
+				<div class="action-card-cluster-name">
+					{currentClusterDisplayName || 'この分野'}
+				</div>
+				<div class="action-card-importance-row">
+					<span class="action-card-importance-label">重要度</span>
+					<div class="action-card-stars">
+						{#each [1, 2, 3, 4, 5] as star (star)}
+							<button
+								onclick={() => (pendingImportance = star)}
+								class="action-star-btn"
+								class:selected={star <= pendingImportance}
+							>
+								<Star
+									size={22}
+									fill={star <= pendingImportance ? '#fbbf24' : 'none'}
+									color={star <= pendingImportance ? '#f59e0b' : '#d1d5db'}
+									strokeWidth={star <= pendingImportance ? 2.5 : 1.5}
+								/>
+							</button>
+						{/each}
+						<span class="action-card-importance-text">{getImportanceLabel(pendingImportance)}</span>
+					</div>
+				</div>
+				<button
+					class="action-card-advance-btn"
+					onclick={() => {
+						closePanel();
+						onAdvanceCluster();
+					}}
+					disabled={isLoading}
+				>
+					{#if isLoading}
+						<Hourglass size={16} /> 読み込み中...
+					{:else if isLastClusterInSession}
+						重要度を確認する <ChevronRight size={18} />
+					{:else if nextClusterDisplayName}
+						「{nextClusterDisplayName}」分野へ <ChevronRight size={18} />
+					{:else}
+						次の分野へ <ChevronRight size={18} />
+					{/if}
+				</button>
 			</div>
 
-			<!-- Searchable Member Table -->
-			<div class="interim-search-section">
-				<h4 class="interim-section-title">全議員検索</h4>
-				<div class="interim-search-box">
-					<Search size={14} class="interim-search-icon" />
-					<input
-						type="text"
-						bind:value={memberSearchQuery}
-						placeholder="名前・会派で検索..."
-						class="interim-search-input"
-					/>
-					{#if memberSearchQuery}
-						<button class="interim-search-clear" onclick={() => (memberSearchQuery = '')}>
-							<X size={14} />
-						</button>
-					{/if}
-				</div>
-				<div class="interim-member-table">
-					<div class="member-table-header">
-						<span class="table-col-rank">#</span>
-						<span class="table-col-name">氏名</span>
-						<span class="table-col-group">会派</span>
-						<span class="table-col-score">マッチ度</span>
-					</div>
-					<div class="member-table-body">
-						{#each filteredTopMatches as match (match.memberId)}
+			<!-- Section Divider -->
+			<div class="interim-section-divider">
+				<div class="interim-section-divider-line"></div>
+				<span class="interim-section-divider-label">暫定マッチング結果</span>
+				<div class="interim-section-divider-line"></div>
+			</div>
+
+			<!-- Results Grid (adapts to full-screen) -->
+			<div class="interim-results-grid">
+				<!-- Top 3 Spotlight -->
+				<div class="interim-results-card">
+					<h4 class="interim-card-title"><User size={15} /> 上位マッチ議員</h4>
+					<div class="interim-spotlight">
+						{#each topMatches.slice(0, 3) as match, idx (match.memberId)}
 							<button
-								class="member-table-row"
+								class="spotlight-member"
+								class:rank-gold={idx === 0}
+								class:rank-silver={idx === 1}
+								class:rank-bronze={idx === 2}
 								class:active={selectedMember?.memberId === match.memberId}
 								onclick={() => handleMemberClick(match)}
 							>
-								<span class="table-col-rank">{match.rank}</span>
-								<span class="table-col-name">{match.name}</span>
-								<span class="table-col-group">{match.group || '無所属'}</span>
-								<span
-									class="table-col-score score-{match.similarity >= 0.7
-										? 'high'
-										: match.similarity >= 0.5
-											? 'med'
-											: 'low'}">{(match.similarity * 100).toFixed(1)}%</span
-								>
+								<div class="spotlight-rank">{idx + 1}</div>
+								<div class="spotlight-info">
+									<span class="spotlight-name">{match.name}</span>
+									<span class="spotlight-group">{match.group || '無所属'}</span>
+								</div>
+								<div class="spotlight-score">{(match.similarity * 100).toFixed(1)}%</div>
 							</button>
 						{/each}
-						{#if filteredTopMatches.length === 0}
-							<div class="member-table-empty">該当する議員がいません</div>
-						{/if}
 					</div>
 				</div>
-			</div>
 
-			<!-- Interim Party Ranking -->
-			{#if activePartyScores.length > 0}
-				<div class="interim-party-section">
-					<h4 class="interim-section-title">政党マッチ</h4>
+				<!-- Party Ranking -->
+				{#if activePartyScores.length > 0}
+					<div class="interim-results-card">
+						<h4 class="interim-card-title">政党マッチ</h4>
 
-					<!-- Mode Toggle -->
-					<div class="interim-party-mode-toggle">
-						<button
-							class="interim-party-mode-btn"
-							class:active={partyMode === 'current'}
-							onclick={() => (partyMode = 'current')}
-						>
-							現在の所属議員
-						</button>
-						<button
-							class="interim-party-mode-btn"
-							class:active={partyMode === 'historical'}
-							onclick={() => (partyMode = 'historical')}
-						>
-							在籍期間の行動
-						</button>
+						<div class="interim-party-mode-toggle">
+							<button
+								class="interim-party-mode-btn"
+								class:active={partyMode === 'current'}
+								onclick={() => (partyMode = 'current')}
+							>
+								現在の所属議員
+							</button>
+							<button
+								class="interim-party-mode-btn"
+								class:active={partyMode === 'historical'}
+								onclick={() => (partyMode = 'historical')}
+							>
+								在籍期間の行動
+							</button>
+						</div>
+
+						<div class="interim-search-box">
+							<Search size={14} class="interim-search-icon" />
+							<input
+								type="text"
+								bind:value={partySearchQuery}
+								placeholder="政党名で検索..."
+								class="interim-search-input"
+							/>
+							{#if partySearchQuery}
+								<button class="interim-search-clear" onclick={() => (partySearchQuery = '')}>
+									<X size={14} />
+								</button>
+							{/if}
+						</div>
+
+						<div class="interim-member-table">
+							<div class="member-table-header">
+								<span class="table-col-rank">#</span>
+								<span class="table-col-name">政党名</span>
+								<span class="table-col-group">人数</span>
+								<span class="table-col-score">マッチ度</span>
+							</div>
+							<div class="member-table-body">
+								{#each filteredPartyScores as partyItem (partyItem.partyId)}
+									<div
+										class="member-table-row party-table-row"
+										class:rank-gold={partyItem.rank === 1}
+										class:rank-silver={partyItem.rank === 2}
+										class:rank-bronze={partyItem.rank === 3}
+									>
+										<span class="table-col-rank">{partyItem.rank}</span>
+										<span class="table-col-name">{partyItem.partyName}</span>
+										<span class="table-col-group">{partyItem.memberCount}名</span>
+										<span
+											class="table-col-score score-{partyItem.globalScore >= 0.7
+												? 'high'
+												: partyItem.globalScore >= 0.5
+													? 'med'
+													: 'low'}"
+										>
+											{(partyItem.globalScore * 100).toFixed(1)}%
+										</span>
+									</div>
+								{/each}
+								{#if filteredPartyScores.length === 0}
+									<div class="member-table-empty">該当する政党がありません</div>
+								{/if}
+							</div>
+						</div>
 					</div>
+				{/if}
 
-					<!-- Search Box -->
+				<!-- Full Member Search -->
+				<div class="interim-results-card interim-results-card-wide">
+					<h4 class="interim-card-title"><Search size={15} /> 全議員検索</h4>
 					<div class="interim-search-box">
 						<Search size={14} class="interim-search-icon" />
 						<input
 							type="text"
-							bind:value={partySearchQuery}
-							placeholder="政党名で検索..."
+							bind:value={memberSearchQuery}
+							placeholder="名前・会派で検索..."
 							class="interim-search-input"
 						/>
-						{#if partySearchQuery}
-							<button class="interim-search-clear" onclick={() => (partySearchQuery = '')}>
+						{#if memberSearchQuery}
+							<button class="interim-search-clear" onclick={() => (memberSearchQuery = '')}>
 								<X size={14} />
 							</button>
 						{/if}
 					</div>
-
-					<!-- Party Table -->
 					<div class="interim-member-table">
 						<div class="member-table-header">
 							<span class="table-col-rank">#</span>
-							<span class="table-col-name">政党名</span>
-							<span class="table-col-group">人数</span>
+							<span class="table-col-name">氏名</span>
+							<span class="table-col-group">会派</span>
 							<span class="table-col-score">マッチ度</span>
 						</div>
 						<div class="member-table-body">
-							{#each filteredPartyScores as partyItem (partyItem.partyId)}
-								<div
-									class="member-table-row party-table-row"
-									class:rank-gold={partyItem.rank === 1}
-									class:rank-silver={partyItem.rank === 2}
-									class:rank-bronze={partyItem.rank === 3}
+							{#each filteredTopMatches as match (match.memberId)}
+								<button
+									class="member-table-row"
+									class:active={selectedMember?.memberId === match.memberId}
+									onclick={() => handleMemberClick(match)}
 								>
-									<span class="table-col-rank">{partyItem.rank}</span>
-									<span class="table-col-name">{partyItem.partyName}</span>
-									<span class="table-col-group">{partyItem.memberCount}名</span>
+									<span class="table-col-rank">{match.rank}</span>
+									<span class="table-col-name">{match.name}</span>
+									<span class="table-col-group">{match.group || '無所属'}</span>
 									<span
-										class="table-col-score score-{partyItem.globalScore >= 0.7
+										class="table-col-score score-{match.similarity >= 0.7
 											? 'high'
-											: partyItem.globalScore >= 0.5
+											: match.similarity >= 0.5
 												? 'med'
-												: 'low'}"
+												: 'low'}">{(match.similarity * 100).toFixed(1)}%</span
 									>
-										{(partyItem.globalScore * 100).toFixed(1)}%
-									</span>
-								</div>
+								</button>
 							{/each}
-							{#if filteredPartyScores.length === 0}
-								<div class="member-table-empty">該当する政党がありません</div>
+							{#if filteredTopMatches.length === 0}
+								<div class="member-table-empty">該当する議員がいません</div>
 							{/if}
 						</div>
 					</div>
 				</div>
-			{/if}
+			</div>
 
 			<!-- Visualization + Detail Side by Side -->
 			<div class="interim-viz-row">
@@ -1733,86 +1748,149 @@
 		line-height: 1.3;
 	}
 
-	/* ===== Panel Action Bar ===== */
-	.panel-action-bar {
+	/* ===== Panel Action Card ===== */
+	.panel-action-card {
+		background: white;
+		border: 1px solid #e5e7eb;
+		border-radius: 16px;
+		padding: 1.25rem 1.5rem;
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+	}
+
+	.action-card-cluster-name {
+		font-size: 1.125rem;
+		font-weight: 700;
+		color: #1a1a2e;
+		text-align: center;
+		padding-bottom: 0.25rem;
+	}
+
+	.action-card-importance-row {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
 		gap: 0.75rem;
-		padding: 0.625rem 1.25rem;
-		background: linear-gradient(135deg, #fefce8, #fef3c7);
-		border-bottom: 1px solid #fde68a;
+	}
+
+	.action-card-importance-label {
+		font-size: 0.8rem;
+		font-weight: 600;
+		color: #6b7280;
+		white-space: nowrap;
 		flex-shrink: 0;
 	}
 
-	.panel-importance {
+	.action-card-stars {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
+		gap: 0.25rem;
+		flex: 1;
 	}
 
-	.panel-importance-label {
-		font-size: 0.75rem;
-		font-weight: 600;
-		color: #92400e;
-		white-space: nowrap;
-	}
-
-	.panel-star-rating {
-		display: flex;
-		gap: 0.125rem;
-	}
-
-	.panel-star-btn {
+	.action-star-btn {
 		background: none;
 		border: none;
 		cursor: pointer;
-		padding: 0.125rem;
+		padding: 0.25rem;
 		display: flex;
 		align-items: center;
-		border-radius: 4px;
-		transition: transform 0.15s ease;
+		border-radius: 6px;
+		transition: all 0.15s ease;
 	}
 
-	.panel-star-btn:hover {
+	.action-star-btn:hover {
 		transform: scale(1.2);
+		background: rgba(251, 191, 36, 0.1);
 	}
 
-	.panel-star-btn.selected {
-		filter: drop-shadow(0 0 2px rgba(251, 191, 36, 0.5));
+	.action-star-btn.selected {
+		filter: drop-shadow(0 0 3px rgba(251, 191, 36, 0.5));
 	}
 
-	.panel-importance-text {
-		font-size: 0.7rem;
+	.action-card-importance-text {
+		font-size: 0.75rem;
+		font-weight: 500;
 		color: #b45309;
 		white-space: nowrap;
+		min-width: 5rem;
 	}
 
-	.panel-advance-btn {
+	.action-card-advance-btn {
 		display: flex;
 		align-items: center;
-		gap: 0.375rem;
-		padding: 0.5rem 1rem;
+		justify-content: center;
+		gap: 0.5rem;
+		width: 100%;
+		padding: 0.75rem 1.25rem;
 		border: none;
-		border-radius: 8px;
-		font-size: 0.8rem;
-		font-weight: 600;
+		border-radius: 10px;
+		font-size: 0.95rem;
+		font-weight: 700;
 		cursor: pointer;
 		transition: all 0.2s ease;
-		background: #059669;
+		background: linear-gradient(135deg, #059669 0%, #047857 100%);
 		color: white;
-		white-space: nowrap;
-		flex-shrink: 0;
+		box-shadow: 0 2px 8px rgba(5, 150, 105, 0.25);
 	}
 
-	.panel-advance-btn:hover {
-		background: #047857;
-		box-shadow: 0 2px 8px rgba(5, 150, 105, 0.3);
+	.action-card-advance-btn:hover:not(:disabled) {
+		background: linear-gradient(135deg, #047857 0%, #065f46 100%);
+		box-shadow: 0 4px 16px rgba(5, 150, 105, 0.35);
+		transform: translateY(-1px);
 	}
 
-	.panel-advance-btn:disabled {
+	.action-card-advance-btn:disabled {
 		opacity: 0.6;
 		cursor: not-allowed;
+	}
+
+	/* ===== Section Divider ===== */
+	.interim-section-divider {
+		display: flex;
+		align-items: center;
+		gap: 1rem;
+		padding: 0.25rem 0;
+	}
+
+	.interim-section-divider-line {
+		flex: 1;
+		height: 1px;
+		background: #e5e7eb;
+	}
+
+	.interim-section-divider-label {
+		font-size: 0.75rem;
+		font-weight: 700;
+		color: #9ca3af;
+		letter-spacing: 0.05em;
+		text-transform: uppercase;
+		white-space: nowrap;
+	}
+
+	/* ===== Results Grid ===== */
+	.interim-results-grid {
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+	}
+
+	.interim-results-card {
+		background: white;
+		border: 1px solid #e5e7eb;
+		border-radius: 12px;
+		padding: 1rem;
+	}
+
+	.interim-card-title {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-size: 0.85rem;
+		font-weight: 700;
+		color: #374151;
+		margin-bottom: 0.75rem;
 	}
 
 	/* ===== Interim Results Panel ===== */
@@ -2051,13 +2129,6 @@
 	}
 
 	/* ===== Interim Party Ranking ===== */
-	.interim-party-section {
-		background: white;
-		border-radius: 12px;
-		padding: 1rem;
-		border: 1px solid #e5e7eb;
-	}
-
 	.interim-party-mode-toggle {
 		display: flex;
 		gap: 2px;
@@ -2096,20 +2167,7 @@
 		background: #fffbeb;
 	}
 
-	/* ===== Searchable Member Table ===== */
-	.interim-search-section {
-		background: white;
-		border-radius: 12px;
-		padding: 1rem;
-		border: 1px solid #e5e7eb;
-	}
-
-	.interim-section-title {
-		font-size: 0.85rem;
-		font-weight: 600;
-		color: #6b7280;
-		margin-bottom: 0.75rem;
-	}
+	/* ===== Search Box ===== */
 
 	.interim-search-box {
 		position: relative;
@@ -2289,25 +2347,38 @@
 		border: 1px solid #e5e7eb;
 		border-radius: 10px;
 		overflow: hidden;
-		max-height: 420px;
+		max-height: 60vh;
 		display: flex;
 		flex-direction: column;
 	}
 
 	/* Full-screen panel: side-by-side layout */
-	.panel-full .interim-viz-row {
-		flex-direction: row;
-		align-items: flex-start;
+	.panel-full .interim-results-grid {
+		display: grid;
+		grid-template-columns: auto 1fr;
+		gap: 1rem;
+		align-items: start;
 	}
 
-	.panel-full .interim-viz.has-detail {
-		flex: 1;
-		min-width: 0;
+	.panel-full .interim-results-card-wide {
+		grid-column: 1 / -1;
+	}
+
+	.panel-full .interim-viz-row {
+		flex-direction: row;
+		align-items: stretch;
+	}
+
+	.panel-full .interim-viz {
+		flex-shrink: 0;
+		width: auto;
 	}
 
 	.panel-full .interim-detail-panel {
-		width: 360px;
-		max-height: 520px;
+		flex: 1;
+		min-width: 0;
+		width: auto;
+		max-height: none;
 	}
 
 	.interim-detail-panel-header {
@@ -3021,9 +3092,23 @@
 			height: 44px;
 		}
 
-		.panel-action-bar {
+		.panel-action-card {
+			padding: 1rem;
+		}
+
+		.action-card-importance-row {
 			flex-direction: column;
+			align-items: flex-start;
 			gap: 0.5rem;
+		}
+
+		.action-card-advance-btn {
+			font-size: 0.9rem;
+			padding: 0.75rem 1rem;
+		}
+
+		.interim-results-grid {
+			gap: 0.75rem;
 		}
 
 		.interim-viz-row {
