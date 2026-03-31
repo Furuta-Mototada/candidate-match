@@ -44,10 +44,15 @@
 	let sessionFilter: string = $state('all');
 	let resultFilter: string = $state('all');
 
-	// Derive unique types and sessions for filter dropdowns
+	// Derive unique types, sessions, and results for filter dropdowns
 	let availableTypes = $derived([...new Set(legislationScores.map((b) => b.billType))].sort());
 	let availableSessions = $derived(
 		[...new Set(legislationScores.map((b) => b.session))].sort((a, b) => b - a)
+	);
+	let availableResults = $derived(
+		[
+			...new Set(legislationScores.map((b) => b.result).filter((r): r is string => r !== null))
+		].sort()
 	);
 
 	// Filter bills based on search and filters
@@ -194,27 +199,37 @@
 	function closeModal() {
 		selectedBill = null;
 		memberSearchTerm = '';
-		// Destroy chart if it exists
+		// Destroy charts if they exist
 		if (chartInstance) {
 			chartInstance.destroy();
 			chartInstance = null;
+		}
+		if (normalizedChartInstance) {
+			normalizedChartInstance.destroy();
+			normalizedChartInstance = null;
 		}
 	}
 
 	let chartInstance: { destroy: () => void } | null = null;
 	let chartCanvas: HTMLCanvasElement | undefined = $state(undefined);
+	let normalizedChartInstance: { destroy: () => void } | null = null;
+	let normalizedChartCanvas: HTMLCanvasElement | undefined = $state(undefined);
 
 	// Create histogram when selected bill changes
 	$effect(() => {
 		if (
 			selectedBill &&
 			chartCanvas &&
+			normalizedChartCanvas &&
 			typeof window !== 'undefined' &&
 			(window as unknown as Record<string, unknown>).Chart
 		) {
-			// Destroy existing chart
+			// Destroy existing charts
 			if (chartInstance) {
 				chartInstance.destroy();
+			}
+			if (normalizedChartInstance) {
+				normalizedChartInstance.destroy();
 			}
 
 			const ctx = chartCanvas.getContext('2d');
@@ -250,7 +265,7 @@
 				}
 			});
 
-			// Create chart
+			// Create charts
 			const ChartCtor = (window as unknown as Record<string, unknown>).Chart as new (
 				ctx: CanvasRenderingContext2D,
 				config: unknown
@@ -285,6 +300,117 @@
 							title: {
 								display: true,
 								text: 'スコア',
+								font: {
+									size: 14,
+									weight: 'bold'
+								}
+							}
+						},
+						y: {
+							beginAtZero: true,
+							title: {
+								display: true,
+								text: '議員数',
+								font: {
+									size: 14,
+									weight: 'bold'
+								}
+							},
+							ticks: {
+								stepSize: 1
+							}
+						}
+					},
+					plugins: {
+						legend: {
+							display: false
+						},
+						tooltip: {
+							callbacks: {
+								label: function (context: { parsed: { y: number } }) {
+									return `議員数: ${context.parsed.y}名`;
+								}
+							}
+						}
+					}
+				}
+			});
+
+			// Create normalized chart (scores mapped to [-1, 1])
+			const normalizedCtx = normalizedChartCanvas.getContext('2d');
+			if (!normalizedCtx) return;
+
+			const billMax = Math.max(...scores);
+			const billMin = Math.min(...scores);
+			function normalizeScore(s: number): number {
+				if (s > 0 && billMax > 0) return s / billMax;
+				if (s < 0 && billMin < 0) return s / Math.abs(billMin);
+				return 0;
+			}
+
+			const normalizedScores = scores.map(normalizeScore);
+			const normMin = Math.min(...normalizedScores);
+			const normMax = Math.max(...normalizedScores);
+
+			// Create bins for normalized scores in 0.1 increments
+			const normBinSize = 0.1;
+			const normBinStart = Math.floor(normMin / normBinSize) * normBinSize;
+			const normBinEnd = Math.ceil(normMax / normBinSize) * normBinSize;
+			const normBins: { label: string; count: number; minVal: number; maxVal: number }[] = [];
+
+			for (
+				let i = parseFloat(normBinStart.toFixed(1));
+				i < normBinEnd + normBinSize / 2;
+				i = parseFloat((i + normBinSize).toFixed(1))
+			) {
+				normBins.push({
+					label: i.toFixed(1),
+					count: 0,
+					minVal: parseFloat(i.toFixed(1)),
+					maxVal: parseFloat((i + normBinSize).toFixed(1))
+				});
+			}
+
+			normalizedScores.forEach((ns) => {
+				const bin = normBins.find((b) => ns >= b.minVal && ns < b.maxVal);
+				if (bin) {
+					bin.count++;
+				} else if (ns >= normBinEnd - normBinSize / 2) {
+					const lastBin = normBins[normBins.length - 1];
+					if (lastBin) lastBin.count++;
+				}
+			});
+
+			normalizedChartInstance = new ChartCtor(normalizedCtx, {
+				type: 'bar',
+				data: {
+					labels: normBins.map((b) => b.label),
+					datasets: [
+						{
+							label: '議員数',
+							data: normBins.map((b) => b.count),
+							backgroundColor: normBins.map((b) => {
+								if (b.minVal > 0) return 'rgba(76, 175, 80, 0.7)';
+								if (b.minVal < 0) return 'rgba(244, 67, 54, 0.7)';
+								return 'rgba(158, 158, 158, 0.7)';
+							}),
+							borderColor: normBins.map((b) => {
+								if (b.minVal > 0) return 'rgb(76, 175, 80)';
+								if (b.minVal < 0) return 'rgb(244, 67, 54)';
+								return 'rgb(158, 158, 158)';
+							}),
+							borderWidth: 1
+						}
+					]
+				},
+				options: {
+					responsive: true,
+					maintainAspectRatio: false,
+					scales: {
+						x: {
+							title: {
+								display: true,
+								text: '正規化スコア（-1〜1）',
 								font: {
 									size: 14,
 									weight: 'bold'
@@ -528,10 +654,9 @@
 				<label class="filter-label" for="filter-result">結果</label>
 				<select id="filter-result" class="filter-select" bind:value={resultFilter}>
 					<option value="all">すべて</option>
-					<option value="可決">可決</option>
-					<option value="否決">否決</option>
-					<option value="撤回">撤回</option>
-					<option value="未了">未了</option>
+					{#each availableResults as result (result)}
+						<option value={result}>{result}</option>
+					{/each}
 					<option value="none">審議中</option>
 				</select>
 			</div>
@@ -573,6 +698,7 @@
 							<th class="col-positive">賛成</th>
 							<th class="col-negative">反対</th>
 							<th class="col-average">平均</th>
+							<th class="col-result">結果</th>
 							<th class="col-date">提出日</th>
 						</tr>
 					</thead>
@@ -597,6 +723,17 @@
 										class:negative={bill.averageScore < 0}
 									>
 										{bill.averageScore > 0 ? '+' : ''}{bill.averageScore.toFixed(1)}
+									</span>
+								</td>
+								<td class="col-result">
+									<span
+										class="result-badge"
+										class:result-passed={bill.result === '可決'}
+										class:result-rejected={bill.result === '否決'}
+										class:result-withdrawn={bill.result === '撤回'}
+										class:result-expired={bill.result === '未了'}
+									>
+										{bill.result || '審議中'}
 									</span>
 								</td>
 								<td class="col-date">{bill.submissionDate || '-'}</td>
@@ -674,6 +811,13 @@
 				<h3>スコア分布</h3>
 				<div class="chart-container">
 					<canvas bind:this={chartCanvas} id="memberScoresChart"></canvas>
+				</div>
+			</div>
+
+			<div class="chart-section">
+				<h3>スコア分布（正規化）</h3>
+				<div class="chart-container">
+					<canvas bind:this={normalizedChartCanvas} id="normalizedScoresChart"></canvas>
 				</div>
 			</div>
 
@@ -1248,12 +1392,47 @@
 		text-align: center;
 	}
 
+	.col-result {
+		width: 70px;
+		text-align: center;
+	}
+
 	.col-date {
 		width: 100px;
 		text-align: center;
 		white-space: nowrap;
 		color: #9ca3af;
 		font-size: 0.85rem;
+	}
+
+	.result-badge {
+		display: inline-block;
+		padding: 0.15rem 0.4rem;
+		border-radius: 4px;
+		font-size: 0.8rem;
+		font-weight: 500;
+		color: #9ca3af;
+		background: #f3f4f6;
+	}
+
+	.result-passed {
+		color: #16a34a;
+		background: #dcfce7;
+	}
+
+	.result-rejected {
+		color: #dc2626;
+		background: #fee2e2;
+	}
+
+	.result-withdrawn {
+		color: #d97706;
+		background: #fef3c7;
+	}
+
+	.result-expired {
+		color: #6b7280;
+		background: #e5e7eb;
 	}
 
 	.bill-type-badge {

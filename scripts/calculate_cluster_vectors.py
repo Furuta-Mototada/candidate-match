@@ -102,12 +102,17 @@ def get_bill_weight(bill_info: Dict, title: str = "") -> float:
         return 0.8
 
 
-def normalize_score(
-    score: float, min_score: float = -10, max_score: float = 12
-) -> float:
-    """Normalize score from original range to [-1, 1]."""
-    # Map [min_score, max_score] to [-1, 1]
-    return 2.0 * (score - min_score) / (max_score - min_score) - 1.0
+def normalize_score(score: float, min_score: float = 0, max_score: float = 0) -> float:
+    """Normalize score to [-1, 1] preserving sign.
+
+    Positive scores are divided by max_score, negative by abs(min_score).
+    This ensures a positive raw score always maps to a positive normalized value.
+    """
+    if score > 0 and max_score > 0:
+        return score / max_score
+    elif score < 0 and min_score < 0:
+        return score / abs(min_score)
+    return 0.0
 
 
 def build_voting_matrix(
@@ -133,13 +138,20 @@ def build_voting_matrix(
         if bill_id not in cluster_bills:
             continue
 
+        # Compute per-bill min/max for normalization
+        all_scores = [ms["score"] for ms in leg_score["memberScores"]]
+        bill_max = max(all_scores) if all_scores else 0
+        bill_min = min(all_scores) if all_scores else 0
+
         for member_score in leg_score["memberScores"]:
             member_id = member_score["memberId"]
             score = member_score["score"]
 
             if member_id not in member_scores_map:
                 member_scores_map[member_id] = {}
-            member_scores_map[member_id][bill_id] = normalize_score(score)
+            member_scores_map[member_id][bill_id] = normalize_score(
+                score, bill_min, bill_max
+            )
             member_names[member_id] = member_score["memberName"]
 
     # Build matrix
