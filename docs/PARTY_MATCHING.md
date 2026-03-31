@@ -57,7 +57,7 @@ $$
 \text{overlapFraction}(m, t, c) = \frac{|\text{bills in cluster} \cap \text{bills overlapping tenure}|}{|\text{bills in cluster}|}
 $$
 
-Two periods overlap when: `billStart ≤ tenureEnd AND tenureStart ≤ billEnd` (with null start = beginning of time, null end = present).
+Two periods overlap when: `billStart ≤ tenureEnd AND tenureStart ≤ billEnd` (with null start = beginning of time, null end = present). This is implemented via the `doPeriodsOverlap()` helper function.
 
 ### Per-Cluster Score (Weighted Average)
 
@@ -85,10 +85,34 @@ $$
 | Data | Source Table | Key Fields |
 |------|-------------|------------|
 | Member similarity per cluster | `clusterVectorResults` | Member latent vectors → cosine similarity with user |
-| Party membership history | `memberParty` | `memberId, partyId, startDate, endDate` |
-| Bill active period | `bill` | `submissionDate, resultDate` |
+| Party membership history | `memberParty` | `memberId, partyId, chamber, startDate, endDate` |
+| Bill active period | `bill` | `submissionDate, resultDate, submissionSession` |
 | Session dates (fallback) | `congressSession` | `sessionNumber, startDate` |
 | Cluster bill assignments | `clusterVectorResults.billIds` | JSON array of bill IDs per cluster |
+| Snapshot storage | `resultSnapshot` | `vectorGroupKey` — stores `"vectorName\|clusterId"` for historical mode reconstruction |
+
+## Type Definitions
+
+```typescript
+interface ClusterMatchInput {
+  clusterLabel: number;
+  importance: number;
+  matches: Array<{ memberId: number; name: string; group: string | null; similarity: number }>;
+}
+
+interface GlobalPartyScore {
+  partyId: number;
+  partyName: string;
+  globalScore: number;                    // 0–1 range
+  clusterScores: Record<number, number>;  // clusterLabel → similarity
+  memberCount: number;                    // Number of contributing members
+}
+
+interface PartyScores {
+  current: GlobalPartyScore[];
+  historical: GlobalPartyScore[];
+}
+```
 
 ## Architecture
 
@@ -96,27 +120,48 @@ $$
 
 `src/lib/server/party-matching.ts` — `calculatePartyScores(clusterResults, vectorGroupKey?)`
 
-- Input: cluster match results (same as used for global MP scores) + optional vector group key (needed for historical mode)
-- Output: `{ current: GlobalPartyScore[], historical: GlobalPartyScore[] }`
-- Historical mode requires `vectorGroupKey` to look up which bills belong to each cluster
+- **Input**: `ClusterMatchInput[]` (cluster label, importance weight, and member matches with similarity scores) + optional `vectorGroupKey` in `"vectorName|clusterId"` format (needed for historical mode)
+- **Output**: `PartyScores` → `{ current: GlobalPartyScore[], historical: GlobalPartyScore[] }`
+- Historical mode requires `vectorGroupKey` to look up which bills belong to each cluster via `clusterVectorResults`
+- Key internal functions:
+  - `calculateCurrentRoster()` — Mode A: simple average per party (`computeGlobalPartyScores()`)
+  - `calculateHistorical()` — Mode B: overlap-weighted average (`computeGlobalPartyScoresWeighted()`)
+  - `doPeriodsOverlap()` — Temporal overlap detection with null handling
 
 ### API Endpoints
 
-- **POST `/api/party-match`** — Standalone endpoint for computing party scores
+- **POST `/api/party-match`** — Standalone endpoint for computing party scores. Accepts `{ clusterResults, vectorGroupKey? }`, returns `{ success, partyScores }`.
 - Party scores are also included in:
-  - `POST /api/saved-sessions` (live-results action)
-  - `GET /api/saved-sessions?id=N` (snapshot details)
+  - **POST `/api/saved-sessions`** (`action: "snapshot"`) — Stores `vectorGroupKey` in `resultSnapshot` table. Party scores are **not** stored — they are computed on demand at retrieval time.
+  - **POST `/api/saved-sessions`** (`action: "live-results"`) — Recalculates matching from stored `userBillAnswer` entries and computes party scores.
+  - **GET `/api/saved-sessions?id=N`** — Retrieves snapshot, reconstructs `clusterResults` from stored data, and calls `calculatePartyScores()` with the stored `vectorGroupKey` to produce both current and historical party scores.
 
 ### UI Components
 
-- **`GlobalResultsPhase.svelte`** — "政党マッチ" tab with mode toggle and party ranking table
-- **`QuestioningPhase.svelte`** — Interim "政党マッチ (暫定)" section in the side panel during questioning
-- Party scores are available in both the live match flow and saved snapshot views
+- **`GlobalResultsPhase.svelte`** — "政党マッチ" tab (one of four tabs: overview, 回答記録, 全議員リスト, 政党マッチ). The tab only appears when `partyScores` data is available. Contains:
+  - Mode toggle between "現在の所属議員" and "在籍期間の行動" (historical button disabled when no historical data)
+  - Mode description text explaining each calculation method to users
+  - Top 3 party spotlight cards with rank badges (gold/silver/bronze), party name, member count, and score
+  - Sortable party ranking table: columns for 順位 (rank), 政党名 (party name), 議員数 (member count), 総合 (global score), plus per-cluster score columns. All columns are sortable, and party name is searchable.
+  - Expandable explanation section ("政党マッチの計算方法について") at the bottom
+
+- **`QuestioningPhase.svelte`** — "政党マッチ" card inside the "暫定マッチング結果" (interim results) section of the side panel during questioning. Contains:
+  - Mode toggle (same as GlobalResultsPhase)
+  - Searchable party table with columns: # (rank), 政党名 (party name), 人数 (member count), マッチ度 (match score)
+  - Auto-updates via `fetchPartyScores()` triggered by `$effect` on `topMatches` changes (debounced 300ms)
+
+- **`src/routes/match/+page.svelte`** — Orchestrates party score fetching via `fetchPartyScores()`:
+  - Collects cluster data from completed clusters
+  - For the current active cluster, fetches **all members** (not just top 5) via `/api/match` with `action: 'results'`
+  - Calls `/api/party-match` with `{ clusterResults, vectorGroupKey: selectedSavedVectorKey }`
+  - Passes `partyScores` to both `QuestioningPhase` (as `interimPartyScores`) and `GlobalResultsPhase`
 
 ## Edge Cases
 
 - **Independent MPs**: excluded from party view (remain visible in member view)
 - **Parties with few members**: shown with member count so users can assess confidence
-- **Bills without dates**: fall back to `congressSession.startDate` via `submissionSession`
+- **Bills without dates**: fall back to `congressSession.startDate` via `bill.submissionSession`
 - **Members not in any cluster**: naturally excluded (they don't appear in `clusterVectorResults`)
-- **No vectorGroupKey**: historical mode returns empty; only current roster is computed
+- **No vectorGroupKey**: historical mode returns empty array; only current roster is computed
+- **Empty cluster results**: both modes return empty arrays immediately
+- **Invalid vectorGroupKey format**: if `|` separator not found or `clusterId` is NaN, historical mode returns empty

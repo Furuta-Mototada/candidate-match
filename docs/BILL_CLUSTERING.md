@@ -10,8 +10,9 @@ This system analyzes bills submitted to the National Diet using the following ap
 2. **Text Extraction**: Extract bill text, title, and description from PDFs
 3. **Vectorization**: Convert bills to high-dimensional vectors using Japanese-compatible embedding models
 4. **Clustering**: Group similar bills using K-Means or HDBSCAN
-5. **Cluster Naming**: Generate human-readable names for each cluster using LLM
-6. **Visualization**: Explore clusters through an interactive Web UI
+5. **Cluster Naming**: Generate human-readable names for each cluster using LLM (auto-triggered after clustering if OPENAI_API_KEY is set)
+6. **Cluster Vector Calculation**: Calculate member latent vectors per cluster using weighted PCA/SVD on voting matrices
+7. **Visualization**: Explore clusters through an interactive Web UI with enrichment data, debate records, and vote results
 
 ## Setup
 
@@ -24,10 +25,13 @@ pip install -r requirements.txt
 Required packages:
 - `sentence-transformers`: Multilingual sentence embedding models
 - `PyPDF2`: PDF parsing
-- `scikit-learn`: Clustering algorithms
+- `scikit-learn`: Clustering algorithms and PCA
+- `numpy`: Numerical operations
 - `hdbscan`: Density-based clustering (optional)
 - `psycopg2-binary`: PostgreSQL client
+- `requests`: HTTP requests for downloading PDFs
 - `beautifulsoup4`: HTML parsing for scraping PDF URLs
+- `python-dotenv`: Environment variable management
 - `openai`: For LLM-based cluster naming
 
 ### 2. Update Database Schema
@@ -38,10 +42,11 @@ pnpm db:push
 ```
 
 This creates the following tables:
-- `bill_embeddings`: Bill embedding vectors and extracted text
+- `bill_embeddings`: Bill embedding vectors, PDF URLs, and extracted text
 - `bill_clusters`: Clustering result metadata
-- `bill_cluster_assignments`: Each bill's cluster assignment
+- `bill_cluster_assignments`: Each bill's cluster assignment with 2D visualization coordinates
 - `bill_cluster_label_names`: Human-readable names for cluster labels
+- `cluster_vector_results`: Pre-calculated member latent vectors for matching
 
 ## Usage
 
@@ -61,9 +66,9 @@ This script:
 1. Retrieves bills without embeddings
 2. Scrapes the actual PDF URL from the bill's detail page on sangiin.go.jp
 3. Downloads the PDF and extracts text
-4. Combines title, description, and full text to create a document
+4. Combines title, description, and full text (limited to first 5000 characters) to create a document
 5. Converts to 768-dimensional vector using multilingual Sentence-BERT model (`paraphrase-multilingual-mpnet-base-v2`)
-6. Saves both the embedding and extracted text to database
+6. Saves the embedding, PDF URL, and extracted text to database using upsert strategy
 
 **Note**: The embedding model (~1GB) will be downloaded on first run.
 
@@ -96,6 +101,8 @@ HDBSCAN is density-based clustering that detects outliers as noise (cluster -1).
 
 **Note**: HDBSCAN works best with lower-dimensional data. For 768D embeddings, it often classifies everything as noise. K-Means is recommended for this use case.
 
+**Note**: After clustering completes, `name_clusters.py` is automatically invoked to generate LLM cluster names if `OPENAI_API_KEY` is set in the environment.
+
 ### Step 3: Generate Cluster Names (Optional)
 
 Use LLM to generate human-readable names for each cluster:
@@ -109,14 +116,42 @@ pnpm cluster:name <cluster_id> --force
 
 This script:
 1. Reads bill titles for each cluster label
-2. Uses GPT-4o to analyze common themes and generate a descriptive name
-3. Saves names to `bill_cluster_label_names` table
+2. Uses GPT-5.1 to analyze common themes and generate a descriptive name (with JSON response format)
+3. Saves names to `bill_cluster_label_names` table using upsert logic
 
 Example output:
 - Cluster 0: "環境・エネルギー" - 地球温暖化対策や再生可能エネルギーに関する法案群
 - Cluster 1: "地方財政・交付税" - 地方自治体の財政基盤強化と交付税制度の改正に関する法案群
 
-### Step 4: Visualize in Web UI
+### Step 4: Calculate Cluster Vectors (Optional)
+
+Calculate member latent vectors per cluster using weighted PCA/SVD on voting matrices. This can be done via the API or CLI:
+
+```bash
+# Process all cluster labels for a given clustering
+python scripts/calculate_cluster_vectors.py --cluster-id <cluster_id>
+
+# Process a specific cluster label
+python scripts/calculate_cluster_vectors.py --cluster-id <cluster_id> --cluster-label <label>
+
+# Specify number of PCA dimensions (default: 3)
+python scripts/calculate_cluster_vectors.py --cluster-id <cluster_id> --n-components 2
+```
+
+This script:
+1. Loads legislation scores and cluster bill assignments
+2. Builds a per-cluster voting matrix (members × bills)
+3. Applies bill importance weighting:
+   - 可決 (passed): 1.0
+   - 否決 (rejected): 0.6
+   - 撤回 (withdrawn): 0.3
+   - 未了 (expired): 0.2
+   - null (deliberating): 0.8
+4. Performs weighted SVD to produce member latent vectors and bill loadings
+5. Identifies representative bills per dimension
+6. Outputs JSON (or saves to `cluster_vector_results` table via the API)
+
+### Step 5: Visualize in Web UI
 
 Start the development server:
 
@@ -128,25 +163,34 @@ Access `http://localhost:5173/bill-clustering` in your browser.
 
 #### Web UI Features
 
-1. **New Clustering Generation**:
+1. **New Clustering Generation** (Admin only):
    - Select algorithm (K-Means or HDBSCAN)
    - Adjust parameters
    - Execute directly from browser
 
 2. **View Clustering Results**:
-   - Select existing clustering results
-   - Browse bills within each cluster
-   - View LLM-generated cluster names and descriptions
-   - Color-coded cluster display
-   - 2D PCA scatter plot visualization (automatically generated per cluster)
+   - Select existing clustering results from cards (shows name, algorithm, creation date, parameters, bill count)
+   - Browse bills grouped by cluster with LLM-generated cluster names and descriptions
+   - Color-coded cluster display with 10-color palette
+   - 2D PCA scatter plot visualization with interactive zoom (50%–500%) and pan controls
+   - Click or hover bills in scatter plot to view details
+   - Legend showing cluster labels with bill counts
 
-3. **View Bill Details**:
-   - Click a bill (from list or graph) to show detail panel
+3. **View Bill Details** (right sidebar panel):
    - Type, session, number, title, description
-   - Assigned committees
+   - Assigned committees (grouped by session)
    - PDF link to view the actual bill document
    - Distance from cluster center
-   - Link to enriched bill content (if available)
+   - Bill status badges: 可決 (green), 否決 (red), 撤回 (gray), 未了 (yellow), 審議中 (blue)
+
+4. **Bill Enrichment Data** (when available):
+   - Short summary (概要) and detailed explanation (詳細説明)
+   - Impact tags with gradient badges
+   - Key points in Who/What/When format
+   - Pros and cons separated lists
+   - Example scenario (real-world application)
+   - Debate records (limited to 5 most recent)
+   - Vote results by political group (approve/reject)
 
 ## Architecture
 
@@ -161,11 +205,15 @@ Embedding Generation (Sentence-BERT)
     ↓
 Clustering (K-Means / HDBSCAN)
     ↓
-LLM Cluster Naming (Optional)
+LLM Cluster Naming (auto-triggered if OPENAI_API_KEY is set)
+    ↓
+2D Visualization (PCA → x,y stored in DB + cached JSON)
+    ↓
+Cluster Vector Calculation (Weighted SVD on voting matrices)
     ↓
 Save Results (DB)
     ↓
-Web UI Visualization (2D PCA projection)
+Web UI Visualization (scatter plot, enrichment, debates, votes)
 ```
 
 ### Embedding Model
@@ -189,12 +237,13 @@ Uses `paraphrase-multilingual-mpnet-base-v2` by default:
 
 ## Visualization System
 
-Each clustering analysis generates its own 2D visualization file stored as `bill_embeddings_2d_cluster_{id}.json`. This allows you to:
-- Switch between different clustering results without losing visualizations
-- Cache visualization data for faster loading
-- Generate visualizations on-demand when first viewing a cluster
+2D visualization coordinates are stored in the `bill_cluster_assignments` table (`x`, `y` columns) and also cached as JSON files at `static/data/bill_embeddings_2d_cluster_{id}.json`. The API uses a three-tier fallback:
 
-The visualization uses PCA (Principal Component Analysis) to reduce 768-dimensional embeddings to 2D for plotting in an interactive scatter plot.
+1. **Cached JSON file** (fastest) — `static/data/bill_embeddings_2d_cluster_{id}.json`
+2. **Database coordinates** — `x`, `y` columns in `bill_cluster_assignments`
+3. **Generate on demand** — Runs `scripts/visualize_embeddings_2d.py` to compute PCA reduction and store results
+
+This allows switching between clustering results without losing visualizations. The visualization uses PCA (Principal Component Analysis) to reduce 768-dimensional embeddings to 2D for plotting in an interactive scatter plot with zoom and pan controls.
 
 ## Database Schema
 
@@ -204,9 +253,10 @@ The visualization uses PCA (Principal Component Analysis) to reduce 768-dimensio
 -- Bill embeddings with extracted text
 CREATE TABLE bill_embeddings (
   bill_id INTEGER PRIMARY KEY REFERENCES bill(id),
-  embedding JSONB NOT NULL,
-  embedding_model TEXT NOT NULL,
+  pdf_url TEXT,                -- URL to the PDF document
   text_content TEXT,           -- Extracted PDF text
+  embedding TEXT NOT NULL,     -- JSON serialized vector (array of floats)
+  embedding_model TEXT NOT NULL,
   created_at TIMESTAMP DEFAULT NOW()
 );
 
@@ -215,29 +265,50 @@ CREATE TABLE bill_clusters (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,
   algorithm TEXT NOT NULL,
-  parameters JSONB,
-  embedding_model TEXT,
+  parameters TEXT NOT NULL,     -- JSON string of clustering parameters
+  embedding_model TEXT NOT NULL,
   created_at TIMESTAMP DEFAULT NOW()
 );
 
--- Cluster assignments
+-- Cluster assignments (composite primary key)
 CREATE TABLE bill_cluster_assignments (
-  id SERIAL PRIMARY KEY,
-  cluster_id INTEGER REFERENCES bill_clusters(id),
-  bill_id INTEGER REFERENCES bill(id),
+  cluster_id INTEGER NOT NULL REFERENCES bill_clusters(id),
+  bill_id INTEGER NOT NULL REFERENCES bill(id),
   cluster_label INTEGER NOT NULL,
-  distance REAL,
-  UNIQUE(cluster_id, bill_id)
+  distance TEXT,               -- Distance to cluster center (string)
+  x REAL,                      -- 2D visualization x coordinate (PCA)
+  y REAL,                      -- 2D visualization y coordinate (PCA)
+  PRIMARY KEY (cluster_id, bill_id)
 );
 
 -- LLM-generated cluster names
 CREATE TABLE bill_cluster_label_names (
-  cluster_id INTEGER REFERENCES bill_clusters(id),
+  cluster_id INTEGER NOT NULL REFERENCES bill_clusters(id),
   cluster_label INTEGER NOT NULL,
   name TEXT NOT NULL,
   description TEXT,
   generated_at TIMESTAMP DEFAULT NOW(),
   PRIMARY KEY(cluster_id, cluster_label)
+);
+
+-- Pre-calculated member vectors for matching
+CREATE TABLE cluster_vector_results (
+  id SERIAL PRIMARY KEY,
+  cluster_id INTEGER NOT NULL REFERENCES bill_clusters(id),
+  cluster_label INTEGER NOT NULL,
+  n_components INTEGER NOT NULL,        -- Number of PCA dimensions
+  name TEXT NOT NULL,                   -- User-provided name for this calculation
+  member_vectors TEXT NOT NULL,         -- JSON: Record<string, number[]>
+  member_names TEXT NOT NULL,           -- JSON: Record<string, string>
+  bill_loadings TEXT NOT NULL,          -- JSON: number[][]
+  bill_ids TEXT NOT NULL,               -- JSON: number[]
+  explained_variance TEXT NOT NULL,     -- JSON: number[]
+  dimensions INTEGER NOT NULL,
+  member_count INTEGER NOT NULL,
+  bill_count INTEGER NOT NULL,
+  representative_bills TEXT,            -- JSON: RepresentativeBill[][]
+  is_default BOOLEAN DEFAULT false,     -- Whether this is the default config for /match
+  created_at TIMESTAMP DEFAULT NOW()
 );
 ```
 
@@ -279,9 +350,10 @@ The LLM prompt in `name_clusters.py` can be modified to generate different style
 | Script | npm Command | Description |
 |--------|-------------|-------------|
 | `generate_bill_embeddings.py` | `pnpm embeddings:generate` | Generate embeddings from PDF text |
-| `cluster_bills.py` | `pnpm cluster:bills` | Run clustering algorithm |
+| `cluster_bills.py` | `pnpm cluster:bills` | Run clustering algorithm (auto-invokes naming) |
 | `name_clusters.py` | `pnpm cluster:name` | Generate LLM names for clusters |
-| `visualize_embeddings_2d.py` | - | Generate 2D PCA projection |
+| `calculate_cluster_vectors.py` | - (via API) | Calculate member latent vectors per cluster using weighted SVD |
+| `visualize_embeddings_2d.py` | - | Generate 2D PCA projection (stores in DB + JSON) |
 
 ## Troubleshooting
 
@@ -328,12 +400,12 @@ Or set in `.env` file.
 
 ### GET /api/bill-embeddings
 
-Get all bill embeddings.
+Get all bill embeddings, or 2D visualization data for a specific cluster.
 
 **Query Parameters**:
-- `clusterId` (optional): Generate and return 2D visualization data for specific cluster
+- `clusterId` (optional): If provided, returns 2D visualization data using three-tier fallback (cached JSON → DB coordinates → generate on-demand)
 
-**Response**:
+**Response** (without `clusterId`):
 ```json
 {
   "embeddings": [
@@ -350,6 +422,22 @@ Get all bill embeddings.
 }
 ```
 
+**Response** (with `clusterId`):
+```json
+[
+  {
+    "billId": 1,
+    "type": "閣法",
+    "session": 198,
+    "number": 1,
+    "title": "...",
+    "x": -0.091,
+    "y": 0.130,
+    "cluster": 8
+  }
+]
+```
+
 ### GET /api/bill-clusters
 
 Get list of clustering results.
@@ -363,7 +451,9 @@ Get list of clustering results.
       "name": "Policy Topics - 10 Clusters",
       "algorithm": "kmeans",
       "parameters": "{\"n_clusters\": 10}",
-      "createdAt": "2024-01-01"
+      "embeddingModel": "paraphrase-multilingual-mpnet-base-v2",
+      "createdAt": "2024-01-01",
+      "billCount": 100
     }
   ]
 }
@@ -378,8 +468,26 @@ Get details of a specific clustering result.
 {
   "cluster": { ... },
   "billsByCluster": {
-    "0": [ ... ],
-    "1": [ ... ]
+    "0": [
+      {
+        "billId": 1,
+        "clusterLabel": 0,
+        "distance": "0.123",
+        "billType": "閣法",
+        "submissionSession": 198,
+        "billNumber": 1,
+        "title": "...",
+        "description": "...",
+        "result": "可決",
+        "pdfUrl": "...",
+        "committees": [
+          { "name": "...", "chamber": "...", "session": 198 }
+        ]
+      }
+    ]
+  },
+  "labelNames": {
+    "0": { "name": "環境・エネルギー", "description": "..." }
   },
   "totalBills": 100
 }
@@ -387,7 +495,7 @@ Get details of a specific clustering result.
 
 ### POST /api/generate-clustering
 
-Generate new clustering.
+Generate new clustering (requires admin role).
 
 **Request**:
 ```json
@@ -403,18 +511,113 @@ Generate new clustering.
 {
   "success": true,
   "clusterId": 5,
+  "output": "...",
   "message": "Clustering generated successfully"
+}
+```
+
+### POST /api/cluster-vectors
+
+Calculate cluster-specific member vectors (requires admin role).
+
+**Request**:
+```json
+{
+  "clusterId": 1,
+  "clusterLabel": 0,
+  "nComponents": 3,
+  "saveImmediately": false,
+  "saveName": "My Vectors"
+}
+```
+
+**Response**:
+```json
+{
+  "success": true,
+  "clusterId": 1,
+  "clusterName": "Policy Topics",
+  "nComponents": 3,
+  "clusters": {
+    "0": {
+      "memberVectors": { "member_id": [0.1, -0.2, 0.3] },
+      "memberNames": { "member_id": "山田 太郎" },
+      "billLoadings": [[...]],
+      "representativeBills": [[{ "billId": 1, "title": "...", "result": "可決", "loading": 0.5, "absLoading": 0.5 }]],
+      "explainedVariance": [0.4, 0.3, 0.2],
+      "dimensions": 3,
+      "memberCount": 50,
+      "billCount": 20,
+      "billIds": [1, 2, 3]
+    }
+  }
+}
+```
+
+### PUT /api/cluster-vectors
+
+Save calculated cluster vectors.
+
+**Request**:
+```json
+{
+  "clusterId": 1,
+  "clusterLabel": 0,
+  "nComponents": 3,
+  "name": "My Saved Vectors",
+  "clusterData": { ... }
+}
+```
+
+### GET /api/cluster-vectors
+
+Get cluster labels and saved vector results.
+
+**Query Parameters**:
+- `clusterId` (required unless `all=true`): Cluster to query
+- `saved` (optional): `"true"` to get saved results
+- `all` (optional): `"true"` to get all saved results across all clusters
+
+### GET /api/cluster-vectors/[id]
+
+Get a specific saved vector result by ID.
+
+### DELETE /api/cluster-vectors/[id]
+
+Delete a saved vector result by ID.
+
+### GET /api/bill-enrichment?billId={billId}
+
+Get enriched bill content (summaries, key points, impact tags, pros/cons, debates, vote results).
+
+**Response**:
+```json
+{
+  "billId": 1,
+  "title": "...",
+  "description": "...",
+  "passed": true,
+  "summaryShort": "...",
+  "summaryDetailed": "...",
+  "keyPoints": [{ "who": "...", "what": "...", "when": "..." }],
+  "impactTags": ["環境", "エネルギー"],
+  "prosAndCons": { "pros": ["..."], "cons": ["..."] },
+  "exampleScenario": "...",
+  "enrichmentStatus": "completed",
+  "pdfUrl": "...",
+  "debates": [...],
+  "debateCount": 5,
+  "voteResults": [{ "groupName": "自由民主党", "approved": true }]
 }
 ```
 
 ## Future Improvements
 
-1. **t-SNE/UMAP Visualization**: Alternative dimensionality reduction methods for better cluster separation
-2. **Cluster Labeling**: Automatically extract representative keywords for each cluster
-3. **Time Series Analysis**: Track cluster distribution changes over time
-4. **Party Analysis**: Which parties submit bills in which clusters
-5. **Fine-tuning**: Optimize embedding model on Japanese bill data
-6. **Real-time Updates**: Automatically generate embeddings when new bills are added
+1. **t-SNE/UMAP Visualization**: Alternative dimensionality reduction methods for better cluster separation (t-SNE is available in `cluster_bills.py` but not yet exposed in the UI)
+2. **Time Series Analysis**: Track cluster distribution changes over time
+3. **Party Analysis**: Which parties submit bills in which clusters
+4. **Fine-tuning**: Optimize embedding model on Japanese bill data
+5. **Real-time Updates**: Automatically generate embeddings when new bills are added
 
 ## License
 

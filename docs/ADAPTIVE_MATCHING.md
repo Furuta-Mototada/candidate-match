@@ -8,8 +8,12 @@ The matching system uses a **Computerized Adaptive Testing (CAT)** approach to e
 
 Key features:
 - **Saved vector support**: Pre-calculated cluster vectors can be saved to database for faster session startup
-- **Session persistence**: Matching sessions can be saved and resumed later
-- **Multiple cluster analysis**: Users can answer questions across different policy clusters
+- **Default vector config**: Admin can designate a default vector set for the /match page (`isDefault` flag)
+- **Answer persistence**: Answers are persisted per-user in `user_bill_answer` table and auto-populated on session start
+- **Vote delegation integration**: Delegated votes are resolved and incorporated into matching sessions
+- **Multiple cluster analysis**: Users answer questions across different policy clusters, rate importance, and aggregate results
+- **Party matching**: Per-party similarity scores computed alongside individual member matches
+- **Result snapshots**: Point-in-time snapshots of matching results can be saved and loaded later
 - **Real-time matching**: Live preview of top matching members as users answer questions
 
 ## Algorithm
@@ -35,15 +39,18 @@ When a user starts a matching session:
 
 ```typescript
 MatchingState = {
-  clusterId: number,              // Cluster being analyzed
-  clusterLabel: number,           // Specific label within cluster  
-  dimensions: number,             // Number of latent dimensions (1-5)
-  answeredBills: UserAnswer[],    // List of {billId, score} pairs
-  userVector: number[],           // Position in latent space (starts at origin)
-  uncertainty: number[],          // Uncertainty per dimension (starts at 1.0)
-  questionCount: number           // Number of questions answered
+  clusterId: number,                        // Cluster being analyzed
+  clusterLabel: number,                     // Specific label within cluster  
+  dimensions: number,                       // Number of latent dimensions (1-5)
+  answeredBills: UserAnswer[],              // List of {billId, score} pairs
+  userVector: number[],                     // Position in latent space (starts at origin)
+  uncertainty: number[],                    // Uncertainty per dimension (starts at 1.0)
+  questionCount: number,                    // Number of questions answered
+  pendingDelegationBillIds?: Set<number>    // Bills with pending delegations (excluded from vector estimation)
 }
 ```
+
+If the user is logged in, existing answers from `user_bill_answer` and resolved delegated votes are pre-populated into the session at start time. Bills with pending (not-yet-voted) delegations are marked as answered for question skipping but excluded from vector estimation.
 
 ### 3. Question Selection (Adaptive Algorithm)
 
@@ -89,39 +96,44 @@ similarity(user, member) = dot(user, member) / (|user| × |member|)
 
 Results are sorted by similarity, with values ranging from -1 (opposite) to +1 (identical).
 
-## Saved Sessions
+## Persistence & Snapshots
 
-The system supports saving and resuming matching sessions:
+Active matching sessions are stored **in-memory** with automatic cleanup after 1 hour. There are no database-persisted "active sessions" — the old `saved_matching_session`, `session_cluster_result`, and `session_answer` tables were removed (see `drizzle/0018_remove_sessions.sql`).
 
-### Session Structure
+Instead, persistence is achieved through two mechanisms:
 
-```typescript
-interface SavedMatchingSession {
-  id: number;
-  name: string;
-  description: string;
-  savedVectorKey: string;      // Links to pre-calculated vectors
-  clusterId: number;
-  nComponents: number;
-  status: 'in_progress' | 'completed';
-  createdAt: Date;
-  updatedAt: Date;
-}
+### User Bill Answers
 
-interface SessionClusterResult {
-  sessionId: number;
-  clusterLabel: number;
-  clusterLabelName: string;    // Human-readable cluster name
-  userVector: string;          // JSON-encoded user position
-  importance: number;          // Weight for aggregating results
-  answeredCount: number;
-  matchesJson: string;         // Top matching members
-}
-```
+All user answers are persisted to the `user_bill_answer` table as they are submitted. When a new session starts or resumes, these answers are automatically loaded and pre-populated into the matching state. This includes:
+- Direct user answers (`yes`, `no`, `skip`)
+- Resolved delegated votes (via `resolveDelegatedVotes()`)
+- Pending delegation placeholders (excluded from vector estimation)
 
 ### Result Snapshots
 
-Users can save snapshots of their progress at any time. This allows tracking how matches change as more questions are answered.
+Users can save point-in-time **snapshots** of their matching results. A snapshot captures:
+
+```typescript
+interface ResultSnapshot {
+  id: number;
+  userId: string;                  // Owner of the snapshot
+  clusterId: number;               // Which cluster configuration
+  name: string;                    // User-provided name
+  globalScoresJson: string;        // JSON: GlobalMemberScore[]
+  clusterResultsJson: string;      // JSON: per-cluster results with matches and answered bills
+  vectorGroupKey: string | null;   // "vectorName|clusterId" — used to reconstruct viz data
+  createdAt: Date;
+}
+```
+
+When a snapshot has a `vectorGroupKey`, the system can reconstruct full visualization data (user vectors, member vectors, explained variance) by loading the cluster vector results from the database and re-estimating the user vector from the stored answered bills.
+
+### Party Matching
+
+After matching, party-level similarity scores are calculated via `calculatePartyScores()` in `party-matching.ts`:
+- **Current roster mode**: Average similarity across currently affiliated members of each party
+- **Historical mode**: Weighted average based on temporal overlap of member tenure and bill dates
+- Returns `PartyScores { current: GlobalPartyScore[], historical: GlobalPartyScore[] }`
 
 ## API Reference
 
@@ -140,7 +152,7 @@ Users can save snapshots of their progress at any time. This allows tracking how
    }
    ```
    
-   Or for backwards compatibility (calculates on-the-fly):
+   Or for backwards compatibility (calculates on-the-fly via Python subprocess):
    ```json
    {
      "action": "start",
@@ -167,19 +179,39 @@ Users can save snapshots of their progress at any time. This allows tracking how
        "title": "法案タイトル",
        "description": "法案の説明",
        "passed": true,
+       "result": "可決",
        "reason": "次元1の不確実性を解消（議員間分散: 0.45）",
-       "dimensionTarget": 0
+       "dimensionTarget": 0,
+       "billType": "閣法",
+       "submissionSession": 213,
+       "billNumber": 42
      },
      "uncertainty": [1.0, 1.0, 1.0],
      "userVector": [0, 0, 0],
+     "topMatches": [
+       { "memberId": 1, "name": "議員名", "group": "政党名", "similarity": 0.95, "rank": 1, "latentVector": [0.4, -0.1, 0.2] }
+     ],
+     "preExistingAnswerCount": 5,
+     "preExistingAnsweredBills": [
+       {
+         "billId": 100, "title": "法案名", "answer": 1, "source": "direct",
+         "billType": "閣法", "submissionSession": 213, "billNumber": 10
+       },
+       {
+         "billId": 200, "title": "法案名", "answer": -1, "source": "delegated",
+         "delegationStatus": "voted", "delegateId": "user-uuid"
+       }
+     ],
      "memberVectors": [
        { "memberId": 1, "name": "議員名", "group": "政党名", "latentVector": [0.4, -0.1, 0.2] }
      ],
      "explainedVariance": [0.35, 0.22, 0.15]
    }
    ```
+   
+   When a logged-in user starts a session, their existing `user_bill_answer` records and resolved delegated votes are loaded and pre-applied to the matching state. The response includes `preExistingAnswerCount` and `preExistingAnsweredBills` with `source` tracking (`'direct'` or `'delegated'`).
 
-2. **resume** - Resume with existing user vector (for saved sessions)
+2. **resume** - Resume with existing answers from database
    ```json
    {
      "action": "resume",
@@ -188,6 +220,10 @@ Users can save snapshots of their progress at any time. This allows tracking how
      "answeredBillIds": [123, 456]
    }
    ```
+   
+   For logged-in users, `existingUserVector` and `answeredBillIds` are ignored — answers are loaded from the database instead (including delegated votes). For anonymous users, the provided values are used directly.
+   
+   Response format is identical to `start`.
 
 3. **answer** - Submit an answer
    ```json
@@ -199,7 +235,9 @@ Users can save snapshots of their progress at any time. This allows tracking how
    }
    ```
    
-   Response includes updated `nextQuestion`, `uncertainty`, `userVector`, and `topMatches`.
+   Response includes updated `nextQuestion`, `uncertainty`, `userVector`, `topMatches`, and `isComplete`.
+   
+   **Vote delegation integration**: If the user has an active outgoing delegation for this bill, the delegation is retracted (set to `'rejected'`) and the delegate is notified. If the user's vote changes and they are a delegate with `'voted'` incoming delegations, downstream delegators are notified.
 
 4. **skip** - Skip current question
    ```json
@@ -209,12 +247,51 @@ Users can save snapshots of their progress at any time. This allows tracking how
      "billId": 123
    }
    ```
+   
+   Persists a `'skip'` answer to `user_bill_answer` (unless the user has an active delegation for this bill).
 
 5. **results** - Get final matching results
    ```json
    {
      "action": "results",
      "sessionId": "uuid"
+   }
+   ```
+
+6. **retract-answer** - Retract a user's own answer on a bill
+   ```json
+   {
+     "action": "retract-answer",
+     "billId": 123
+   }
+   ```
+   
+   Requires authentication. Fails if the user has voted on someone else's behalf via delegation for this bill.
+
+7. **direct-vote** - Vote on a bill outside a matching session (e.g., from answer history)
+   ```json
+   {
+     "action": "direct-vote",
+     "billId": 123,
+     "score": 1
+   }
+   ```
+   
+   Requires authentication. Fails if the user has an active outgoing delegation for this bill.
+
+8. **set-default** (admin only) - Set a vector group as the default for /match
+   ```json
+   {
+     "action": "set-default",
+     "name": "Vector Config Name",
+     "configClusterId": 1
+   }
+   ```
+
+9. **clear-default** (admin only) - Remove default designation
+   ```json
+   {
+     "action": "clear-default"
    }
    ```
 
@@ -249,7 +326,8 @@ Get available clusters and saved vector results for matching:
       "memberCount": 389,
       "billCount": 45,
       "createdAt": "2024-01-01T00:00:00Z",
-      "clusterLabelName": "環境・エネルギー"
+      "clusterLabelName": "環境・エネルギー",
+      "isDefault": true
     }
   ]
 }
@@ -257,62 +335,143 @@ Get available clusters and saved vector results for matching:
 
 #### `GET /api/saved-sessions`
 
-Get all saved matching sessions:
+Requires authentication. Query parameters:
 
+- `(none)` — List all snapshots for the current user
+- `id=N` — Get specific snapshot details (includes reconstructed viz data if `vectorGroupKey` present)
+- `answers=true` — Get user's bill answers summary
+- `answers=true&clusterId=N` — Get answers filtered by cluster
+
+List response:
 ```json
 {
   "success": true,
-  "sessions": [
+  "snapshots": [
     {
       "id": 1,
       "name": "My Analysis",
-      "description": "Description",
-      "status": "in_progress",
+      "clusterId": 1,
       "totalAnswered": 15,
-      "totalBills": 100,
-      "clusterCount": 3,
-      "latestSnapshotDate": "2024-01-15T12:00:00Z",
-      "createdAt": "2024-01-01T00:00:00Z",
-      "updatedAt": "2024-01-15T12:00:00Z"
+      "topMatch": { "name": "議員名", "score": 0.87 },
+      "createdAt": "2024-01-15T12:00:00Z"
     }
   ]
 }
 ```
 
+Snapshot detail response (when `id=N`):
+```json
+{
+  "success": true,
+  "snapshot": {
+    "id": 1,
+    "clusterId": 1,
+    "clusterName": "2024年国会法案",
+    "name": "My Analysis",
+    "globalScores": [{ "memberId": 1, "name": "議員名", "group": "政党名", "globalScore": 0.87, "clusterScores": { "0": 0.9 } }],
+    "clusterResults": [{ "clusterLabel": 0, "clusterLabelName": "環境・エネルギー", "importance": 3, "answeredCount": 10, "matches": [...], "userVector": [...], "memberVectorsForViz": [...], "explainedVariance": [...] }],
+    "totalAnswered": 15,
+    "createdAt": "2024-01-15T12:00:00Z",
+    "partyScores": { "current": [...], "historical": [...] }
+  }
+}
+```
+
 #### `POST /api/saved-sessions`
 
-Create or update a saved matching session.
+Requires authentication.
+
+##### Actions
+
+1. **snapshot** - Save a point-in-time snapshot of matching results
+   ```json
+   {
+     "action": "snapshot",
+     "name": "My Analysis",
+     "clusterId": 1,
+     "vectorGroupKey": "configName|1",
+     "clusterResults": [
+       {
+         "clusterLabel": 0,
+         "clusterLabelName": "環境・エネルギー",
+         "importance": 3,
+         "answeredCount": 10,
+         "matches": [{ "memberId": 1, "name": "議員名", "group": "政党名", "similarity": 0.9 }],
+         "answeredBills": [{ "billId": 100, "title": "法案名", "answer": 1 }]
+       }
+     ]
+   }
+   ```
+
+2. **delete** - Delete a snapshot
+   ```json
+   { "action": "delete", "snapshotId": 1 }
+   ```
+
+3. **live-results** - Compute real-time results from saved answers (no active session needed)
+   ```json
+   {
+     "action": "live-results",
+     "vectorGroupKey": "configName|1",
+     "importanceWeights": { "0": 5, "1": 3 }
+   }
+   ```
+   
+   Loads all user answers and delegated votes, processes each cluster label in the vector group, estimates user vectors, and returns aggregated global scores with party scores.
+
+4. **backfill-answers** - Backfill `user_bill_answer` for users who matched while logged out
+   ```json
+   {
+     "action": "backfill-answers",
+     "answeredBills": [{ "billId": 100, "answer": 1 }, { "billId": 200, "answer": -1 }]
+   }
+   ```
 
 ## UI Flow
 
-1. **Setup Phase**
-   - User selects a pre-calculated vector set (or creates a new one)
-   - Optionally selects a specific cluster label
-   - Can create a new saved session or resume an existing one
+The matching interface supports six phases (defined as `MatchingPhase` type):
 
-2. **Questioning Phase**
-   - Display current bill with title and description
+1. **Setup Phase** (`'setup'`)
+   - User selects a pre-calculated vector group (or the default is pre-selected)
+   - Existing answers are auto-loaded if logged in
+   - Can load a previous snapshot to view saved results
+
+2. **Questioning Phase** (`'questioning'`)
+   - Display current bill with title, description, bill type, and session/number metadata
    - User votes: 賛成 (agree: +1), わからない (unsure: 0), 反対 (disagree: -1)
+   - Bills with active delegations are shown with delegation status
    - Progress bar shows uncertainty reduction
-   - Live preview of top matching members
+   - Live preview of top matching members and party scores
    - User can skip questions or finish early (after 3+ answers)
-   - Cluster importance can be weighted for cross-cluster analysis
 
-3. **Results Phase**
-   - Show top matching members with similarity percentages
-   - Display user's estimated political vector
-   - 2D visualization of members in latent space with user position
-   - Option to save session for later continuation
-   - Aggregate scores across multiple clusters using importance weights
+3. **Rating Phase** (`'rating'`)
+   - User reviews results for the current cluster label
+   - Preview of matches for this cluster
+
+4. **Importance Review Phase** (`'importance-review'`)
+   - User rates the importance of each answered cluster (1-5 stars)
+   - Can navigate to additional cluster labels in the vector group
+
+5. **Cluster Results Phase** (`'cluster-results'`)
+   - Detailed per-cluster results and 2D visualization
+
+6. **Global Results Phase** (`'global-results'`)
+   - Aggregated scores across all clusters using importance weights
+   - Formula: `globalScore = Σ (importance[i] / totalImportance) × similarity[i]`
+   - Party-level scores (current roster and historical)
+   - Option to save a snapshot
 
 ## Implementation Files
 
 | File | Description |
 |------|-------------|
-| `src/lib/server/matching.ts` | Core matching algorithm (CAT, similarity, question selection) |
-| `src/routes/api/match/+server.ts` | Match API endpoint handlers |
-| `src/routes/api/saved-sessions/+server.ts` | Saved session management API |
-| `src/routes/match/+page.svelte` | User interface |
+| `src/lib/server/matching.ts` | Core matching algorithm (CAT, similarity, question selection, answer conversion) |
+| `src/lib/server/party-matching.ts` | Party-level score calculation (current roster + historical) |
+| `src/lib/server/delegation-helpers.ts` | Vote delegation resolution (chain walking) |
+| `src/lib/types/match.ts` | TypeScript types for matching (phases, results, snapshots, party scores) |
+| `src/routes/api/match/+server.ts` | Match API endpoint handlers (start, resume, answer, skip, results, retract-answer, direct-vote, set-default, clear-default) |
+| `src/routes/api/saved-sessions/+server.ts` | Snapshot management and live-results API |
+| `src/routes/match/+page.svelte` | User interface (6 matching phases) |
 | `src/routes/match/+page.server.ts` | Server-side data loading |
 | `scripts/calculate_cluster_vectors.py` | Python script for SVD/latent vector calculation |
 
@@ -337,66 +496,35 @@ CREATE TABLE cluster_vector_results (
   member_count INTEGER NOT NULL,
   bill_count INTEGER NOT NULL,
   representative_bills TEXT,          -- JSON: RepresentativeBill[][] (optional)
+  is_default BOOLEAN NOT NULL DEFAULT false,  -- Whether this is the default config for /match
   created_at TIMESTAMP DEFAULT NOW()
 );
 
--- Saved matching sessions
-CREATE TABLE saved_matching_session (
+-- User bill answers (persisted per-user, shared across sessions)
+CREATE TABLE user_bill_answer (
   id SERIAL PRIMARY KEY,
-  name TEXT NOT NULL,
-  description TEXT,
-  saved_vector_key TEXT NOT NULL,     -- "name|clusterId" key for the saved vector group
-  cluster_id INTEGER REFERENCES bill_clusters(id),
-  n_components INTEGER NOT NULL,
-  status TEXT DEFAULT 'in_progress',  -- 'in_progress' or 'completed'
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
-);
-
--- Per-cluster results within a session
-CREATE TABLE session_cluster_result (
-  id SERIAL PRIMARY KEY,
-  session_id INTEGER REFERENCES saved_matching_session(id) ON DELETE CASCADE,
-  cluster_label INTEGER NOT NULL,
-  cluster_label_name TEXT,
-  user_vector TEXT NOT NULL,           -- JSON: number[]
-  importance INTEGER DEFAULT 3,        -- 1-5 rating
-  answered_count INTEGER DEFAULT 0,
-  matches_json TEXT NOT NULL,          -- JSON: MemberMatch[]
-  member_vectors_viz_json TEXT,        -- JSON: MemberVectorForViz[]
-  explained_variance_json TEXT,        -- JSON: number[]
-  user_vector_history_json TEXT,       -- JSON: number[][]
-  x_dimension INTEGER DEFAULT 0,
-  y_dimension INTEGER DEFAULT 1,
+  user_id TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
+  bill_id INTEGER NOT NULL REFERENCES bill(id),
+  answer bill_answer_value NOT NULL,  -- 'yes', 'no', 'skip', or 'delegated'
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW(),
-  UNIQUE(session_id, cluster_label)
+  UNIQUE(user_id, bill_id)
 );
 
--- Individual bill answers within a cluster result
-CREATE TABLE session_answer (
-  id SERIAL PRIMARY KEY,
-  cluster_result_id INTEGER REFERENCES session_cluster_result(id) ON DELETE CASCADE,
-  bill_id INTEGER REFERENCES bill(id),
-  bill_title TEXT NOT NULL,
-  score INTEGER NOT NULL,              -- -1, 0, or 1
-  answered_at TIMESTAMP DEFAULT NOW(),
-  UNIQUE(cluster_result_id, bill_id)
-);
-
--- Point-in-time snapshots of matching results
+-- Point-in-time snapshots of matching results (standalone, no session dependency)
 CREATE TABLE result_snapshot (
   id SERIAL PRIMARY KEY,
-  session_id INTEGER REFERENCES saved_matching_session(id) ON DELETE CASCADE,
-  snapshot_number INTEGER DEFAULT 1,
-  name TEXT,
+  user_id TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
+  cluster_id INTEGER NOT NULL REFERENCES bill_clusters(id),
+  name TEXT NOT NULL,
   global_scores_json TEXT NOT NULL,    -- JSON: GlobalMemberScore[]
-  cluster_results_json TEXT NOT NULL,  -- JSON: summary of cluster results
-  total_answered INTEGER NOT NULL,
-  created_at TIMESTAMP DEFAULT NOW(),
-  UNIQUE(session_id, snapshot_number)
+  cluster_results_json TEXT NOT NULL,  -- JSON: per-cluster results with matches and answered bills
+  vector_group_key TEXT,               -- "vectorName|clusterId" for reconstructing viz data
+  created_at TIMESTAMP DEFAULT NOW()
 );
 ```
+
+> **Note**: The old `saved_matching_session`, `session_cluster_result`, and `session_answer` tables were removed in migration `0018_remove_sessions.sql`.
 
 ## Configuration
 
@@ -411,10 +539,11 @@ CREATE TABLE result_snapshot (
 
 ### Session Configuration
 
-Sessions are stored in-memory with automatic cleanup after 1 hour. For production:
-- Saved sessions persist to PostgreSQL database
-- Can be resumed with `action: "resume"`
-- Support for result snapshots at any point
+Active sessions are stored in-memory with automatic cleanup after 1 hour. Answer persistence is handled separately via `user_bill_answer`:
+- Logged-in users have answers auto-saved and auto-loaded on any new session
+- Anonymous users can backfill answers after signing up via the `backfill-answers` action
+- Result snapshots provide permanent records of matching results
+- The `live-results` action can recompute results from saved answers at any time without an active session
 
 ## Technical Notes
 
@@ -443,3 +572,13 @@ python scripts/calculate_cluster_vectors.py --cluster-id 1 --n-components 3
 - Question selection is O(n) where n = number of bills
 - Member matching is O(m) where m = number of members
 - All operations complete in < 100ms for typical datasets with pre-calculated vectors
+
+### Vote Delegation Integration
+
+The matching system is integrated with the vote delegation feature:
+
+- **Session start/resume**: Delegated votes are resolved via `resolveDelegatedVotes()` (walks delegation chains to find the terminal voter's answer) and pre-applied to the user's matching state
+- **Pending delegations**: Bills with active but not-yet-voted delegations are marked as answered for question skipping but excluded from vector estimation (their score would be meaningless)
+- **Answering**: When a user answers a bill they have delegated, the delegation is retracted (`status: 'rejected'`) and the delegate is notified via `notifyDelegationOverridden()`
+- **Vote changes**: If a delegate changes their vote, downstream delegators are notified via `notifyDelegationVoteChanged()` and `notifyUpstreamDelegatorsVoteChanged()`
+- **Skipping**: Skip answers are not persisted if the user has an active delegation for that bill
