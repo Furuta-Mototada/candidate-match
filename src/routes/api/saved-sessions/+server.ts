@@ -23,6 +23,7 @@ import {
 	type UserAnswer
 } from '$lib/server/matching.js';
 import { resolveDelegatedVotes } from '$lib/server/delegation-helpers.js';
+import { calculatePartyScores } from '$lib/server/party-matching.js';
 
 /**
  * GET /api/saved-sessions
@@ -117,6 +118,28 @@ async function getSnapshotDetails(snapshotId: number, userId: string) {
 		clusterResults = await enrichClusterResultsWithVizData(clusterResults, snapshot.vectorGroupKey);
 	}
 
+	// Calculate party scores from stored member similarities
+	const globalScores = JSON.parse(snapshot.globalScoresJson);
+	const partyScores = await calculatePartyScores(
+		clusterResults.map(
+			(cr: {
+				clusterLabel: number;
+				importance: number;
+				matches: Array<{
+					memberId: number;
+					name: string;
+					group: string | null;
+					similarity: number;
+				}>;
+			}) => ({
+				clusterLabel: cr.clusterLabel,
+				importance: cr.importance,
+				matches: cr.matches
+			})
+		),
+		snapshot.vectorGroupKey
+	);
+
 	return json({
 		success: true,
 		snapshot: {
@@ -124,13 +147,14 @@ async function getSnapshotDetails(snapshotId: number, userId: string) {
 			clusterId: snapshot.clusterId,
 			clusterName: cluster?.name || '',
 			name: snapshot.name,
-			globalScores: JSON.parse(snapshot.globalScoresJson),
+			globalScores,
 			clusterResults,
 			totalAnswered: (clusterResults as Array<{ answeredCount: number }>).reduce(
 				(sum: number, cr: { answeredCount: number }) => sum + cr.answeredCount,
 				0
 			),
-			createdAt: snapshot.createdAt.toISOString()
+			createdAt: snapshot.createdAt.toISOString(),
+			partyScores
 		}
 	});
 }
@@ -764,10 +788,14 @@ async function handleLiveResults(
 	const globalScores = calculateGlobalScores(clusterResultsList);
 	const totalAnswered = clusterResultsList.reduce((sum, cr) => sum + cr.answeredCount, 0);
 
+	// Calculate party scores
+	const partyScores = await calculatePartyScores(clusterResultsList, vectorGroupKey);
+
 	return json({
 		success: true,
 		globalScores,
 		clusterResults: clusterResultsList,
-		totalAnswered
+		totalAnswered,
+		partyScores
 	});
 }

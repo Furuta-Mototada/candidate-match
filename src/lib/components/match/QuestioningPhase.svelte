@@ -26,7 +26,8 @@
 		Bill,
 		MemberMatch,
 		MemberVectorForViz,
-		EnrichedBillData
+		EnrichedBillData,
+		PartyScores
 	} from '$lib/types/index.js';
 	import { formatBillRef } from '$lib/types/index.js';
 
@@ -68,6 +69,7 @@
 		confidence: number;
 		isLastClusterInSession: boolean;
 		nextClusterDisplayName: string | null;
+		interimPartyScores: PartyScores | null;
 	}
 
 	let {
@@ -94,6 +96,7 @@
 		confidence = 0,
 		isLastClusterInSession = false,
 		nextClusterDisplayName = null,
+		interimPartyScores = null,
 		...rest
 	}: Props = $props();
 	void rest; // Consume unused props (currentClusterDisplayName, currentClusterBillCount)
@@ -246,6 +249,23 @@
 		return allMembersRanked.filter(
 			(m) => m.name.toLowerCase().includes(q) || (m.group && m.group.toLowerCase().includes(q))
 		);
+	});
+
+	// Party search/mode state
+	let partySearchQuery = $state('');
+	let partyMode = $state<'current' | 'historical'>('current');
+
+	let activePartyScores = $derived.by(() => {
+		if (!interimPartyScores) return [];
+		const list =
+			partyMode === 'current' ? interimPartyScores.current : interimPartyScores.historical;
+		return (list ?? []).map((p, i) => ({ ...p, rank: i + 1 }));
+	});
+
+	let filteredPartyScores = $derived.by(() => {
+		if (!partySearchQuery.trim()) return activePartyScores;
+		const q = partySearchQuery.toLowerCase();
+		return activePartyScores.filter((p) => p.partyName.toLowerCase().includes(q));
 	});
 
 	// Member detail state
@@ -836,6 +856,83 @@
 					</div>
 				</div>
 			</div>
+
+			<!-- Interim Party Ranking -->
+			{#if activePartyScores.length > 0}
+				<div class="interim-party-section">
+					<h4 class="interim-section-title">政党マッチ</h4>
+
+					<!-- Mode Toggle -->
+					<div class="interim-party-mode-toggle">
+						<button
+							class="interim-party-mode-btn"
+							class:active={partyMode === 'current'}
+							onclick={() => (partyMode = 'current')}
+						>
+							現在の所属議員
+						</button>
+						<button
+							class="interim-party-mode-btn"
+							class:active={partyMode === 'historical'}
+							onclick={() => (partyMode = 'historical')}
+						>
+							在籍期間の行動
+						</button>
+					</div>
+
+					<!-- Search Box -->
+					<div class="interim-search-box">
+						<Search size={14} class="interim-search-icon" />
+						<input
+							type="text"
+							bind:value={partySearchQuery}
+							placeholder="政党名で検索..."
+							class="interim-search-input"
+						/>
+						{#if partySearchQuery}
+							<button class="interim-search-clear" onclick={() => (partySearchQuery = '')}>
+								<X size={14} />
+							</button>
+						{/if}
+					</div>
+
+					<!-- Party Table -->
+					<div class="interim-member-table">
+						<div class="member-table-header">
+							<span class="table-col-rank">#</span>
+							<span class="table-col-name">政党名</span>
+							<span class="table-col-group">人数</span>
+							<span class="table-col-score">マッチ度</span>
+						</div>
+						<div class="member-table-body">
+							{#each filteredPartyScores as partyItem (partyItem.partyId)}
+								<div
+									class="member-table-row party-table-row"
+									class:rank-gold={partyItem.rank === 1}
+									class:rank-silver={partyItem.rank === 2}
+									class:rank-bronze={partyItem.rank === 3}
+								>
+									<span class="table-col-rank">{partyItem.rank}</span>
+									<span class="table-col-name">{partyItem.partyName}</span>
+									<span class="table-col-group">{partyItem.memberCount}名</span>
+									<span
+										class="table-col-score score-{partyItem.globalScore >= 0.7
+											? 'high'
+											: partyItem.globalScore >= 0.5
+												? 'med'
+												: 'low'}"
+									>
+										{(partyItem.globalScore * 100).toFixed(1)}%
+									</span>
+								</div>
+							{/each}
+							{#if filteredPartyScores.length === 0}
+								<div class="member-table-empty">該当する政党がありません</div>
+							{/if}
+						</div>
+					</div>
+				</div>
+			{/if}
 
 			<!-- Visualization + Detail Side by Side -->
 			<div class="interim-viz-row">
@@ -1951,6 +2048,52 @@
 		font-size: 0.7rem;
 		font-weight: 400;
 		color: #9ca3af;
+	}
+
+	/* ===== Interim Party Ranking ===== */
+	.interim-party-section {
+		background: white;
+		border-radius: 12px;
+		padding: 1rem;
+		border: 1px solid #e5e7eb;
+	}
+
+	.interim-party-mode-toggle {
+		display: flex;
+		gap: 2px;
+		background: #f3f4f6;
+		border-radius: 8px;
+		padding: 2px;
+		margin-bottom: 0.75rem;
+	}
+
+	.interim-party-mode-btn {
+		flex: 1;
+		padding: 0.35rem 0.5rem;
+		border: none;
+		border-radius: 6px;
+		font-size: 0.75rem;
+		font-weight: 600;
+		color: #6b7280;
+		background: transparent;
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+
+	.interim-party-mode-btn.active {
+		background: white;
+		color: #4f46e5;
+		box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+	}
+
+	.party-table-row.rank-gold {
+		background: #fffbeb;
+	}
+	.party-table-row.rank-silver {
+		background: #f9fafb;
+	}
+	.party-table-row.rank-bronze {
+		background: #fffbeb;
 	}
 
 	/* ===== Searchable Member Table ===== */

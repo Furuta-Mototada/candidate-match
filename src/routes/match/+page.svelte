@@ -26,7 +26,8 @@
 		ClusterResult,
 		GlobalMemberScore,
 		MatchingPhase,
-		MemberVectorForViz
+		MemberVectorForViz,
+		PartyScores
 	} from '$lib/types/index.js';
 
 	interface NextQuestion {
@@ -59,6 +60,7 @@
 	let currentClusterIndex: number = $state(0);
 	let clusterResults: ClusterResult[] = $state([]);
 	let globalScores: GlobalMemberScore[] = $state([]);
+	let partyScores: PartyScores | null = $state(null);
 
 	// Current cluster session
 	let sessionId: string | null = $state(null);
@@ -222,6 +224,20 @@
 			}
 		}
 		return true;
+	});
+
+	// Auto-fetch party scores whenever topMatches changes during questioning
+	let partyScoreTimer: ReturnType<typeof setTimeout> | null = null;
+	$effect(() => {
+		// Track dependencies: topMatches changes trigger this effect
+		const matchCount = topMatches.length;
+		if (phase === 'questioning' && matchCount > 0) {
+			// Debounce to avoid rapid successive calls
+			if (partyScoreTimer) clearTimeout(partyScoreTimer);
+			partyScoreTimer = setTimeout(() => {
+				fetchPartyScores();
+			}, 300);
+		}
 	});
 
 	/**
@@ -1047,6 +1063,8 @@
 				await startClusterSessionWithSavedVector(clusterLabelsToProcess[nextIndex]);
 				// Only update the index after successful start
 				currentClusterIndex = nextIndex;
+				// Update interim party scores in background (non-blocking)
+				fetchPartyScores();
 			} else {
 				// Go to importance review phase immediately, load missing clusters in background
 				phase = 'importance-review';
@@ -1085,10 +1103,101 @@
 			}
 			calculateGlobalScores();
 			phase = 'global-results';
+			// Fetch party scores in background (non-blocking)
+			fetchPartyScores();
 		} catch (e) {
 			error = e instanceof Error ? e.message : '不明なエラーが発生しました';
 		} finally {
 			isLoading = false;
+		}
+	}
+
+	/**
+	 * Fetch party matching scores from the API.
+	 * Includes both completed cluster results AND the current cluster's full member matches
+	 * (fetched from the session to get ALL members, not just top 5).
+	 */
+	async function fetchPartyScores() {
+		try {
+			// Build cluster data from completed clusters
+			const allClusterData = clusterResults.map((cr) => ({
+				clusterLabel: cr.clusterLabel,
+				importance: cr.importance,
+				matches: cr.matches.map((m) => ({
+					memberId: m.memberId,
+					name: m.name,
+					group: m.group,
+					similarity: m.similarity
+				}))
+			}));
+
+			// For the current cluster, fetch ALL members from the session (not just top 5)
+			if (
+				currentClusterLabel !== null &&
+				sessionId &&
+				!allClusterData.some((cr) => cr.clusterLabel === currentClusterLabel)
+			) {
+				try {
+					const resultsRes = await fetch('/api/match', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ action: 'results', sessionId })
+					});
+					if (resultsRes.ok) {
+						const resultsData = await resultsRes.json();
+						if (resultsData.success && resultsData.matches?.length > 0) {
+							allClusterData.push({
+								clusterLabel: currentClusterLabel,
+								importance: pendingImportance,
+								matches: resultsData.matches.map(
+									(m: {
+										memberId: number;
+										name: string;
+										group: string | null;
+										similarity: number;
+									}) => ({
+										memberId: m.memberId,
+										name: m.name,
+										group: m.group,
+										similarity: m.similarity
+									})
+								)
+							});
+						}
+					}
+				} catch {
+					// If results fetch fails, fall back to topMatches
+					if (topMatches.length > 0) {
+						allClusterData.push({
+							clusterLabel: currentClusterLabel,
+							importance: pendingImportance,
+							matches: topMatches.map((m) => ({
+								memberId: m.memberId,
+								name: m.name,
+								group: m.group,
+								similarity: m.similarity
+							}))
+						});
+					}
+				}
+			}
+
+			if (allClusterData.length === 0) return;
+
+			const res = await fetch('/api/party-match', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					clusterResults: allClusterData,
+					vectorGroupKey: selectedSavedVectorKey
+				})
+			});
+			if (res.ok) {
+				const data = await res.json();
+				partyScores = data.partyScores;
+			}
+		} catch (e) {
+			console.error('Failed to fetch party scores:', e);
 		}
 	}
 
@@ -1158,6 +1267,7 @@
 		userVector = [];
 		clusterResults = [];
 		globalScores = [];
+		partyScores = null;
 		currentClusterIndex = 0;
 		clusterLabelsToProcess = [];
 		clusterLabelNameMap = {};
@@ -1482,6 +1592,7 @@
 				{confidence}
 				{isLastClusterInSession}
 				{nextClusterDisplayName}
+				interimPartyScores={partyScores}
 			/>
 		{:else if phase === 'importance-review'}
 			<!-- Importance Review Phase -->
@@ -1553,6 +1664,7 @@
 			<GlobalResultsPhase
 				{clusterResults}
 				{globalScores}
+				{partyScores}
 				onReset={reset}
 				onSave={data.user ? saveSnapshot : undefined}
 				{isSaving}

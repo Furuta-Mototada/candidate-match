@@ -92,6 +92,19 @@ export interface GlobalMemberScore {
 	clusterScores: Record<number, number>; // clusterLabel -> similarity
 }
 
+export interface GlobalPartyScore {
+	partyId: number;
+	partyName: string;
+	globalScore: number;
+	clusterScores: Record<number, number>; // clusterLabel -> similarity
+	memberCount: number; // Number of contributing members
+}
+
+export interface PartyScores {
+	current: GlobalPartyScore[];
+	historical: GlobalPartyScore[];
+}
+
 export type MatchingPhase =
 	| 'setup'
 	| 'questioning'
@@ -138,6 +151,7 @@ export interface ResultSnapshotData {
 	clusterResults: (SnapshotClusterResult | ClusterResult)[];
 	totalAnswered: number;
 	createdAt: string;
+	partyScores?: PartyScores | null;
 }
 
 export type SnapshotClusterResult = BaseClusterResult;

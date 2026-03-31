@@ -10,7 +10,8 @@
 		SavedVectorInfo,
 		GlobalMemberScore,
 		BaseClusterResult,
-		ClusterResult
+		ClusterResult,
+		PartyScores
 	} from '$lib/types/index.js';
 	import { formatBillRef } from '$lib/types/match.js';
 	import DelegationModal from '$lib/components/match/DelegationModal.svelte';
@@ -140,6 +141,7 @@
 	let liveGlobalScores: GlobalMemberScore[] = $state([]);
 	let liveClusterResults: (BaseClusterResult | ClusterResult)[] = $state([]);
 	let liveTotalAnswered: number = $state(0);
+	let livePartyScores: PartyScores | null = $state(null);
 	let liveLoading: boolean = $state(false);
 	let liveError: string | null = $state(null);
 	let showLiveResult: boolean = $state(false);
@@ -217,6 +219,7 @@
 			liveGlobalScores = result.globalScores;
 			liveClusterResults = result.clusterResults;
 			liveTotalAnswered = result.totalAnswered;
+			livePartyScores = result.partyScores || null;
 			showLiveResult = true;
 		} catch (e) {
 			liveError = e instanceof Error ? e.message : '不明なエラーが発生しました';
@@ -1110,6 +1113,7 @@
 						<GlobalResultsPhase
 							clusterResults={liveClusterResults}
 							globalScores={liveGlobalScores}
+							partyScores={livePartyScores}
 							readonly={true}
 						/>
 					</div>

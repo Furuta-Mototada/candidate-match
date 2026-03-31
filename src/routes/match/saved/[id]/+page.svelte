@@ -73,6 +73,7 @@
 		<GlobalResultsPhase
 			clusterResults={snapshot.clusterResults || []}
 			globalScores={snapshot.globalScores || []}
+			partyScores={snapshot.partyScores || null}
 			readonly={true}
 		/>
 	</main>
