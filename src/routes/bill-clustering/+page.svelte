@@ -2,7 +2,7 @@
 	import { SvelteMap } from 'svelte/reactivity';
 	import type { PageData } from './$types.js';
 	import { PageHero, ClusterCard, EmptyState } from '$lib/components/index.js';
-	import { ChartColumn, RotateCcw, X, BookOpen, ThumbsUp, ThumbsDown } from '@lucide/svelte';
+	import { ChartColumn, RotateCcw, X, BookOpen, ThumbsUp, ThumbsDown, Target, Lightbulb, Layers, GitBranch, Eye } from '@lucide/svelte';
 
 	interface CommitteeInfo {
 		name: string | null;
@@ -367,6 +367,119 @@
 	>
 		{#snippet badge()}<ChartColumn size={16} class="inline-icon" /> クラスタリング分析{/snippet}
 	</PageHero>
+
+	<!-- Explanation Section (Collapsible) -->
+	<section class="explanation-section">
+		<details class="explanation-details-wrapper">
+			<summary class="explanation-summary">
+				<span class="summary-icon"><BookOpen size={16} /></span>
+				<span>この分析について</span>
+				<span class="expand-icon">▼</span>
+			</summary>
+
+			<div class="explanation-content">
+				<div class="explanation-intro">
+					<h3><Target size={16} class="inline-icon" /> 何をしているの？</h3>
+					<p>
+						この分析では、国会に提出された法案を<strong>ベクトル化（埋め込み）</strong>し、
+						内容が似ている法案を<strong>自動的にグループ（クラスタ）</strong>に分類しています。
+						これにより、政策トピックの全体像を俯瞰できます。
+					</p>
+				</div>
+
+				<div class="explanation-diagram">
+					<div class="diagram-container">
+						<div class="diagram-before">
+							<div class="diagram-title">ステップ1: ベクトル化</div>
+							<div class="diagram-visual">
+								<div class="step-visual">
+									<div class="step-item">📄 法案テキスト</div>
+									<div class="step-arrow">↓</div>
+									<div class="step-item highlight">AIモデルで数値ベクトルに変換</div>
+									<div class="step-arrow">↓</div>
+									<div class="step-item">[0.23, -0.41, 0.87, ...]</div>
+								</div>
+							</div>
+							<div class="diagram-desc">法案の内容を高次元の数値で表現</div>
+						</div>
+
+						<div class="diagram-arrow">→</div>
+
+						<div class="diagram-after">
+							<div class="diagram-title">ステップ2: クラスタリング</div>
+							<div class="diagram-visual">
+								<div class="step-visual">
+									<div class="cluster-demo">
+										<div class="cluster-demo-group group-a">
+											<span class="cluster-dot"></span>
+											<span class="cluster-dot"></span>
+											<span class="cluster-dot"></span>
+											<span class="cluster-label-text">経済政策</span>
+										</div>
+										<div class="cluster-demo-group group-b">
+											<span class="cluster-dot"></span>
+											<span class="cluster-dot"></span>
+											<span class="cluster-label-text">社会保障</span>
+										</div>
+									</div>
+								</div>
+							</div>
+							<div class="diagram-desc">似た法案を自動的にグループ化</div>
+						</div>
+					</div>
+				</div>
+
+				<div class="explanation-details">
+					<div class="detail-card">
+						<h4><Layers size={16} class="inline-icon" /> 埋め込みベクトルとは？</h4>
+						<p>
+							法案のPDFテキストをAIの言語モデルに入力し、内容の意味を捉えた
+							<strong>高次元の数値ベクトル</strong>に変換します。
+						</p>
+						<ul>
+							<li>似た内容の法案は<strong>近いベクトル</strong>になる</li>
+							<li>異なる内容の法案は<strong>遠いベクトル</strong>になる</li>
+							<li>日本語対応のモデルを使用</li>
+						</ul>
+					</div>
+
+					<div class="detail-card">
+						<h4><GitBranch size={16} class="inline-icon" /> アルゴリズムの違い</h4>
+						<p>2つのクラスタリング手法から選択できます。</p>
+						<ul>
+							<li><strong>K-Means</strong>：クラスタ数を事前に指定。均等なグループに分割</li>
+							<li><strong>HDBSCAN</strong>：密度ベースで自動的にクラスタ数を決定。ノイズ（外れ値）も検出</li>
+						</ul>
+						<p class="detail-note">
+							<Lightbulb size={14} class="inline-icon" color="#f59e0b" /> 法案の種類や数に応じて、適切なアルゴリズムを選んでください。
+						</p>
+					</div>
+
+					<div class="detail-card">
+						<h4><ChartColumn size={16} class="inline-icon" /> 2D可視化の見方</h4>
+						<p>散布図では、高次元のベクトルを2次元に圧縮して表示しています。</p>
+						<ul>
+							<li><strong>近い点</strong>：内容が似ている法案</li>
+							<li><strong>同じ色</strong>：同じクラスタに属する法案</li>
+							<li><strong>点の集まり</strong>：政策トピックのまとまり</li>
+						</ul>
+					</div>
+
+					<div class="detail-card">
+						<h4><Eye size={16} class="inline-icon" /> クラスタ名の生成</h4>
+						<p>
+							各クラスタに含まれる法案の内容をLLMが分析し、
+							<strong>人間が理解しやすい名前</strong>を自動で付与します。
+						</p>
+						<ul>
+							<li>クラスタ内の法案タイトル・内容を要約</li>
+							<li>そのグループの政策テーマを端的に表現</li>
+						</ul>
+					</div>
+				</div>
+			</div>
+		</details>
+	</section>
 
 	{#if isAdmin}
 		<!-- Clustering Generation Section -->
@@ -828,6 +941,282 @@
 	.page {
 		min-height: 100vh;
 		background: #fafbfc;
+	}
+
+	/* ===== EXPLANATION SECTION ===== */
+	.explanation-section {
+		max-width: 1200px;
+		margin: 0 auto;
+		padding: 2rem 2rem 0;
+	}
+
+	.explanation-details-wrapper {
+		background: white;
+		border-radius: 12px;
+		border: 1px solid #e5e7eb;
+		overflow: hidden;
+	}
+
+	.explanation-summary {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		padding: 1rem 1.5rem;
+		cursor: pointer;
+		font-size: 1rem;
+		font-weight: 600;
+		color: #374151;
+		background: #f9fafb;
+		border: none;
+		list-style: none;
+		transition: background 0.2s;
+	}
+
+	.explanation-summary:hover {
+		background: #f3f4f6;
+	}
+
+	.explanation-summary::-webkit-details-marker {
+		display: none;
+	}
+
+	.summary-icon {
+		display: flex;
+		align-items: center;
+	}
+
+	.expand-icon {
+		margin-left: auto;
+		font-size: 0.75rem;
+		color: #9ca3af;
+		transition: transform 0.3s;
+	}
+
+	.explanation-details-wrapper[open] .expand-icon {
+		transform: rotate(180deg);
+	}
+
+	.explanation-content {
+		display: flex;
+		flex-direction: column;
+		gap: 1.5rem;
+		padding: 1.5rem;
+		border-top: 1px solid #e5e7eb;
+	}
+
+	.explanation-intro {
+		background: #f9fafb;
+		padding: 1.25rem;
+		border-radius: 10px;
+	}
+
+	.explanation-intro h3 {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin: 0 0 0.75rem 0;
+		font-size: 1rem;
+		color: #1a1a2e;
+	}
+
+	.explanation-intro p {
+		margin: 0;
+		color: #64748b;
+		line-height: 1.6;
+	}
+
+	.explanation-diagram {
+		background: #f9fafb;
+		padding: 1.5rem;
+		border-radius: 10px;
+		overflow-x: auto;
+	}
+
+	.diagram-container {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 1.5rem;
+		flex-wrap: wrap;
+	}
+
+	.diagram-before,
+	.diagram-after {
+		flex: 1;
+		min-width: 200px;
+		max-width: 350px;
+	}
+
+	.diagram-title {
+		font-size: 0.85rem;
+		font-weight: 600;
+		color: #64748b;
+		text-align: center;
+		margin-bottom: 0.75rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+
+	.diagram-visual {
+		background: #f8fafc;
+		border: 1px solid #e2e8f0;
+		border-radius: 8px;
+		padding: 1rem;
+		min-height: 100px;
+	}
+
+	.diagram-desc {
+		font-size: 0.8rem;
+		color: #64748b;
+		text-align: center;
+		margin-top: 0.5rem;
+	}
+
+	.diagram-arrow {
+		font-size: 2rem;
+		color: #0369a1;
+		font-weight: bold;
+		flex-shrink: 0;
+	}
+
+	.step-visual {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.35rem;
+		font-size: 0.85rem;
+		color: #374151;
+	}
+
+	.step-item {
+		padding: 0.4rem 0.75rem;
+		border-radius: 6px;
+		background: white;
+		border: 1px solid #e2e8f0;
+		text-align: center;
+		font-size: 0.8rem;
+	}
+
+	.step-item.highlight {
+		background: #eff6ff;
+		border-color: #93c5fd;
+		color: #1e40af;
+		font-weight: 500;
+	}
+
+	.step-arrow {
+		color: #9ca3af;
+		font-size: 0.9rem;
+	}
+
+	.cluster-demo {
+		display: flex;
+		gap: 1.25rem;
+		justify-content: center;
+	}
+
+	.cluster-demo-group {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.3rem;
+		padding: 0.5rem 0.75rem;
+		border-radius: 8px;
+	}
+
+	.cluster-demo-group.group-a {
+		background: rgba(99, 102, 241, 0.1);
+		border: 1px solid rgba(99, 102, 241, 0.3);
+	}
+
+	.cluster-demo-group.group-b {
+		background: rgba(16, 185, 129, 0.1);
+		border: 1px solid rgba(16, 185, 129, 0.3);
+	}
+
+	.cluster-dot {
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+	}
+
+	.cluster-demo-group.group-a .cluster-dot {
+		background: #6366f1;
+	}
+
+	.cluster-demo-group.group-b .cluster-dot {
+		background: #10b981;
+	}
+
+	.cluster-label-text {
+		font-size: 0.7rem;
+		font-weight: 500;
+		color: #64748b;
+		margin-left: 0.25rem;
+	}
+
+	.explanation-details {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+		gap: 1rem;
+	}
+
+	.detail-card {
+		background: #f9fafb;
+		padding: 1.25rem;
+		border-radius: 10px;
+	}
+
+	.detail-card h4 {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin: 0 0 0.75rem 0;
+		font-size: 1rem;
+		color: #1a1a2e;
+	}
+
+	.detail-card p {
+		margin: 0 0 0.75rem 0;
+		color: #64748b;
+		font-size: 0.9rem;
+		line-height: 1.6;
+	}
+
+	.detail-card ul {
+		margin: 0;
+		padding-left: 1.25rem;
+		color: #64748b;
+		font-size: 0.9rem;
+		line-height: 1.8;
+	}
+
+	.detail-card li {
+		margin-bottom: 0.25rem;
+	}
+
+	.detail-note {
+		background: #fef9c3;
+		padding: 0.75rem;
+		border-radius: 8px;
+		font-size: 0.85rem !important;
+		margin-top: 0.75rem !important;
+		margin-bottom: 0 !important;
+		border-left: 3px solid #eab308;
+	}
+
+	@media (max-width: 600px) {
+		.diagram-container {
+			flex-direction: column;
+		}
+
+		.diagram-arrow {
+			transform: rotate(90deg);
+		}
+
+		.explanation-section {
+			padding: 1rem 1rem 0;
+		}
 	}
 
 	/* ===== SECTION STYLES ===== */
