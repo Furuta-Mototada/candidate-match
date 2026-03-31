@@ -20,7 +20,6 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import {
-	fetchWithRetry,
 	resolveUrl,
 	parseArgs,
 	hasFlag,
@@ -28,8 +27,12 @@ import {
 	createDbConnection,
 	schema,
 	parseJapaneseDate,
+	createPageCache,
 	type DrizzleDB
 } from './lib';
+import type { PageCache } from './lib/cache';
+
+let cache: PageCache;
 
 // Configuration
 const ROOT_URL = 'https://www.kantei.go.jp/jp/rekidainaikaku/index.html';
@@ -140,13 +143,12 @@ interface PMData {
  */
 async function scrapeCabinetList(minCabinetNumber: number): Promise<CabinetEntry[]> {
 	console.log('Fetching main page:', ROOT_URL);
-	const res = await fetchWithRetry(ROOT_URL);
+	const body = await cache.fetchText(ROOT_URL);
 
-	if (res.status !== 200) {
-		throw new Error(`Failed to fetch main page: ${res.status}`);
+	if (!body) {
+		throw new Error(`Failed to fetch main page: ${ROOT_URL}`);
 	}
 
-	const body = await res.text();
 	const $ = load(body);
 
 	const anchors: CabinetEntry[] = [];
@@ -208,16 +210,15 @@ async function processCabinetEntry(entry: CabinetEntry): Promise<PMData | null> 
 
 	// Fetch detail page only if needed
 	try {
-		const r = await fetchWithRetry(entry.href);
-		if (r.status !== 200) {
-			console.warn(`Failed to fetch detail page: ${r.status} ${entry.href}`);
+		const dbody = await cache.fetchText(entry.href);
+		if (!dbody) {
+			console.warn(`Failed to fetch detail page: ${entry.href}`);
 			if (pmName) {
 				return { name: pmName.replace(WHITESPACE_RE, ''), startDate, endDate };
 			}
 			return null;
 		}
 
-		const dbody = await r.text();
 		const $$ = load(dbody);
 
 		// Extract PM name from various sources if not already set
@@ -366,6 +367,7 @@ async function saveCabinetEntries(
 async function main() {
 	const args = parseArgs();
 	const DRY_RUN = hasFlag(args, 'dry-run');
+	cache = createPageCache('scrape_kantei', process.argv.slice(2));
 	const MIN_CABINET_NUMBER = getIntValue(args, 'min-cabinet', DEFAULT_MIN_CABINET_NUMBER)!;
 	const DATABASE_URL = process.env.DATABASE_URL;
 

@@ -4,7 +4,17 @@ dotenv.config();
 import * as cheerio from 'cheerio';
 import * as schema from '../src/lib/server/db/schema';
 import { sql } from 'drizzle-orm';
-import { createDbConnection, parseArgs, hasFlag, parseJapaneseDate, DrizzleDB } from './lib';
+import {
+	createDbConnection,
+	parseArgs,
+	hasFlag,
+	parseJapaneseDate,
+	createPageCache,
+	DrizzleDB
+} from './lib';
+import type { PageCache } from './lib/cache';
+
+let cache: PageCache;
 
 const SESSIONS_URL =
 	'https://www.shugiin.go.jp/internet/itdb_annai.nsf/html/statics/shiryo/kaiki.htm';
@@ -19,16 +29,14 @@ interface ParsedSession {
 }
 
 /**
- * Fetch Shift-JIS encoded page
+ * Fetch Shift-JIS encoded page (cached)
  */
 async function fetchShiftJIS(url: string): Promise<string> {
-	const res = await fetch(url);
-	if (res.status !== 200) {
-		throw new Error(`HTTP error! status: ${res.status}`);
+	const result = await cache.fetchShiftJIS(url);
+	if (!result) {
+		throw new Error(`Failed to fetch ${url}`);
 	}
-	const buffer = await res.arrayBuffer();
-	const decoder = new TextDecoder('shift-jis');
-	return decoder.decode(buffer);
+	return result;
 }
 
 /**
@@ -140,6 +148,7 @@ async function saveSessions(db: DrizzleDB, sessions: ParsedSession[]): Promise<v
 async function main() {
 	const args = parseArgs();
 	const DRY_RUN = hasFlag(args, 'dry-run');
+	cache = createPageCache('scrape_sessions', process.argv.slice(2));
 	const DATABASE_URL = process.env.DATABASE_URL;
 
 	if (!DATABASE_URL && !DRY_RUN) {

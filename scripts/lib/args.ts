@@ -14,7 +14,9 @@ const KNOWN_FLAGS = new Set([
 	'f',
 	'all',
 	'shugiin',
-	'sangiin'
+	'sangiin',
+	'no-cache',
+	'from-cache'
 ]);
 
 export interface ParsedArgs {

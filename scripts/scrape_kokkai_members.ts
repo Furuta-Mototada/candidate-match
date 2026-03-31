@@ -27,11 +27,13 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-import { fetch } from 'undici';
 import { load } from 'cheerio';
 import { eq, and, inArray, isNull } from 'drizzle-orm';
-import { createDbConnection, parseArgs, hasFlag, getPositionalInt, DrizzleDB, schema } from './lib';
+import { createDbConnection, parseArgs, hasFlag, getPositionalInt, createPageCache, DrizzleDB, schema } from './lib';
+import type { PageCache } from './lib/cache';
 import { scrapeSangiinTerm27 } from './scrape_sangiin_27';
+
+let cache: PageCache;
 
 const BASE_URL = 'https://kokkai.sugawarataku.net';
 const DELAY = 500; // Rate limit delay between requests
@@ -65,38 +67,14 @@ interface TermInfo {
 }
 
 /**
- * Fetch with retry logic for Shift-JIS encoded pages
+ * Fetch with retry logic for Shift-JIS encoded pages (cached)
  */
 async function fetchShiftJIS(
 	url: string,
 	maxRetries = 3,
 	initialDelay = 1000
 ): Promise<string | null> {
-	let lastError: Error | null = null;
-
-	for (let attempt = 0; attempt < maxRetries; attempt++) {
-		try {
-			await new Promise((resolve) => setTimeout(resolve, DELAY));
-
-			const res = await fetch(url);
-			if (res.status !== 200) {
-				console.warn(`Failed to fetch ${url}: ${res.status}`);
-				return null;
-			}
-
-			const buffer = await res.arrayBuffer();
-			const decoder = new TextDecoder('shift-jis');
-			return decoder.decode(buffer);
-		} catch (err) {
-			lastError = err as Error;
-			const delay = initialDelay * Math.pow(2, attempt);
-			console.warn(`Attempt ${attempt + 1} failed for ${url}, retrying in ${delay}ms...`);
-			await new Promise((resolve) => setTimeout(resolve, delay));
-		}
-	}
-
-	console.error(`All ${maxRetries} attempts failed for ${url}:`, lastError);
-	return null;
+	return cache.fetchShiftJIS(url, { maxRetries, baseDelayMs: initialDelay, rateLimitMs: DELAY });
 }
 
 /**
@@ -567,12 +545,13 @@ async function scrapeChamber(
 
 	// For 参議院 27期 onwards, use the dedicated scraper
 	if (chamber === '参議院' && endTerm >= 27 && startTerm <= 27) {
-		await scrapeSangiinTerm27(db, dryRun);
+		await scrapeSangiinTerm27(db, dryRun, false, cache);
 	}
 }
 
 async function main(): Promise<void> {
 	const args = parseArgs();
+	cache = createPageCache('scrape_kokkai_members', process.argv.slice(2));
 
 	const dryRun = hasFlag(args, 'dry-run');
 	const shugiinOnly = hasFlag(args, 'shugiin');

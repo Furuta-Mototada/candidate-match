@@ -28,3 +28,6 @@ vite.config.ts.timestamp-*
 src/lib/paraglide
 # HCs (Habits of Mind & Cornerstones)
 HCs/
+
+# Scrape cache
+data/raw/

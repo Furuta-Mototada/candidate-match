@@ -34,7 +34,7 @@ import {
 	getValue,
 	ProgressTracker,
 	DrizzleDB,
-	fetchWithRetry,
+	createPageCache,
 	BillType
 } from './lib';
 
@@ -145,6 +145,7 @@ interface DebateProgress {
 
 // Parse CLI arguments
 const args = parseArgs();
+const cache = createPageCache('scrape_debates', process.argv.slice(2));
 const options = {
 	limit: parseInt(getValue(args, 'limit') || '0') || Infinity,
 	skipExisting: hasFlag(args, 'skip-existing'),
@@ -587,13 +588,14 @@ async function fetchMeetingInfo(issueId: string): Promise<KokkaiMeetingInfo | nu
 	log(`    Fetching meeting info for: ${issueId}`);
 
 	try {
-		const response = await fetchWithRetry(url, { rateLimitMs: RATE_LIMIT_MS });
-		if (response.status !== 200) {
-			console.error(`Meeting API error: ${response.status}`);
+		const data = await cache.fetchJson<KokkaiApiResponse<Record<string, unknown>>>(url, {
+			rateLimitMs: RATE_LIMIT_MS
+		});
+		if (!data) {
+			console.error(`Meeting API error for ${issueId}`);
 			return null;
 		}
 
-		const data = (await response.json()) as KokkaiApiResponse<Record<string, unknown>>;
 		if (!data.meetingRecord || data.meetingRecord.length === 0) {
 			return null;
 		}
@@ -643,13 +645,13 @@ async function fetchAllMeetingSpeeches(issueId: string): Promise<KokkaiSpeech[]>
 		const url = `${KOKKAI_API_BASE}/speech?issueID=${issueId}&recordPacking=json&maximumRecords=${MAX_RECORDS_PER_REQUEST}&startRecord=${startRecord}`;
 
 		try {
-			const response = await fetchWithRetry(url, { rateLimitMs: RATE_LIMIT_MS });
-			if (response.status !== 200) {
-				console.error(`Speech API error: ${response.status}`);
+			const data = await cache.fetchJson<KokkaiApiResponse<Record<string, unknown>>>(url, {
+				rateLimitMs: RATE_LIMIT_MS
+			});
+			if (!data) {
+				console.error(`Speech API error`);
 				break;
 			}
-
-			const data = (await response.json()) as KokkaiApiResponse<Record<string, unknown>>;
 
 			if (data.message) {
 				log(`    API message: ${data.message}`);

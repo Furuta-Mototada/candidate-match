@@ -20,10 +20,12 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-import { fetch } from 'undici';
 import { load } from 'cheerio';
 import { eq, and, inArray } from 'drizzle-orm';
-import { createDbConnection, parseArgs, hasFlag, DrizzleDB, schema } from './lib';
+import { createDbConnection, parseArgs, hasFlag, createPageCache, DrizzleDB, schema } from './lib';
+import type { PageCache } from './lib/cache';
+
+let cache: PageCache;
 
 const SANGIIN_MEMBERS_URL = 'https://www.sangiin.go.jp/japanese/joho1/kousei/giin/219/giin.htm';
 const WIKIPEDIA_URL =
@@ -143,32 +145,10 @@ interface SangiinMember {
 }
 
 /**
- * Fetch a page with retry logic
+ * Fetch a page with retry logic (cached)
  */
 async function fetchPage(url: string, maxRetries = 3): Promise<string | null> {
-	let lastError: Error | null = null;
-
-	for (let attempt = 0; attempt < maxRetries; attempt++) {
-		try {
-			await new Promise((resolve) => setTimeout(resolve, DELAY));
-
-			const res = await fetch(url);
-			if (res.status !== 200) {
-				console.warn(`Failed to fetch ${url}: ${res.status}`);
-				return null;
-			}
-
-			return await res.text();
-		} catch (err) {
-			lastError = err as Error;
-			const delay = 1000 * Math.pow(2, attempt);
-			console.warn(`Attempt ${attempt + 1} failed for ${url}, retrying in ${delay}ms...`);
-			await new Promise((resolve) => setTimeout(resolve, delay));
-		}
-	}
-
-	console.error(`All ${maxRetries} attempts failed for ${url}:`, lastError);
-	return null;
+	return cache.fetchPage(url, { maxRetries, baseDelayMs: 1000, rateLimitMs: DELAY });
 }
 
 /**
@@ -622,8 +602,14 @@ async function processCurrentMembers(db: DrizzleDB, members: SangiinMember[]): P
 export async function scrapeSangiinTerm27(
 	db: DrizzleDB | null,
 	dryRun: boolean,
-	verbose: boolean = false
+	verbose: boolean = false,
+	externalCache?: PageCache
 ): Promise<{ termNumber: number; chamber: '参議院'; memberCount: number }> {
+	if (externalCache) {
+		cache = externalCache;
+	} else if (!cache) {
+		cache = createPageCache('scrape_sangiin_27', process.argv.slice(2));
+	}
 	console.log('\nScraping 参議院 from sangiin.go.jp...');
 
 	// First, fetch party information from Wikipedia for term 27
@@ -728,6 +714,7 @@ async function main(): Promise<void> {
 	const args = parseArgs();
 	const dryRun = hasFlag(args, 'dry-run');
 	const verbose = hasFlag(args, 'verbose');
+	cache = createPageCache('scrape_sangiin_27', process.argv.slice(2));
 
 	const databaseUrl = process.env.DATABASE_URL;
 	if (!databaseUrl) {

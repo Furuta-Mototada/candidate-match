@@ -14,7 +14,6 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-import { fetch } from 'undici';
 import { load } from 'cheerio';
 import { eq, and, inArray } from 'drizzle-orm';
 import {
@@ -25,13 +24,16 @@ import {
 	hasFlag,
 	getPositionalInt,
 	resolveUrl,
-	sleep,
 	parseJapaneseDate,
 	getLatestSessionNumber,
+	createPageCache,
 	DrizzleDB,
 	type BillType,
 	schema
 } from './lib';
+import type { PageCache } from './lib/cache';
+
+let cache: PageCache;
 
 // Configuration
 const BASE_URL = 'https://www.shugiin.go.jp';
@@ -63,53 +65,15 @@ interface BillDetails {
 
 interface BillData extends BillEntry, BillDetails {}
 
-// Rate limiter for Shugiin requests
-let lastRequestTime = 0;
-
-async function waitForRateLimit(): Promise<void> {
-	const now = Date.now();
-	const elapsed = now - lastRequestTime;
-	if (elapsed < RATE_LIMIT_MS) {
-		await sleep(RATE_LIMIT_MS - elapsed);
-	}
-	lastRequestTime = Date.now();
-}
-
 /**
- * Fetch Shift-JIS encoded page with retry logic
+ * Fetch Shift-JIS encoded page with retry logic (cached)
  */
 async function fetchShiftJIS(
 	url: string,
 	maxRetries = 3,
 	baseDelayMs = 1000
 ): Promise<string | null> {
-	let lastError: Error | null = null;
-
-	for (let attempt = 0; attempt < maxRetries; attempt++) {
-		try {
-			await waitForRateLimit();
-
-			const res = await fetch(url);
-			if (res.status !== 200) {
-				console.warn(`Failed to fetch ${url}: ${res.status}`);
-				return null;
-			}
-
-			const buffer = await res.arrayBuffer();
-			const decoder = new TextDecoder('shift-jis');
-			return decoder.decode(buffer);
-		} catch (err) {
-			lastError = err as Error;
-			const delay = baseDelayMs * Math.pow(2, attempt);
-			console.warn(
-				`Attempt ${attempt + 1}/${maxRetries} failed for ${url}, retrying in ${delay}ms...`
-			);
-			await sleep(delay);
-		}
-	}
-
-	console.error(`All ${maxRetries} attempts failed for ${url}:`, lastError?.message);
-	return null;
+	return cache.fetchShiftJIS(url, { maxRetries, baseDelayMs, rateLimitMs: RATE_LIMIT_MS });
 }
 
 /**
@@ -210,15 +174,7 @@ async function searchCommitteeChair(
 		const apiUrl = `https://kokkai.ndl.go.jp/api/meeting?${params.toString()}`;
 		console.log(`    Kokkai API URL: ${apiUrl}`);
 
-		await waitForRateLimit();
-
-		const res = await fetch(apiUrl);
-		if (res.status !== 200) {
-			console.warn(`    Failed to fetch from Kokkai API: ${res.status}`);
-			return null;
-		}
-
-		const data = (await res.json()) as {
+		const data = await cache.fetchJson<{
 			numberOfRecords: number;
 			numberOfReturn: number;
 			meetingRecord?: Array<{
@@ -231,7 +187,12 @@ async function searchCommitteeChair(
 					speech?: string;
 				}>;
 			}>;
-		};
+		}>(apiUrl);
+
+		if (!data) {
+			console.warn(`    Failed to fetch from Kokkai API`);
+			return null;
+		}
 
 		console.log(`    Found ${data.numberOfRecords} meeting(s)`);
 
@@ -658,6 +619,7 @@ function extractBillEntries($: ReturnType<typeof load>, sessionUrl: string): Bil
 async function main() {
 	const args = parseArgs();
 	const DRY_RUN = hasFlag(args, 'dry-run');
+	cache = createPageCache('scrape_shugiin', process.argv.slice(2));
 	const DATABASE_URL = process.env.DATABASE_URL;
 
 	const startSession = getPositionalInt(args, 0, DEFAULT_START_SESSION)!;

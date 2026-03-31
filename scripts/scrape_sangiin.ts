@@ -16,7 +16,6 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import {
-	fetchWithRetry,
 	resolveUrl,
 	parseArgs,
 	hasFlag,
@@ -27,10 +26,14 @@ import {
 	batchGetOrCreateMembers,
 	getOrCreateCommittee,
 	getLatestSessionNumber,
+	createPageCache,
 	type DrizzleDB,
 	type BillType,
 	type VotingMethod
 } from './lib';
+import type { PageCache } from './lib/cache';
+
+let cache: PageCache;
 
 // Configuration
 const BASE_URL = 'https://www.sangiin.go.jp';
@@ -211,8 +214,8 @@ async function fetchBillDetails(
 	}
 
 	try {
-		const detailRes = await fetchWithRetry(billDetailUrl);
-		if (detailRes.status !== 200) {
+		const detailBody = await cache.fetchText(billDetailUrl);
+		if (!detailBody) {
 			return {
 				submissionDate,
 				billResult,
@@ -225,7 +228,6 @@ async function fetchBillDetails(
 			};
 		}
 
-		const detailBody = await detailRes.text();
 		const $detail = load(detailBody);
 
 		// Variables to track deliberation status
@@ -668,10 +670,9 @@ async function processVoteResults(db: DrizzleDB, voteId: number, voteUrl: string
 	console.log(`Fetching vote results from: ${voteUrl}`);
 
 	try {
-		const voteRes = await fetchWithRetry(voteUrl);
-		if (voteRes.status !== 200) return;
+		const voteBody = await cache.fetchText(voteUrl);
+		if (!voteBody) return;
 
-		const voteBody = await voteRes.text();
 		const $vote = load(voteBody);
 
 		// Collect all vote data first
@@ -837,6 +838,7 @@ function extractBillEntries(
 async function main() {
 	const args = parseArgs();
 	const DRY_RUN = hasFlag(args, 'dry-run');
+	cache = createPageCache('scrape_sangiin', process.argv.slice(2));
 	const DATABASE_URL = process.env.DATABASE_URL;
 
 	const startSession = getPositionalInt(args, 0, DEFAULT_START_SESSION)!;
@@ -889,13 +891,12 @@ async function main() {
 			const sessionUrl = `${BASE_URL}/japanese/joho1/kousei/gian/${session}/gian.htm`;
 
 			try {
-				const res = await fetchWithRetry(sessionUrl);
-				if (res.status !== 200) {
-					console.warn(`Failed to fetch session ${session} page: ${res.status}`);
+				const body = await cache.fetchText(sessionUrl);
+				if (!body) {
+					console.warn(`Failed to fetch session ${session} page`);
 					continue;
 				}
 
-				const body = await res.text();
 				const $ = load(body);
 
 				// Extract all bill entries from session page

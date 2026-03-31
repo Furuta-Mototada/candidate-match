@@ -40,9 +40,9 @@ import {
 	hasFlag,
 	getPositionalArg,
 	DrizzleDB,
-	fetchWithRetry,
 	sleep,
 	ProgressTracker,
+	createPageCache,
 	type Chamber,
 	schema
 } from './lib';
@@ -104,6 +104,7 @@ interface MemberGroupProgress {
 
 // CLI options
 const args = parseArgs();
+const cache = createPageCache('scrape_member_groups', process.argv.slice(2));
 const options = {
 	dryRun: hasFlag(args, 'dry-run'),
 	resume: hasFlag(args, 'resume'),
@@ -200,17 +201,17 @@ async function fetchSpeechesForMember(
 	const url = `${KOKKAI_API_BASE}?${params.toString()}`;
 	log(`  Fetching: ${url}`);
 
-	const response = await fetchWithRetry(url, {
+	const data = await cache.fetchJson<KokkaiSpeechResponse>(url, {
 		rateLimitMs: RATE_LIMIT_MS,
 		maxRetries: 3,
 		baseDelayMs: 1000
 	});
 
-	if (response.status !== 200) {
-		throw new Error(`HTTP error! status: ${response.status}`);
+	if (!data) {
+		throw new Error(`Failed to fetch ${url}`);
 	}
 
-	return (await response.json()) as KokkaiSpeechResponse;
+	return data;
 }
 
 /**
