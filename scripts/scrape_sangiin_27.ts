@@ -443,7 +443,9 @@ async function batchGetOrCreateParties(
 }
 
 /**
- * Batch get or create members
+ * Batch get or create members.
+ * Tries all name variants (e.g. ['ながえ孝子', '永江孝子']) against the lookup
+ * to handle cases where sangiin.go.jp uses hiragana but kokkai has kanji.
  */
 async function batchGetOrCreateMembers(
 	db: DrizzleDB,
@@ -465,7 +467,7 @@ async function batchGetOrCreateMembers(
 	// Query all existing members
 	const existing = await db.select().from(schema.member);
 
-	// Build lookup map
+	// Build lookup map: name+reading => existing member
 	const existingByNameAndReading = new Map<
 		string,
 		{ id: number; names: string[]; nameReading: string | null }
@@ -481,12 +483,18 @@ async function batchGetOrCreateMembers(
 	const newMembers: SangiinMember[] = [];
 
 	for (const [key, m] of uniqueMembers) {
-		const lookupKey = `${m.names[0]}|${m.nameReading}`;
-		const existingMember = existingByNameAndReading.get(lookupKey);
-
-		if (existingMember) {
-			memberMap.set(key, existingMember.id);
-		} else if (m.names[0]) {
+		// Try all name variants (e.g. ['ながえ孝子', '永江孝子']) against the lookup
+		let found = false;
+		for (const name of m.names) {
+			const lookupKey = `${name}|${m.nameReading}`;
+			const existingMember = existingByNameAndReading.get(lookupKey);
+			if (existingMember) {
+				memberMap.set(key, existingMember.id);
+				found = true;
+				break;
+			}
+		}
+		if (!found && m.names[0]) {
 			newMembers.push(m);
 		}
 	}

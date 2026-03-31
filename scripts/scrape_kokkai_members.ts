@@ -29,9 +29,18 @@ dotenv.config();
 
 import { load } from 'cheerio';
 import { eq, and, inArray, isNull } from 'drizzle-orm';
-import { createDbConnection, parseArgs, hasFlag, getPositionalInt, createPageCache, DrizzleDB, schema } from './lib';
+import {
+	createDbConnection,
+	parseArgs,
+	hasFlag,
+	getPositionalInt,
+	createPageCache,
+	DrizzleDB,
+	schema
+} from './lib';
 import type { PageCache } from './lib/cache';
 import { scrapeSangiinTerm27 } from './scrape_sangiin_27';
+import { scrapeShugiin51 } from './scrape_shugiin_51';
 
 let cache: PageCache;
 
@@ -40,13 +49,16 @@ const DELAY = 500; // Rate limit delay between requests
 
 // Term ranges for each house
 const SHUGIIN_TERM_START = 23; // 衆議院 starts at 23期
-const SHUGIIN_TERM_END = 50; // 衆議院 ends at 50期
+const SHUGIIN_TERM_END_KOKKAI = 50; // 衆議院 ends at 50期 on kokkai.sugawarataku.net
+const SHUGIIN_TERM_END = 51; // 衆議院 51期 is available from shugiin.go.jp
 const SANGIIN_TERM_START = 1; // 参議院 starts at 1期
 const SANGIIN_TERM_END_KOKKAI = 26; // 参議院 ends at 26期 on kokkai.sugawarataku.net
 const SANGIIN_TERM_END = 27; // 参議院 27期 is available from sangiin.go.jp
 
 // Term 27 started on 2025-07-20, so Term 26 should end on this date
 const SANGIIN_TERM_27_START_DATE = '2025-07-20';
+// Term 51 started on 2026-02-08, so Term 50 should end on this date
+const SHUGIIN_TERM_51_START_DATE = '2026-02-08';
 
 interface TermMember {
 	names: string[]; // Multiple names (e.g., ["赤間二郎", "あかま二郎"])
@@ -514,7 +526,12 @@ async function scrapeChamber(
 	console.log(`\nScraping ${chamber} from ${startTerm}期 to ${endTerm}期...`);
 
 	// Determine the actual end term for kokkai.sugawarataku.net
-	const kokkaiEndTerm = chamber === '参議院' ? Math.min(endTerm, SANGIIN_TERM_END_KOKKAI) : endTerm;
+	let kokkaiEndTerm: number;
+	if (chamber === '参議院') {
+		kokkaiEndTerm = Math.min(endTerm, SANGIIN_TERM_END_KOKKAI);
+	} else {
+		kokkaiEndTerm = Math.min(endTerm, SHUGIIN_TERM_END_KOKKAI);
+	}
 
 	// Scrape from kokkai.sugawarataku.net for terms up to kokkaiEndTerm
 	for (let term = startTerm; term <= kokkaiEndTerm; term++) {
@@ -528,6 +545,12 @@ async function scrapeChamber(
 		if (chamber === '参議院' && term === 26 && termInfo.endDate === null) {
 			termInfo.endDate = SANGIIN_TERM_27_START_DATE;
 			console.log(`  Overriding endDate for 参議院 26期 to ${SANGIIN_TERM_27_START_DATE}`);
+		}
+
+		// Override endDate for 衆議院 50期 since Term 51 has started
+		if (chamber === '衆議院' && term === 50 && termInfo.endDate === null) {
+			termInfo.endDate = SHUGIIN_TERM_51_START_DATE;
+			console.log(`  Overriding endDate for 衆議院 50期 to ${SHUGIIN_TERM_51_START_DATE}`);
 		}
 
 		if (dryRun) {
@@ -546,6 +569,11 @@ async function scrapeChamber(
 	// For 参議院 27期 onwards, use the dedicated scraper
 	if (chamber === '参議院' && endTerm >= 27 && startTerm <= 27) {
 		await scrapeSangiinTerm27(db, dryRun, false, cache);
+	}
+
+	// For 衆議院 51期 onwards, use the dedicated scraper
+	if (chamber === '衆議院' && endTerm >= 51 && startTerm <= 51) {
+		await scrapeShugiin51(db, dryRun, false, cache);
 	}
 }
 
