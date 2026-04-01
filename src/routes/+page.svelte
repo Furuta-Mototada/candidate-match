@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import type { PageData } from './$types.js';
-	import { Vote, Target, Microscope, Compass, Trophy } from '@lucide/svelte';
+	import { Vote, Target, Microscope, Compass, Trophy, FlaskConical } from '@lucide/svelte';
 
 	let { data: pageData }: { data: PageData } = $props();
 
@@ -196,6 +196,13 @@
 				<div class="feature-icon bounce-in"><Compass size={32} color="#3b82f6" /></div>
 				<h3>議員ベクトル分析</h3>
 				<p>投票履歴から議員の政治的方向性をベクトル化し、類似性を分析</p>
+				<span class="feature-link">詳しく見る →</span>
+			</a>
+
+			<a href="/evaluation" class="feature-card hover-lift" style="--card-delay: 3">
+				<div class="feature-icon bounce-in"><FlaskConical size={32} color="#8b5cf6" /></div>
+				<h3>アルゴリズム評価</h3>
+				<p>適応型質問選択の精度を4つの戦略で比較・評価するベンチマーク</p>
 				<span class="feature-link">詳しく見る →</span>
 			</a>
 		</div>
