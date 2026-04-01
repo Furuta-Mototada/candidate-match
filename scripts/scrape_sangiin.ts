@@ -38,7 +38,7 @@ let cache: PageCache;
 // Configuration
 const BASE_URL = 'https://www.sangiin.go.jp';
 const DEFAULT_START_SESSION = 198;
-const FALLBACK_END_SESSION = 219; // Used only if database is unavailable
+const FALLBACK_END_SESSION = 221; // Used only if database is unavailable
 const BILL_CONCURRENCY = 5; // Max parallel bill detail fetches
 
 // Pre-compiled regex for performance

@@ -22,9 +22,11 @@
 		"scrape:sessions": "tsx ./scripts/scrape_sessions.ts",
 		"scrape:members": "tsx ./scripts/scrape_kokkai_members.ts",
 		"scrape:kantei": "tsx ./scripts/scrape_kantei.ts",
-		"scrape:sangiin": "tsx ./scripts/scrape_sangiin.ts",
+		"scrape:sangiin": "tsx ./scripts/scrape_sangiin.ts && tsx ./scripts/fix_scrape_sangiin.ts",
+		"scrape:sangiin-raw": "tsx ./scripts/scrape_sangiin.ts",
 		"fix:sangiin": "tsx ./scripts/fix_scrape_sangiin.ts",
-		"scrape:shugiin": "tsx ./scripts/scrape_shugiin.ts",
+		"scrape:shugiin": "tsx ./scripts/scrape_shugiin.ts && tsx ./scripts/fix_scrape_shugiin.ts",
+		"scrape:shugiin-raw": "tsx ./scripts/scrape_shugiin.ts",
 		"fix:shugiin": "tsx ./scripts/fix_scrape_shugiin.ts",
 		"scrape:member-groups": "tsx ./scripts/scrape_member_groups.ts",
 		"calculate:legislation": "tsx ./scripts/calculate_legislation_scores.ts",
@@ -34,7 +36,8 @@
 		"cluster:name": "python3 ./scripts/name_clusters.py",
 		"scrape:debates": "tsx ./scripts/scrape_debates.ts",
 		"summarize:debates": "python3 ./scripts/summarize_debates.py",
-		"enrich:bills": "python3 ./scripts/enrich_bills.py"
+		"enrich:bills": "python3 ./scripts/enrich_bills.py",
+		"check:data": "tsx ./scripts/check_data_integrity.ts"
 	},
 	"files": [
 		"dist",
@@ -66,6 +69,7 @@
 		"@xyflow/svelte": "^1.5.2",
 		"cheerio": "^1.1.2",
 		"dotenv": "^16.6.1",
+		"imagekit": "^6.0.0",
 		"postgres": "^3.4.7",
 		"undici": "^5.29.0"
 	},
