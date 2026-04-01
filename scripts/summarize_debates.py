@@ -13,12 +13,16 @@ Usage:
     pnpm summarize:debates --limit 10
     pnpm summarize:debates --bill-id 1427 --force
     pnpm summarize:debates --concurrency 3  # Process 3 bills in parallel
+    pnpm summarize:debates --batch --limit 100
+    pnpm summarize:debates --batch-status batch_abc123
+    pnpm summarize:debates --batch-results batch_abc123
 """
 
 import os
 import sys
 import json
 import argparse
+import tempfile
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -37,7 +41,7 @@ except ImportError:
     sys.exit(1)
 
 DELAY_BETWEEN_REQUESTS = 0.5  # Reduced delay for efficiency
-LLM_MODEL = "gpt-5.2"  # 400K context, 128K output
+LLM_MODEL = "gpt-5.4-nano"  # 400K context, 128K output, cheapest GPT-5.4-class
 MAX_CONTEXT_CHARS = 300000  # ~75K tokens, fits well in 400K context
 MAX_SPEECH_CHARS = 3000  # Allow longer individual speeches
 CHUNK_SIZE = 100  # Number of speeches per chunk for hierarchical summarization
@@ -312,7 +316,7 @@ def summarize_debates(
     # Summarize each chunk
     chunk_summaries = []
     for i, chunk in enumerate(chunks):
-        print(f"{prefix}   Processing chunk {i+1}/{len(chunks)}...")
+        print(f"{prefix}   Processing chunk {i + 1}/{len(chunks)}...")
         summary = summarize_chunk(client, bill_title, chunk, i + 1)
         chunk_summaries.append(summary)
         time.sleep(DELAY_BETWEEN_REQUESTS)
@@ -322,11 +326,9 @@ def summarize_debates(
     return merge_chunk_summaries(client, bill_title, chunk_summaries)
 
 
-def summarize_single(
-    client: openai.OpenAI, bill_title: str, debates_context: str
-) -> Dict[str, Any]:
-    """Summarize debates that fit in a single context."""
-    prompt = f"""あなたは国会議事録の分析専門家です。以下の法案に関する国会での議論を分析し、構造化された要約を作成してください。
+def build_single_summary_prompt(bill_title: str, debates_context: str) -> str:
+    """Build the prompt for single-context debate summarization."""
+    return f"""あなたは国会議事録の分析専門家です。以下の法案に関する国会での議論を分析し、構造化された要約を作成してください。
 
 法案名: {bill_title}
 
@@ -364,6 +366,13 @@ def summarize_single(
 - 「〇〇の観点からは」のように、どの立場からの意見かを明示する
 - 質問が見つからない場合は空配列でよい
 - 必ず有効なJSONで返答すること"""
+
+
+def summarize_single(
+    client: openai.OpenAI, bill_title: str, debates_context: str
+) -> Dict[str, Any]:
+    """Summarize debates that fit in a single context."""
+    prompt = build_single_summary_prompt(bill_title, debates_context)
 
     response = client.chat.completions.create(
         model=LLM_MODEL,
@@ -449,6 +458,172 @@ def upsert_debate_summary(
     cursor.close()
 
 
+def prepare_batch_requests(
+    conn,
+    bills: List[Dict[str, Any]],
+) -> tuple[List[Dict[str, Any]], List[int]]:
+    """Prepare batch API requests for bills that fit single context.
+    Returns (requests, skipped_bill_ids)."""
+    requests = []
+    skipped_ids = []
+
+    for bill in bills:
+        debates = get_debates_for_bill(conn, bill["id"])
+        if not debates:
+            continue
+
+        formatted_speeches = [format_speech(d) for d in debates]
+        total_chars = sum(len(s) for s in formatted_speeches)
+
+        # Batch mode only supports single-context bills
+        if total_chars > MAX_CONTEXT_CHARS:
+            skipped_ids.append(bill["id"])
+            continue
+
+        debates_context = "\n".join(formatted_speeches)
+        prompt = build_single_summary_prompt(bill["title"], debates_context)
+
+        request_line = {
+            "custom_id": f"debate-{bill['id']}",
+            "method": "POST",
+            "url": "/v1/chat/completions",
+            "body": {
+                "model": LLM_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.3,
+                "response_format": {"type": "json_object"},
+            },
+        }
+        requests.append(request_line)
+
+    return requests, skipped_ids
+
+
+def submit_batch(
+    client: openai.OpenAI,
+    requests: List[Dict[str, Any]],
+) -> str:
+    """Write JSONL, upload, and submit a batch job. Returns batch ID."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+        for req in requests:
+            f.write(json.dumps(req, ensure_ascii=False) + "\n")
+        jsonl_path = f.name
+
+    print(f"Wrote {len(requests)} requests to {jsonl_path}")
+
+    with open(jsonl_path, "rb") as f:
+        file_obj = client.files.create(file=f, purpose="batch")
+    print(f"Uploaded file: {file_obj.id}")
+
+    batch = client.batches.create(
+        input_file_id=file_obj.id,
+        endpoint="/v1/chat/completions",
+        completion_window="24h",
+        metadata={"script": "summarize_debates", "model": LLM_MODEL},
+    )
+    print(f"Batch created: {batch.id}")
+    print(f"Status: {batch.status}")
+
+    os.unlink(jsonl_path)
+    return batch.id
+
+
+def check_batch_status(client: openai.OpenAI, batch_id: str):
+    """Check and print the status of a batch job."""
+    batch = client.batches.retrieve(batch_id)
+    print(f"Batch ID: {batch.id}")
+    print(f"Status: {batch.status}")
+    print(f"Request counts: {batch.request_counts}")
+    if batch.output_file_id:
+        print(f"Output file: {batch.output_file_id}")
+    if batch.error_file_id:
+        print(f"Error file: {batch.error_file_id}")
+    return batch
+
+
+def retrieve_batch_results(
+    client: openai.OpenAI,
+    conn,
+    batch_id: str,
+):
+    """Retrieve batch results and save to database."""
+    batch = client.batches.retrieve(batch_id)
+
+    if batch.status != "completed":
+        print(f"Batch {batch_id} is not completed yet." f" Status: {batch.status}")
+        if batch.status == "failed":
+            print("Batch failed. Check error file for details.")
+            if batch.error_file_id:
+                error_content = client.files.content(batch.error_file_id)
+                print(error_content.text)
+        return
+
+    if not batch.output_file_id:
+        print("No output file available.")
+        return
+
+    content = client.files.content(batch.output_file_id)
+    results_text = content.text
+
+    success_count = 0
+    error_count = 0
+
+    for line in results_text.strip().split("\n"):
+        if not line:
+            continue
+        result_obj = json.loads(line)
+        custom_id = result_obj["custom_id"]
+        bill_id = int(custom_id.replace("debate-", ""))
+
+        response = result_obj.get("response")
+        error = result_obj.get("error")
+
+        if error:
+            print(f"  Bill {bill_id}: Error - {error}")
+            upsert_debate_summary(
+                conn,
+                bill_id,
+                0,
+                "failed",
+                error=json.dumps(error, ensure_ascii=False),
+            )
+            error_count += 1
+            continue
+
+        if response and response.get("status_code") == 200:
+            body = response["body"]
+            content_str = body["choices"][0]["message"]["content"]
+            result = json.loads(content_str)
+
+            # Get debate count for this bill
+            debates = get_debates_for_bill(conn, bill_id)
+            debate_count = len(debates)
+
+            upsert_debate_summary(
+                conn,
+                bill_id,
+                debate_count,
+                "completed",
+                result,
+            )
+            success_count += 1
+            pro_count = len(result.get("proArguments", []))
+            con_count = len(result.get("conArguments", []))
+            print(f"  Bill {bill_id}: ✓" f" {pro_count} pro, {con_count} con")
+        else:
+            status_code = response.get("status_code") if response else "N/A"
+            upsert_debate_summary(
+                conn,
+                bill_id,
+                0,
+                "failed",
+                error=f"HTTP {status_code}",
+            )
+            error_count += 1
+
+    print(f"\nResults: {success_count} success, {error_count} errors")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Summarize debate records using LLM")
     parser.add_argument(
@@ -469,6 +644,23 @@ def main():
         default=3,
         help="Number of parallel workers (default: 3)",
     )
+    parser.add_argument(
+        "--batch",
+        action="store_true",
+        help="Submit as OpenAI Batch API job" " (50%% cheaper, results within 24h)",
+    )
+    parser.add_argument(
+        "--batch-status",
+        type=str,
+        metavar="BATCH_ID",
+        help="Check status of a batch job",
+    )
+    parser.add_argument(
+        "--batch-results",
+        type=str,
+        metavar="BATCH_ID",
+        help="Retrieve and save results" " from a completed batch job",
+    )
     args = parser.parse_args()
 
     database_url = os.getenv("DATABASE_URL")
@@ -481,20 +673,61 @@ def main():
         print("Error: OPENAI_API_KEY environment variable is required")
         sys.exit(1)
 
+    # Initialize OpenAI client
+    client = openai.OpenAI(api_key=openai_api_key)
+
+    # Handle batch status check (no DB needed)
+    if args.batch_status:
+        check_batch_status(client, args.batch_status)
+        return
+
+    # Initialize DB connection
     conn = psycopg2.connect(database_url)
+
+    # Handle batch results retrieval
+    if args.batch_results:
+        print("Retrieving batch results...")
+        retrieve_batch_results(client, conn, args.batch_results)
+        conn.close()
+        return
 
     print("=" * 60)
     print("Summarizing Debate Records")
     print("=" * 60)
     print(f"Limit: {args.limit or 'all'}")
     print(f"Force: {args.force}")
-    print(f"Concurrency: {args.concurrency}")
+    print(f"Mode: {'batch' if args.batch else 'synchronous'}")
+    if not args.batch:
+        print(f"Concurrency: {args.concurrency}")
     if args.bill_id:
         print(f"Bill ID: {args.bill_id}")
     print()
 
     bills = get_bills_with_debates(conn, args.limit, args.force, args.bill_id)
     print(f"Found {len(bills)} bills with debates to process\n")
+
+    # Batch mode: prepare and submit
+    if args.batch:
+        print("Preparing batch requests...")
+        requests, skipped = prepare_batch_requests(conn, bills)
+        if skipped:
+            print(
+                f"Skipped {len(skipped)} bills requiring"
+                " hierarchical summarization"
+                " (too large for single context)"
+            )
+            print("Run these without --batch:" f" --bill-id for IDs: {skipped}")
+        print(f"Prepared {len(requests)} requests")
+        if not requests:
+            print("No requests to submit.")
+            conn.close()
+            return
+        batch_id = submit_batch(client, requests)
+        print(f"\nBatch submitted! ID: {batch_id}")
+        print(f"Check status:  pnpm summarize:debates" f" --batch-status {batch_id}")
+        print(f"Get results:   pnpm summarize:debates" f" --batch-results {batch_id}")
+        conn.close()
+        return
 
     # Thread-safe counter
     lock = threading.Lock()

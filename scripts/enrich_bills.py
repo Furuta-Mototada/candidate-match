@@ -19,12 +19,16 @@ Generated content includes:
 Usage:
     pnpm enrich:bills --limit 10
     pnpm enrich:bills --bill-id 1427 --force
+    pnpm enrich:bills --batch --limit 100
+    pnpm enrich:bills --batch-status batch_abc123
+    pnpm enrich:bills --batch-results batch_abc123
 """
 
 import os
 import sys
 import json
 import hashlib
+import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional, Any
@@ -42,7 +46,7 @@ except ImportError:
     sys.exit(1)
 
 DELAY_BETWEEN_REQUESTS = 0.5  # Reduced delay for efficiency
-LLM_MODEL = "gpt-5.2"  # 400K context, 128K output
+LLM_MODEL = "gpt-5.4-nano"  # 400K context, 128K output, cheapest GPT-5.4-class
 MAX_PDF_CHARS = 100000  # Use more of the bill text with large context window
 
 
@@ -58,6 +62,31 @@ def generate_enrichment(
     debate_summary: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
     """Generate enrichment content using OpenAI API."""
+
+    prompt = build_enrichment_prompt(bill_title, pdf_text, debate_summary)
+
+    response = client.chat.completions.create(
+        model=LLM_MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.3,
+        response_format={"type": "json_object"},
+    )
+
+    result = json.loads(response.choices[0].message.content)
+
+    # Validate required fields
+    if not result.get("summaryShort") or not result.get("summaryDetailed"):
+        raise ValueError("Missing required fields in response")
+
+    return result
+
+
+def build_enrichment_prompt(
+    bill_title: str,
+    pdf_text: Optional[str],
+    debate_summary: Optional[Dict[str, Any]],
+) -> str:
+    """Build the enrichment prompt for a bill."""
 
     # Build context from available sources
     context = f"法案名: {bill_title}\n\n"
@@ -134,20 +163,7 @@ def generate_enrichment(
 - 不確かな情報は推測せず、確認できる情報のみを含める
 - keyPointsは1〜3項目、impactTagsは3〜5個、pros/consは各2〜3個を目安にする"""
 
-    response = client.chat.completions.create(
-        model=LLM_MODEL,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
-        response_format={"type": "json_object"},
-    )
-
-    result = json.loads(response.choices[0].message.content)
-
-    # Validate required fields
-    if not result.get("summaryShort") or not result.get("summaryDetailed"):
-        raise ValueError("Missing required fields in response")
-
-    return result
+    return prompt
 
 
 def get_bills_to_enrich(
@@ -347,6 +363,166 @@ def upsert_enrichment(
     cursor.close()
 
 
+def prepare_batch_requests(
+    conn,
+    bills: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Prepare batch API request lines for all bills."""
+    requests = []
+    for bill in bills:
+        if not bill["title"]:
+            continue
+
+        debate_summary = get_debate_summary_for_bill(conn, bill["id"])
+        prompt = build_enrichment_prompt(
+            bill["title"],
+            bill.get("pdf_text"),
+            debate_summary,
+        )
+
+        request_line = {
+            "custom_id": f"enrich-{bill['id']}",
+            "method": "POST",
+            "url": "/v1/chat/completions",
+            "body": {
+                "model": LLM_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.3,
+                "response_format": {"type": "json_object"},
+            },
+        }
+        requests.append(request_line)
+    return requests
+
+
+def submit_batch(
+    client: openai.OpenAI,
+    requests: List[Dict[str, Any]],
+) -> str:
+    """Write JSONL, upload, and submit a batch job. Returns batch ID."""
+    # Write JSONL to temp file
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+        for req in requests:
+            f.write(json.dumps(req, ensure_ascii=False) + "\n")
+        jsonl_path = f.name
+
+    print(f"Wrote {len(requests)} requests to {jsonl_path}")
+
+    # Upload file
+    with open(jsonl_path, "rb") as f:
+        file_obj = client.files.create(file=f, purpose="batch")
+    print(f"Uploaded file: {file_obj.id}")
+
+    # Create batch
+    batch = client.batches.create(
+        input_file_id=file_obj.id,
+        endpoint="/v1/chat/completions",
+        completion_window="24h",
+        metadata={"script": "enrich_bills", "model": LLM_MODEL},
+    )
+    print(f"Batch created: {batch.id}")
+    print(f"Status: {batch.status}")
+
+    # Clean up temp file
+    os.unlink(jsonl_path)
+
+    return batch.id
+
+
+def check_batch_status(client: openai.OpenAI, batch_id: str):
+    """Check and print the status of a batch job."""
+    batch = client.batches.retrieve(batch_id)
+    print(f"Batch ID: {batch.id}")
+    print(f"Status: {batch.status}")
+    print(f"Request counts: {batch.request_counts}")
+    if batch.output_file_id:
+        print(f"Output file: {batch.output_file_id}")
+    if batch.error_file_id:
+        print(f"Error file: {batch.error_file_id}")
+    return batch
+
+
+def retrieve_batch_results(
+    client: openai.OpenAI,
+    conn,
+    batch_id: str,
+):
+    """Retrieve batch results and save to database."""
+    batch = client.batches.retrieve(batch_id)
+
+    if batch.status != "completed":
+        print(f"Batch {batch_id} is not completed yet." f" Status: {batch.status}")
+        if batch.status == "failed":
+            print("Batch failed. Check error file for details.")
+            if batch.error_file_id:
+                error_content = client.files.content(batch.error_file_id)
+                print(error_content.text)
+        return
+
+    if not batch.output_file_id:
+        print("No output file available.")
+        return
+
+    # Download results
+    content = client.files.content(batch.output_file_id)
+    results_text = content.text
+
+    success_count = 0
+    error_count = 0
+
+    for line in results_text.strip().split("\n"):
+        if not line:
+            continue
+        result_obj = json.loads(line)
+        custom_id = result_obj["custom_id"]
+        bill_id = int(custom_id.replace("enrich-", ""))
+
+        response = result_obj.get("response")
+        error = result_obj.get("error")
+
+        if error:
+            print(f"  Bill {bill_id}: Error - {error}")
+            upsert_enrichment(
+                conn,
+                bill_id,
+                "failed",
+                error=json.dumps(error, ensure_ascii=False),
+            )
+            error_count += 1
+            continue
+
+        if response and response.get("status_code") == 200:
+            body = response["body"]
+            content_str = body["choices"][0]["message"]["content"]
+            result = json.loads(content_str)
+
+            if not result.get("summaryShort") or not result.get("summaryDetailed"):
+                upsert_enrichment(
+                    conn,
+                    bill_id,
+                    "failed",
+                    error="Missing required fields",
+                )
+                error_count += 1
+                continue
+
+            result["sourceHash"] = ""
+            upsert_enrichment(conn, bill_id, "completed", result)
+            success_count += 1
+            print(f"  Bill {bill_id}: ✓" f" {result['summaryShort'][:50]}...")
+        else:
+            status_code = response.get("status_code") if response else "N/A"
+            upsert_enrichment(
+                conn,
+                bill_id,
+                "failed",
+                error=f"HTTP {status_code}",
+            )
+            error_count += 1
+
+    print(f"\nResults: {success_count} success, {error_count} errors")
+
+
 def main():
     import argparse
     import time
@@ -376,6 +552,23 @@ def main():
         default=3,
         help="Number of parallel workers" " (default: 3)",
     )
+    parser.add_argument(
+        "--batch",
+        action="store_true",
+        help="Submit as OpenAI Batch API job" " (50%% cheaper, results within 24h)",
+    )
+    parser.add_argument(
+        "--batch-status",
+        type=str,
+        metavar="BATCH_ID",
+        help="Check status of a batch job",
+    )
+    parser.add_argument(
+        "--batch-results",
+        type=str,
+        metavar="BATCH_ID",
+        help="Retrieve and save results" " from a completed batch job",
+    )
     args = parser.parse_args()
 
     # Check environment variables
@@ -389,8 +582,23 @@ def main():
         print("Error: OPENAI_API_KEY environment variable is required")
         sys.exit(1)
 
-    # Initialize connections
+    # Initialize OpenAI client
+    client = openai.OpenAI(api_key=openai_api_key)
+
+    # Handle batch status check (no DB needed)
+    if args.batch_status:
+        check_batch_status(client, args.batch_status)
+        return
+
+    # Initialize DB connection
     conn = psycopg2.connect(database_url)
+
+    # Handle batch results retrieval
+    if args.batch_results:
+        print("Retrieving batch results...")
+        retrieve_batch_results(client, conn, args.batch_results)
+        conn.close()
+        return
 
     print("=" * 60)
     print("Enriching Bills with LLM-generated Content")
@@ -400,7 +608,9 @@ def main():
     else:
         print(f"Limit: {args.limit or 'all'}")
     print(f"Force regenerate: {args.force}")
-    print(f"Concurrency: {args.concurrency}")
+    print(f"Mode: {'batch' if args.batch else 'synchronous'}")
+    if not args.batch:
+        print(f"Concurrency: {args.concurrency}")
     print("")
 
     # Get bills to process
@@ -411,7 +621,32 @@ def main():
         bill_id=args.bill_id,
     )
     print(f"Found {len(bills)} bills to process")
+
+    # Skip bills that have neither PDF text nor debate records
+    if not args.bill_id:
+        original_count = len(bills)
+        bills = [b for b in bills if b.get("pdf_text") or b["debate_count"] > 0]
+        skipped = original_count - len(bills)
+        if skipped > 0:
+            print(f"Skipped {skipped} bills with no PDF" " text and no debate records")
+    print(f"Processing {len(bills)} bills")
     print("")
+
+    # Batch mode: prepare and submit
+    if args.batch:
+        print("Preparing batch requests...")
+        requests = prepare_batch_requests(conn, bills)
+        print(f"Prepared {len(requests)} requests")
+        if not requests:
+            print("No requests to submit.")
+            conn.close()
+            return
+        batch_id = submit_batch(client, requests)
+        print(f"\nBatch submitted! ID: {batch_id}")
+        print(f"Check status:  pnpm enrich:bills --batch-status {batch_id}")
+        print(f"Get results:   pnpm enrich:bills --batch-results {batch_id}")
+        conn.close()
+        return
 
     # Thread-safe counter
     lock = threading.Lock()
