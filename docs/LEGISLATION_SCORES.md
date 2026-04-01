@@ -35,15 +35,19 @@ The calculation uses **extended group membership dates** for accurate attributio
 - This handles gaps between official group records
 
 #### Bill Submission (議案提出)
+
+These three categories are **mutually exclusive** — each member can only be scored under one of them per bill, with priority: Sponsor > Supporter > Group Member.
+
 - **Bill Sponsor (議案提出者)**: +10 points
   - Can be multiple members
   - For Cabinet Bills (閣法), the Prime Minister (内閣総理大臣) is recorded as sponsor during data scraping (not in the calculation script itself)
 - **Bill Supporters (賛成者)**: +5 points
+  - Excludes bill sponsors
 - **Sponsoring Group Members (所属会派メンバー)**: +2 points
   - Members in the same parliamentary group as the sponsor on the submission date
   - If `bill_sponsor_groups` is set, uses that group directly
   - Otherwise, uses the sponsor's group from `member_group` with extended dates
-  - Excludes bill sponsors (to avoid double counting)
+  - Excludes bill sponsors and bill supporters
 
 #### Bill Voting (議案採決)
 

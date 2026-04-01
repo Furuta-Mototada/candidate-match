@@ -37,7 +37,8 @@
 		"scrape:debates": "tsx ./scripts/scrape_debates.ts",
 		"summarize:debates": "python3 ./scripts/summarize_debates.py",
 		"enrich:bills": "python3 ./scripts/enrich_bills.py",
-		"check:data": "tsx ./scripts/check_data_integrity.ts"
+		"check:data": "tsx ./scripts/check_data_integrity.ts",
+		"check:scores": "tsx ./scripts/sanity_check_legislation_scores.ts"
 	},
 	"files": [
 		"dist",

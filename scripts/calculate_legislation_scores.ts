@@ -405,8 +405,10 @@ async function calculateLegislationScores(cache: CachedData): Promise<Legislatio
 			});
 		}
 
-		// Track sponsors to avoid double counting
+		// Track members already scored in submission categories to ensure mutual exclusivity:
+		// A member can only be scored as ONE of: sponsor, supporter, or sponsor's group member.
 		const sponsorIds = new Set<number>();
+		const supporterIds = new Set<number>();
 
 		// 1. Bill Submission (議案提出)
 		// 1a. Bill Sponsors (+10)
@@ -421,7 +423,20 @@ async function calculateLegislationScores(cache: CachedData): Promise<Legislatio
 			}
 		}
 
-		// 1b. Sponsoring Group (but exclude sponsors to avoid double counting)
+		// 1b. Bill Supporters (+5) — exclude sponsors
+		const supporters = cache.billSupportersByBillId.get(bill.id) || [];
+
+		for (const supporter of supporters) {
+			if (sponsorIds.has(supporter.memberId)) continue;
+			supporterIds.add(supporter.memberId);
+			const memberScore = memberScoresMap.get(supporter.memberId);
+			if (memberScore) {
+				memberScore.score += 5;
+				memberScore.breakdown.push('Bill Supporter: +5');
+			}
+		}
+
+		// 1c. Sponsoring Group (exclude sponsors and supporters to ensure mutual exclusivity)
 		const sponsorGroups = cache.billSponsorGroupsByBillId.get(bill.id) || [];
 
 		if (sponsorGroups.length > 0) {
@@ -434,8 +449,8 @@ async function calculateLegislationScores(cache: CachedData): Promise<Legislatio
 						cache
 					);
 					for (const memberId of groupMembers) {
-						// Skip if already a sponsor
-						if (sponsorIds.has(memberId)) continue;
+						// Skip if already a sponsor or supporter
+						if (sponsorIds.has(memberId) || supporterIds.has(memberId)) continue;
 
 						const memberScore = memberScoresMap.get(memberId);
 						if (memberScore) {
@@ -455,8 +470,13 @@ async function calculateLegislationScores(cache: CachedData): Promise<Legislatio
 					if (groupId) {
 						const groupMembers = getMembersInGroupOnDate(groupId, bill.submissionDate, cache);
 						for (const memberId of groupMembers) {
-							// Skip if already a sponsor or already added
-							if (sponsorIds.has(memberId) || addedMembers.has(memberId)) continue;
+							// Skip if already a sponsor, supporter, or already added
+							if (
+								sponsorIds.has(memberId) ||
+								supporterIds.has(memberId) ||
+								addedMembers.has(memberId)
+							)
+								continue;
 							addedMembers.add(memberId);
 
 							const memberScore = memberScoresMap.get(memberId);
@@ -467,17 +487,6 @@ async function calculateLegislationScores(cache: CachedData): Promise<Legislatio
 						}
 					}
 				}
-			}
-		}
-
-		// 1c. Bill Supporters (+5)
-		const supporters = cache.billSupportersByBillId.get(bill.id) || [];
-
-		for (const supporter of supporters) {
-			const memberScore = memberScoresMap.get(supporter.memberId);
-			if (memberScore) {
-				memberScore.score += 5;
-				memberScore.breakdown.push('Bill Supporter: +5');
 			}
 		}
 
