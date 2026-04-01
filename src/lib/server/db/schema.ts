@@ -385,6 +385,8 @@ export const user = pgTable('auth_user', {
 	id: text('id').primaryKey(), // UUID or random string
 	username: text('username').notNull().unique(),
 	passwordHash: text('password_hash').notNull(),
+	avatarUrl: text('avatar_url'),
+	avatarFileId: text('avatar_file_id'),
 	role: roleEnum('role').notNull().default('user'),
 	createdAt: timestamp('created_at').notNull().defaultNow(),
 	updatedAt: timestamp('updated_at').notNull().defaultNow()

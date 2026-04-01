@@ -37,6 +37,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 			type: table.notification.type,
 			actorId: table.notification.actorId,
 			actorUsername: table.user.username,
+			actorAvatarUrl: table.user.avatarUrl,
 			resourceId: table.notification.resourceId,
 			billId: table.notification.billId,
 			message: table.notification.message,

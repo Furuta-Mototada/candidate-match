@@ -44,6 +44,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 				id: table.voteDelegation.id,
 				delegatorId: table.voteDelegation.delegatorId,
 				delegatorUsername: table.user.username,
+				delegatorAvatarUrl: table.user.avatarUrl,
 				billId: table.voteDelegation.billId,
 				billTitle: table.bill.title,
 				status: table.voteDelegation.status,
@@ -67,6 +68,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 				id: table.voteDelegation.id,
 				delegateId: table.voteDelegation.delegateId,
 				delegateUsername: table.user.username,
+				delegateAvatarUrl: table.user.avatarUrl,
 				billId: table.voteDelegation.billId,
 				billTitle: table.bill.title,
 				status: table.voteDelegation.status,
@@ -93,6 +95,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 				id: table.voteDelegation.id,
 				delegateId: table.voteDelegation.delegateId,
 				delegateUsername: table.user.username,
+				delegateAvatarUrl: table.user.avatarUrl,
 				status: table.voteDelegation.status
 			})
 			.from(table.voteDelegation)
@@ -114,6 +117,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 				id: table.voteDelegation.id,
 				delegatorId: table.voteDelegation.delegatorId,
 				delegatorUsername: table.user.username,
+				delegatorAvatarUrl: table.user.avatarUrl,
 				billId: table.voteDelegation.billId,
 				billTitle: table.bill.title,
 				billType: table.bill.type,
@@ -157,6 +161,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 				id: table.voteDelegation.id,
 				delegateId: table.voteDelegation.delegateId,
 				delegateUsername: table.user.username,
+				delegateAvatarUrl: table.user.avatarUrl,
 				billId: table.voteDelegation.billId,
 				billTitle: table.bill.title,
 				billType: table.bill.type,

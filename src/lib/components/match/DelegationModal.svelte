@@ -1,10 +1,12 @@
 <script lang="ts">
-	import { Handshake, Hourglass, TriangleAlert, X, User } from '@lucide/svelte';
+	import { Handshake, Hourglass, TriangleAlert, X } from '@lucide/svelte';
+	import Avatar from '$lib/components/Avatar.svelte';
 
 	type Friend = {
 		requestId: number;
 		friendId: string;
 		friendUsername: string;
+		friendAvatarUrl: string | null;
 		since: string;
 	};
 
@@ -259,7 +261,13 @@
 										? holdProgress
 										: 0})"
 								></span>
-								<span class="friend-avatar"><User size={16} /></span>
+								<span class="friend-avatar"
+									><Avatar
+										username={friend.friendUsername}
+										avatarUrl={friend.friendAvatarUrl}
+										size="sm"
+									/></span
+								>
 								<span class="friend-name">{friend.friendUsername}</span>
 								{#if isCurrentDelegate}
 									<span class="current-delegate-badge">現在の委任先</span>

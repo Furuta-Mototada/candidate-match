@@ -10,6 +10,7 @@
 		id: number;
 		delegatorId: string;
 		delegatorUsername: string;
+		delegatorAvatarUrl?: string | null;
 		billId: number;
 		status: string;
 		upstreamPaths: Array<Array<{ username: string; status: string }>>;
@@ -17,6 +18,7 @@
 
 	type OutgoingDelegation = {
 		delegateUsername: string;
+		delegateAvatarUrl?: string | null;
 		delegateVotes?: number;
 		chain: ChainLink[];
 		status: string;
@@ -105,6 +107,7 @@
 			username: string;
 			status: string;
 			col: number;
+			avatarUrl?: string | null;
 		};
 		const personNodesList: PersonNode[] = [];
 		const addedPersons = new SvelteSet<string>();
@@ -117,7 +120,8 @@
 				personNodesList.push({
 					username: inc.delegatorUsername,
 					status: inc.status,
-					col: delegatorCol
+					col: delegatorCol,
+					avatarUrl: inc.delegatorAvatarUrl
 				});
 			}
 		}
@@ -168,7 +172,8 @@
 					makeNode(id, col * X_GAP, startY + i * Y_GAP, {
 						label: p.username,
 						status: p.status,
-						statusColor: getStatusColor(p.status)
+						statusColor: getStatusColor(p.status),
+						avatarUrl: p.avatarUrl
 					})
 				);
 			}
@@ -182,7 +187,8 @@
 					label: outgoing.delegateUsername,
 					status: outgoing.status,
 					statusColor: getStatusColor(outgoing.status),
-					votes: outgoing.delegateVotes
+					votes: outgoing.delegateVotes,
+					avatarUrl: outgoing.delegateAvatarUrl
 				})
 			);
 			es.push(makeEdge(meId, delegateId, outgoing.status));

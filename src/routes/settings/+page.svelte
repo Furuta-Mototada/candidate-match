@@ -1,7 +1,100 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { invalidateAll } from '$app/navigation';
+	import Avatar from '$lib/components/Avatar.svelte';
+	import { Camera, Trash2 } from '@lucide/svelte';
 
 	let { data, form } = $props();
+
+	let uploading = $state(false);
+	let avatarError = $state<string | null>(null);
+	let avatarSuccess = $state(false);
+	let currentAvatarUrl = $state(data.profile.avatarUrl);
+
+	async function handleAvatarUpload(event: Event) {
+		const input = event.target as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file) return;
+
+		// Validate file type and size
+		const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+		if (!allowedTypes.includes(file.type)) {
+			avatarError = 'JPEG、PNG、WebP、GIF形式のみ対応しています';
+			return;
+		}
+		if (file.size > 5 * 1024 * 1024) {
+			avatarError = 'ファイルサイズは5MB以下にしてください';
+			return;
+		}
+
+		uploading = true;
+		avatarError = null;
+		avatarSuccess = false;
+
+		try {
+			// 1. Get auth params from our server
+			const authRes = await fetch('/api/imagekit/auth');
+			const authData = await authRes.json();
+			if (!authData.success) throw new Error(authData.error || '認証に失敗しました');
+
+			// 2. Upload directly to ImageKit
+			const formData = new FormData();
+			formData.append('file', file);
+			formData.append('publicKey', authData.publicKey);
+			formData.append('token', authData.token);
+			formData.append('expire', String(authData.expire));
+			formData.append('signature', authData.signature);
+			formData.append('fileName', `avatar-${data.profile.id}`);
+			formData.append('useUniqueFileName', 'true');
+			formData.append('folder', '/avatars');
+
+			const uploadRes = await fetch('https://upload.imagekit.io/api/v1/files/upload', {
+				method: 'POST',
+				body: formData
+			});
+
+			if (!uploadRes.ok) throw new Error('画像のアップロードに失敗しました');
+			const uploadData = await uploadRes.json();
+
+			// 3. Save the URL and fileId to our database
+			const saveRes = await fetch('/api/profile/avatar', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ url: uploadData.url, fileId: uploadData.fileId })
+			});
+
+			const saveData = await saveRes.json();
+			if (!saveData.success) throw new Error(saveData.error || '保存に失敗しました');
+
+			currentAvatarUrl = saveData.avatarUrl;
+			avatarSuccess = true;
+			await invalidateAll();
+			setTimeout(() => (avatarSuccess = false), 3000);
+		} catch (e) {
+			avatarError = e instanceof Error ? e.message : '不明なエラーが発生しました';
+		} finally {
+			uploading = false;
+			input.value = '';
+		}
+	}
+
+	async function removeAvatar() {
+		uploading = true;
+		avatarError = null;
+		try {
+			const res = await fetch('/api/profile/avatar', { method: 'DELETE' });
+			const data = await res.json();
+			if (!data.success) throw new Error(data.error);
+			currentAvatarUrl = null;
+			avatarSuccess = true;
+			await invalidateAll();
+			setTimeout(() => (avatarSuccess = false), 3000);
+		} catch (e) {
+			avatarError = e instanceof Error ? e.message : '削除に失敗しました';
+		} finally {
+			uploading = false;
+		}
+	}
 </script>
 
 <svelte:head>
@@ -11,6 +104,44 @@
 <div class="settings-page">
 	<div class="settings-container">
 		<h1 class="settings-title">ユーザー設定</h1>
+
+		<!-- Avatar Section -->
+		<section class="settings-card">
+			<h2 class="card-heading">プロフィール画像</h2>
+
+			<div class="avatar-section">
+				<div class="avatar-preview">
+					<Avatar username={data.profile.username} avatarUrl={currentAvatarUrl} size="lg" />
+				</div>
+				<div class="avatar-actions">
+					<label class="btn-upload" class:disabled={uploading}>
+						<Camera size={14} />
+						{uploading ? 'アップロード中...' : '画像を変更'}
+						<input
+							type="file"
+							accept="image/jpeg,image/png,image/webp,image/gif"
+							onchange={handleAvatarUpload}
+							disabled={uploading}
+							hidden
+						/>
+					</label>
+					{#if currentAvatarUrl}
+						<button class="btn-remove-avatar" onclick={removeAvatar} disabled={uploading}>
+							<Trash2 size={14} />
+							削除
+						</button>
+					{/if}
+					<small>JPEG、PNG、WebP、GIF（5MB以下）</small>
+				</div>
+			</div>
+
+			{#if avatarError}
+				<div class="msg msg-error">{avatarError}</div>
+			{/if}
+			{#if avatarSuccess}
+				<div class="msg msg-success">プロフィール画像を更新しました</div>
+			{/if}
+		</section>
 
 		<!-- Username Section -->
 		<section class="settings-card">
@@ -209,5 +340,69 @@
 
 	.btn-submit:hover {
 		background: #4f46e5;
+	}
+
+	.avatar-section {
+		display: flex;
+		align-items: center;
+		gap: 1.5rem;
+	}
+
+	.avatar-preview {
+		flex-shrink: 0;
+	}
+
+	.avatar-actions {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.btn-upload {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.375rem;
+		padding: 0.5rem 1rem;
+		background: #6366f1;
+		color: white;
+		border: none;
+		border-radius: 0.375rem;
+		font-size: 0.8125rem;
+		font-weight: 600;
+		cursor: pointer;
+		transition: background 0.15s ease;
+	}
+
+	.btn-upload:hover {
+		background: #4f46e5;
+	}
+
+	.btn-upload.disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
+	.btn-remove-avatar {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.375rem;
+		padding: 0.375rem 0.75rem;
+		background: none;
+		color: #dc2626;
+		border: 1px solid #fecaca;
+		border-radius: 0.375rem;
+		font-size: 0.75rem;
+		font-weight: 500;
+		cursor: pointer;
+		transition: all 0.15s ease;
+	}
+
+	.btn-remove-avatar:hover {
+		background: #fef2f2;
+	}
+
+	.btn-remove-avatar:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
 	}
 </style>

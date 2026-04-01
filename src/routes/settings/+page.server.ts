@@ -16,6 +16,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 			id: table.user.id,
 			username: table.user.username,
 			role: table.user.role,
+			avatarUrl: table.user.avatarUrl,
 			createdAt: table.user.createdAt
 		})
 		.from(table.user)

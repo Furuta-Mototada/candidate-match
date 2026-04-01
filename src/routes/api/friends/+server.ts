@@ -29,6 +29,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 			.select({
 				id: table.user.id,
 				username: table.user.username,
+				avatarUrl: table.user.avatarUrl,
 				requestId: table.friendRequest.id,
 				senderId: table.friendRequest.senderId,
 				requestStatus: table.friendRequest.status
@@ -62,7 +63,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 					friendStatus = 'rejected';
 				}
 			}
-			return { id: row.id, username: row.username, friendStatus };
+			return { id: row.id, username: row.username, avatarUrl: row.avatarUrl, friendStatus };
 		});
 
 		return json({ users: usersWithStatus });
@@ -76,6 +77,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 					id: table.friendRequest.id,
 					senderId: table.friendRequest.senderId,
 					senderUsername: table.user.username,
+					senderAvatarUrl: table.user.avatarUrl,
 					createdAt: table.friendRequest.createdAt
 				})
 				.from(table.friendRequest)
@@ -89,6 +91,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 					id: table.friendRequest.id,
 					receiverId: table.friendRequest.receiverId,
 					receiverUsername: table.user.username,
+					receiverAvatarUrl: table.user.avatarUrl,
 					createdAt: table.friendRequest.createdAt
 				})
 				.from(table.friendRequest)
@@ -109,6 +112,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 				requestId: table.friendRequest.id,
 				friendId: table.friendRequest.receiverId,
 				friendUsername: table.user.username,
+				friendAvatarUrl: table.user.avatarUrl,
 				since: table.friendRequest.updatedAt
 			})
 			.from(table.friendRequest)
@@ -121,6 +125,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 				requestId: table.friendRequest.id,
 				friendId: table.friendRequest.senderId,
 				friendUsername: table.user.username,
+				friendAvatarUrl: table.user.avatarUrl,
 				since: table.friendRequest.updatedAt
 			})
 			.from(table.friendRequest)

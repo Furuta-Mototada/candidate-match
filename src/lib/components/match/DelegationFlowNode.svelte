@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Handle, Position } from '@xyflow/svelte';
-	import { Hourglass, CircleCheck, XCircle, RefreshCw, User } from '@lucide/svelte';
+	import { Hourglass, CircleCheck, XCircle, RefreshCw } from '@lucide/svelte';
+	import Avatar from '$lib/components/Avatar.svelte';
 
 	let {
 		data,
@@ -13,6 +14,7 @@
 			isMe?: boolean;
 			votes?: number;
 			statusColor?: string;
+			avatarUrl?: string | null;
 		};
 		sourcePosition?: Position;
 		targetPosition?: Position;
@@ -22,17 +24,18 @@
 <Handle type="target" position={targetPosition ?? Position.Left} />
 
 <div class="delegation-node" class:me={data.isMe}>
-	<span class="icon" style:color={data.isMe ? 'white' : (data.statusColor ?? '#6b7280')}>
-		{#if data.isMe}
-			<User size={14} strokeWidth={2.5} />
-		{:else if data.status === 'pending'}
-			<Hourglass size={14} />
-		{:else if data.status === 'voted'}
-			<CircleCheck size={14} />
-		{:else if data.status === 'rejected'}
-			<XCircle size={14} />
-		{:else if data.status === 'redelegated'}
-			<RefreshCw size={14} />
+	<Avatar username={data.label} avatarUrl={data.avatarUrl} size="xs" />
+	<span class="status-icon" style:color={data.isMe ? 'white' : (data.statusColor ?? '#6b7280')}>
+		{#if !data.isMe}
+			{#if data.status === 'pending'}
+				<Hourglass size={12} />
+			{:else if data.status === 'voted'}
+				<CircleCheck size={12} />
+			{:else if data.status === 'rejected'}
+				<XCircle size={12} />
+			{:else if data.status === 'redelegated'}
+				<RefreshCw size={12} />
+			{/if}
 		{/if}
 	</span>
 	<span class="label">{data.label}</span>
@@ -67,7 +70,7 @@
 		font-weight: 600;
 	}
 
-	.icon {
+	.status-icon {
 		display: flex;
 		align-items: center;
 		flex-shrink: 0;

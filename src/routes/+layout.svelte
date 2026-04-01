@@ -2,6 +2,7 @@
 	import '../app.css';
 	import type { LayoutData } from './$types.js';
 	import NotificationDropdown from '$lib/components/NotificationDropdown.svelte';
+	import Avatar from '$lib/components/Avatar.svelte';
 	import { ChevronDown, Users, Settings, LogOut } from '@lucide/svelte';
 
 	import type { Snippet } from 'svelte';
@@ -45,9 +46,7 @@
 						aria-expanded={dropdownOpen}
 						aria-haspopup="true"
 					>
-						<span class="user-chip-avatar">
-							{data.user.username.charAt(0).toUpperCase()}
-						</span>
+						<Avatar username={data.user.username} avatarUrl={data.user.avatarUrl} size="xs" />
 						<span class="user-chip-name">{data.user.username}</span>
 						{#if data.user.role === 'admin'}
 							<span class="badge-admin">Admin</span>
@@ -160,20 +159,6 @@
 	.user-chip:hover {
 		background: #e2e8f0;
 		border-color: #cbd5e1;
-	}
-
-	.user-chip-avatar {
-		width: 1.5rem;
-		height: 1.5rem;
-		border-radius: 50%;
-		background: linear-gradient(135deg, #6366f1, #8b5cf6);
-		color: white;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		font-size: 0.6875rem;
-		font-weight: 700;
-		line-height: 1;
 	}
 
 	.user-chip-name {

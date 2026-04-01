@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Users, Mailbox, Search } from '@lucide/svelte';
+	import Avatar from '$lib/components/Avatar.svelte';
 	import type { PageData } from './$types.js';
 
 	let { data }: { data: PageData } = $props();
@@ -7,6 +8,7 @@
 	type SearchUser = {
 		id: string;
 		username: string;
+		avatarUrl: string | null;
 		friendStatus: 'none' | 'pending_sent' | 'pending_received' | 'accepted' | 'rejected';
 	};
 
@@ -14,6 +16,7 @@
 		requestId: number;
 		friendId: string;
 		friendUsername: string;
+		friendAvatarUrl: string | null;
 		since: string;
 	};
 
@@ -21,6 +24,7 @@
 		id: number;
 		senderId: string;
 		senderUsername: string;
+		senderAvatarUrl: string | null;
 		createdAt: string;
 	};
 
@@ -28,6 +32,7 @@
 		id: number;
 		receiverId: string;
 		receiverUsername: string;
+		receiverAvatarUrl: string | null;
 		createdAt: string;
 	};
 
@@ -240,9 +245,11 @@
 						{#each friends as friend (friend.friendId)}
 							<li class="user-item">
 								<div class="user-info">
-									<span class="avatar">
-										{friend.friendUsername.charAt(0).toUpperCase()}
-									</span>
+									<Avatar
+										username={friend.friendUsername}
+										avatarUrl={friend.friendAvatarUrl}
+										size="md"
+									/>
 									<div>
 										<span class="username">{friend.friendUsername}</span>
 										<span class="meta">
@@ -272,9 +279,11 @@
 							{#each incoming as req (req.id)}
 								<li class="user-item">
 									<div class="user-info">
-										<span class="avatar">
-											{req.senderUsername.charAt(0).toUpperCase()}
-										</span>
+										<Avatar
+											username={req.senderUsername}
+											avatarUrl={req.senderAvatarUrl}
+											size="md"
+										/>
 										<div>
 											<span class="username">{req.senderUsername}</span>
 											<span class="meta">
@@ -307,9 +316,11 @@
 							{#each outgoing as req (req.id)}
 								<li class="user-item">
 									<div class="user-info">
-										<span class="avatar">
-											{req.receiverUsername.charAt(0).toUpperCase()}
-										</span>
+										<Avatar
+											username={req.receiverUsername}
+											avatarUrl={req.receiverAvatarUrl}
+											size="md"
+										/>
 										<div>
 											<span class="username">{req.receiverUsername}</span>
 											<span class="meta">
@@ -356,9 +367,7 @@
 						{#each searchResults as user (user.id)}
 							<li class="user-item">
 								<div class="user-info">
-									<span class="avatar">
-										{user.username.charAt(0).toUpperCase()}
-									</span>
+									<Avatar username={user.username} avatarUrl={user.avatarUrl} size="md" />
 									<span class="username">{user.username}</span>
 								</div>
 								{#if user.friendStatus === 'accepted'}
@@ -540,20 +549,6 @@
 		display: flex;
 		align-items: center;
 		gap: 0.75rem;
-	}
-
-	.avatar {
-		width: 2.25rem;
-		height: 2.25rem;
-		border-radius: 50%;
-		background: linear-gradient(135deg, #6366f1, #8b5cf6);
-		color: white;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		font-size: 0.875rem;
-		font-weight: 700;
-		flex-shrink: 0;
 	}
 
 	.username {

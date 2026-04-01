@@ -1,6 +1,6 @@
 {
-  "id": "0bc4cc55-82c0-4725-97fe-66ee4b5b72b5",
-  "prevId": "0c716fff-474f-45a6-a15f-98c88b3bffeb",
+  "id": "d19c2338-d489-4814-9da1-4d5700e37972",
+  "prevId": "ad16c0b2-420a-4b33-a0a0-a9fff8e95f1e",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2195,6 +2195,18 @@
           "primaryKey": false,
           "notNull": true
         },
+        "avatar_url": {
+          "name": "avatar_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "avatar_file_id": {
+          "name": "avatar_file_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "role": {
           "name": "role",
           "type": "user_role",
@@ -2446,27 +2458,27 @@
       "name": "bill_result",
       "schema": "public",
       "values": [
-        "\u53ef\u6c7a",
-        "\u5426\u6c7a",
-        "\u64a4\u56de",
-        "\u672a\u4e86"
+        "可決",
+        "否決",
+        "撤回",
+        "未了"
       ]
     },
     "public.bill_type": {
       "name": "bill_type",
       "schema": "public",
       "values": [
-        "\u8846\u6cd5",
-        "\u53c2\u6cd5",
-        "\u95a3\u6cd5"
+        "衆法",
+        "参法",
+        "閣法"
       ]
     },
     "public.chamber": {
       "name": "chamber",
       "schema": "public",
       "values": [
-        "\u53c2\u8b70\u9662",
-        "\u8846\u8b70\u9662"
+        "参議院",
+        "衆議院"
       ]
     },
     "public.delegation_status": {
@@ -2527,19 +2539,19 @@
       "name": "session_type",
       "schema": "public",
       "values": [
-        "\u5e38\u4f1a",
-        "\u81e8\u6642\u4f1a",
-        "\u7279\u5225\u4f1a"
+        "常会",
+        "臨時会",
+        "特別会"
       ]
     },
     "public.voting_method": {
       "name": "voting_method",
       "schema": "public",
       "values": [
-        "\u7570\u8b70\u306a\u3057\u63a1\u6c7a",
-        "\u8d77\u7acb\u6295\u7968",
-        "\u8a18\u540d\u6295\u7968",
-        "\u62bc\u3057\u30dc\u30bf\u30f3"
+        "異議なし採決",
+        "起立投票",
+        "記名投票",
+        "押しボタン"
       ]
     }
   },

@@ -1,7 +1,6 @@
 <script lang="ts">
 	import {
 		Bell,
-		User,
 		Handshake,
 		Frown,
 		MailOpen,
@@ -13,12 +12,14 @@
 		RefreshCw,
 		Ban
 	} from '@lucide/svelte';
+	import Avatar from '$lib/components/Avatar.svelte';
 
 	interface Notification {
 		id: number;
 		type: string;
 		actorId: string | null;
 		actorUsername: string | null;
+		actorAvatarUrl: string | null;
 		resourceId: number | null;
 		billId: number | null;
 		message: string;
@@ -125,9 +126,11 @@
 
 <svelte:document onclick={handleClickOutside} />
 
-{#snippet notifIcon(type: string)}
-	{#if type === 'friend_request_received'}
-		<User size={16} />
+{#snippet notifIcon(type: string, actorUsername: string | null, actorAvatarUrl: string | null)}
+	{#if actorUsername}
+		<Avatar username={actorUsername} avatarUrl={actorAvatarUrl} size="sm" />
+	{:else if type === 'friend_request_received'}
+		<Bell size={16} />
 	{:else if type === 'friend_request_accepted'}
 		<Handshake size={16} />
 	{:else if type === 'friend_request_rejected'}
@@ -189,7 +192,9 @@
 									close();
 								}}
 							>
-								<span class="notif-icon">{@render notifIcon(notif.type)}</span>
+								<span class="notif-icon"
+									>{@render notifIcon(notif.type, notif.actorUsername, notif.actorAvatarUrl)}</span
+								>
 								<div class="notif-content">
 									<span class="notif-message">{notif.message}</span>
 									<span class="notif-time">{timeAgo(notif.createdAt)}</span>
@@ -205,7 +210,9 @@
 								role="menuitem"
 								onclick={() => markRead(notif.id)}
 							>
-								<span class="notif-icon">{@render notifIcon(notif.type)}</span>
+								<span class="notif-icon"
+									>{@render notifIcon(notif.type, notif.actorUsername, notif.actorAvatarUrl)}</span
+								>
 								<div class="notif-content">
 									<span class="notif-message">{notif.message}</span>
 									<span class="notif-time">{timeAgo(notif.createdAt)}</span>

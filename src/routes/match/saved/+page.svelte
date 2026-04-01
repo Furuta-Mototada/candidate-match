@@ -18,6 +18,7 @@
 	import BillDetailModal from '$lib/components/match/BillDetailModal.svelte';
 	import DelegationFlowChart from '$lib/components/match/DelegationFlowChart.svelte';
 	import GlobalResultsPhase from '$lib/components/match/GlobalResultsPhase.svelte';
+	import Avatar from '$lib/components/Avatar.svelte';
 	import {
 		ClipboardList,
 		Vote,
@@ -38,7 +39,6 @@
 		ThumbsUp,
 		ThumbsDown,
 		CircleQuestionMark,
-		User,
 		Activity,
 		Save
 	} from '@lucide/svelte';
@@ -47,6 +47,7 @@
 		id: number;
 		delegatorId: string;
 		delegatorUsername: string;
+		delegatorAvatarUrl: string | null;
 		billId: number;
 		billTitle: string | null;
 		billType: string;
@@ -64,6 +65,7 @@
 		id: number;
 		delegateId: string;
 		delegateUsername: string;
+		delegateAvatarUrl: string | null;
 		billId: number;
 		billTitle: string | null;
 		billType: string;
@@ -411,10 +413,17 @@
 
 	// Redelegate modal
 	let redelegatingDelegation: IncomingDelegation | null = $state(null);
-	let redelegateFriends: { friendId: string; friendUsername: string }[] = $state([]);
+	let redelegateFriends: {
+		friendId: string;
+		friendUsername: string;
+		friendAvatarUrl: string | null;
+	}[] = $state([]);
 	let redelegateLoading: boolean = $state(false);
-	let redelegateConfirmingFriend: { friendId: string; friendUsername: string } | null =
-		$state(null);
+	let redelegateConfirmingFriend: {
+		friendId: string;
+		friendUsername: string;
+		friendAvatarUrl: string | null;
+	} | null = $state(null);
 
 	// Bill detail modal
 	let selectedBill: BillListItem | null = $state(null);
@@ -680,7 +689,7 @@
 			}
 			const upstreamIds = new Set(upstreamUsernames);
 			redelegateFriends = (data.friends || []).filter(
-				(f: { friendId: string; friendUsername: string }) =>
+				(f: { friendId: string; friendUsername: string; friendAvatarUrl: string | null }) =>
 					!delegatorIds.has(f.friendId) && !upstreamIds.has(f.friendUsername)
 			);
 		} catch (e) {
@@ -1591,6 +1600,11 @@
 				</div>
 				<div class="vote-modal-body">
 					<p class="vote-modal-delegator">
+						<Avatar
+							username={votingDelegation.delegatorUsername}
+							avatarUrl={votingDelegation.delegatorAvatarUrl}
+							size="sm"
+						/>
 						<strong>{votingDelegation.delegatorUsername}</strong> さんの代わりに投票します
 					</p>
 					<p class="vote-modal-bill">
@@ -1657,6 +1671,11 @@
 				</div>
 				<div class="vote-modal-body">
 					<p class="vote-modal-delegator">
+						<Avatar
+							username={redelegatingDelegation.delegatorUsername}
+							avatarUrl={redelegatingDelegation.delegatorAvatarUrl}
+							size="sm"
+						/>
 						<strong>{redelegatingDelegation.delegatorUsername}</strong> さんからの委任を別のフレンドに転送します
 					</p>
 					<p class="vote-modal-bill">
@@ -1720,7 +1739,11 @@
 									}}
 									disabled={isLoading}
 								>
-									<User size={14} class="inline-icon" />
+									<Avatar
+										username={friend.friendUsername}
+										avatarUrl={friend.friendAvatarUrl}
+										size="xs"
+									/>
 									{friend.friendUsername}
 								</button>
 							{/each}
