@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Executive Summary — Candidate Match</title>
+  <style>
+    /* ── Reset & Page Setup ─────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    @page {
+      size: letter;          /* 8.5 × 11 in  — Google Docs default */
+      margin: 0.7in 0.8in;   /* comfortable reading margins */
+    }
+
+    body {
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      font-size: 11pt;
+      line-height: 1.45;
+      color: #1a1a1a;
+      max-width: 7in;        /* text width inside margins */
+      margin: 0 auto;
+      padding: 0.7in 0.8in;
+    }
+
+    /* ── Typography ─────────────────────────────────────────── */
+    h1 {
+      font-size: 18pt;
+      font-weight: 700;
+      color: #1e3a5f;
+      margin-bottom: 2pt;
+      text-align: center;
+    }
+
+    .subtitle {
+      text-align: center;
+      font-size: 10pt;
+      color: #555;
+      margin-bottom: 10pt;
+    }
+
+    h2 {
+      font-size: 12pt;
+      font-weight: 700;
+      color: #1e3a5f;
+      margin-top: 10pt;
+      margin-bottom: 3pt;
+      border-bottom: 1.5px solid #c5d5e8;
+      padding-bottom: 2pt;
+    }
+
+    p  { margin-bottom: 5pt; }
+    ul { margin: 3pt 0 5pt 18pt; }
+    li { margin-bottom: 2pt; }
+
+    strong { color: #1e3a5f; }
+
+    /* ── Two-column layout ──────────────────────────────────── */
+    .columns {
+      display: flex;
+      gap: 16pt;
+    }
+    .col-left  { flex: 1; }
+    .col-right { flex: 1; }
+
+    /* ── Diagram ────────────────────────────────────────────── */
+    .diagram-container {
+      margin: 8pt 0 4pt;
+      text-align: center;
+    }
+    .diagram-container svg {
+      width: 100%;
+      max-width: 460pt;
+    }
+    .diagram-caption {
+      font-size: 8.5pt;
+      color: #666;
+      text-align: center;
+      margin-top: 2pt;
+    }
+
+    /* ── Footer ─────────────────────────────────────────────── */
+    .footer {
+      margin-top: 8pt;
+      font-size: 8pt;
+      color: #888;
+      text-align: center;
+      border-top: 1px solid #ddd;
+      padding-top: 4pt;
+    }
+
+    /* Print-specific overrides */
+    @media print {
+      body { padding: 0; max-width: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ════════════════  TITLE  ════════════════ -->
+<h1>Candidate Match 🗳️</h1>
+<p class="subtitle">
+  <strong>An AI-Powered Political Matching Platform for the Japanese National Diet</strong><br />
+  Mototada Furuta&ensp;·&ensp;Minerva University Capstone Project
+</p>
+
+<!-- ════════════════  PROBLEM & SOLUTION  ════════════════ -->
+<h2>The Problem</h2>
+<p>
+  Japan's National Diet passes hundreds of bills each session, yet most voters have
+  little insight into <em>how</em> their representatives actually vote.
+  Traditional media coverage focuses on party labels and personalities rather than
+  legislative behavior. Without clear, accessible data, citizens cannot easily
+  determine which politicians truly share their views.
+</p>
+
+<h2>The Solution</h2>
+<p>
+  <strong>Candidate Match</strong> is a web application that lets anyone discover
+  which Diet members align with their political preferences. Inspired by
+  <em>Computerized Adaptive Testing</em> (CAT), the platform asks users a short
+  series of questions about real bills — "Do you support or oppose this
+  legislation?" — and then uses machine-learning techniques to match them with
+  the parliament members whose voting records are most similar.
+</p>
+
+<!-- ════════════════  DIAGRAM  ════════════════ -->
+<div class="diagram-container">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 580 130" role="img" aria-label="System flowchart showing data pipeline from government data to user matching">
+    <!-- Arrows -->
+    <defs>
+      <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+        <polygon points="0 0, 8 3, 0 6" fill="#1e3a5f"/>
+      </marker>
+    </defs>
+
+    <!-- Step 1: Government Data -->
+    <rect x="2" y="30" width="100" height="70" rx="8" fill="#e8f0fe" stroke="#1e3a5f" stroke-width="1.5"/>
+    <text x="52" y="56" text-anchor="middle" font-size="9" font-weight="bold" fill="#1e3a5f">Government</text>
+    <text x="52" y="69" text-anchor="middle" font-size="9" font-weight="bold" fill="#1e3a5f">Data</text>
+    <text x="52" y="85" text-anchor="middle" font-size="7.5" fill="#555">Bills, Votes,</text>
+    <text x="52" y="95" text-anchor="middle" font-size="7.5" fill="#555">Members</text>
+
+    <line x1="104" y1="65" x2="128" y2="65" stroke="#1e3a5f" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+    <!-- Step 2: ML Pipeline -->
+    <rect x="130" y="30" width="100" height="70" rx="8" fill="#e8f0fe" stroke="#1e3a5f" stroke-width="1.5"/>
+    <text x="180" y="56" text-anchor="middle" font-size="9" font-weight="bold" fill="#1e3a5f">ML Pipeline</text>
+    <text x="180" y="72" text-anchor="middle" font-size="7.5" fill="#555">Embeddings,</text>
+    <text x="180" y="82" text-anchor="middle" font-size="7.5" fill="#555">Clustering, SVD,</text>
+    <text x="180" y="92" text-anchor="middle" font-size="7.5" fill="#555">LLM Summaries</text>
+
+    <line x1="232" y1="65" x2="256" y2="65" stroke="#1e3a5f" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+    <!-- Step 3: Adaptive Matching -->
+    <rect x="258" y="30" width="100" height="70" rx="8" fill="#d4e8d4" stroke="#2d6a2e" stroke-width="1.5"/>
+    <text x="308" y="53" text-anchor="middle" font-size="9" font-weight="bold" fill="#2d6a2e">Adaptive</text>
+    <text x="308" y="66" text-anchor="middle" font-size="9" font-weight="bold" fill="#2d6a2e">Matching</text>
+    <text x="308" y="82" text-anchor="middle" font-size="7.5" fill="#555">User answers</text>
+    <text x="308" y="92" text-anchor="middle" font-size="7.5" fill="#555">bill questions</text>
+
+    <line x1="360" y1="65" x2="384" y2="65" stroke="#1e3a5f" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+    <!-- Step 4: Results -->
+    <rect x="386" y="30" width="100" height="70" rx="8" fill="#fef3e0" stroke="#c77f00" stroke-width="1.5"/>
+    <text x="436" y="53" text-anchor="middle" font-size="9" font-weight="bold" fill="#c77f00">Match</text>
+    <text x="436" y="66" text-anchor="middle" font-size="9" font-weight="bold" fill="#c77f00">Results</text>
+    <text x="436" y="82" text-anchor="middle" font-size="7.5" fill="#555">Ranked Diet</text>
+    <text x="436" y="92" text-anchor="middle" font-size="7.5" fill="#555">members & parties</text>
+
+    <line x1="488" y1="65" x2="512" y2="65" stroke="#1e3a5f" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+    <!-- Step 5: Civic Engagement -->
+    <rect x="514" y="30" width="64" height="70" rx="8" fill="#f3e8fe" stroke="#6b2fa0" stroke-width="1.5"/>
+    <text x="546" y="56" text-anchor="middle" font-size="9" font-weight="bold" fill="#6b2fa0">Civic</text>
+    <text x="546" y="69" text-anchor="middle" font-size="9" font-weight="bold" fill="#6b2fa0">Insight</text>
+    <text x="546" y="85" text-anchor="middle" font-size="7.5" fill="#555">Informed</text>
+    <text x="546" y="95" text-anchor="middle" font-size="7.5" fill="#555">voters</text>
+
+    <!-- Top label -->
+    <text x="290" y="18" text-anchor="middle" font-size="10" font-weight="bold" fill="#1e3a5f">How Candidate Match Works</text>
+  </svg>
+  <p class="diagram-caption">Figure 1 — End-to-end pipeline: from raw government data to personalized political insights.</p>
+</div>
+
+<!-- ════════════════  KEY FEATURES & IMPACT (two-col)  ════════════════ -->
+<div class="columns">
+  <div class="col-left">
+    <h2>Key Features</h2>
+    <ul>
+      <li><strong>Adaptive Matching</strong> — asks only the most informative
+        bills first, so users get accurate results in just a few minutes.</li>
+      <li><strong>Legislation Scores</strong> — searchable database showing how
+        every member voted on every bill.</li>
+      <li><strong>Bill Clustering</strong> — groups similar legislation into
+        policy topics using machine-learning embeddings.</li>
+      <li><strong>Member Visualization</strong> — interactive latent-space map
+        of parliament members' political positions.</li>
+      <li><strong>Bilingual</strong> — full Japanese and English support.</li>
+    </ul>
+  </div>
+  <div class="col-right">
+    <h2>Technology</h2>
+    <p>
+      The platform is built with <strong>SvelteKit</strong> and
+      <strong>PostgreSQL</strong> on the web side, and a
+      <strong>Python</strong> data pipeline that scrapes official Diet records,
+      computes voting scores, generates bill embeddings with
+      <strong>sentence-transformers</strong>, and clusters legislation with
+      <strong>scikit-learn</strong>. An optional <strong>OpenAI</strong>
+      integration produces plain-language bill summaries so users can
+      understand complex legislation before answering.
+    </p>
+
+    <h2>Impact &amp; Vision</h2>
+    <p>
+      By making legislative data accessible and personal, Candidate Match aims
+      to strengthen democratic participation in Japan. The long-term goal is to
+      expand coverage to local assemblies and to support civic-education
+      initiatives that help young voters engage with politics based on
+      <em>policy</em>, not just party affiliation.
+    </p>
+  </div>
+</div>
+
+<!-- ════════════════  FOOTER  ════════════════ -->
+<p class="footer">
+  Candidate Match · Mototada Furuta · Minerva University Capstone · 2025
+  &ensp;|&ensp; Source: <em>github.com/Furuta-Mototada/candidate-match</em>
+</p>
+
+</body>
+</html>

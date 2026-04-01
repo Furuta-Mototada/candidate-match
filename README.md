@@ -2,6 +2,8 @@
 
 A data-driven political analysis platform for the Japanese National Diet. This application helps users discover which parliament members align most closely with their political views by analyzing voting patterns, bill submissions, and legislative behavior.
 
+> 📄 **[Executive Summary](docs/EXECUTIVE_SUMMARY.html)** — a one-page overview of the project for a general audience.
+
 ## Features
 
 - **Member Matching**: AI-powered adaptive matching to find parliament members whose voting patterns align with your views
