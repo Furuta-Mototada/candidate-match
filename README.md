@@ -2,7 +2,7 @@
 
 A data-driven political analysis platform for the Japanese National Diet. This application helps users discover which parliament members align most closely with their political views by analyzing voting patterns, bill submissions, and legislative behavior.
 
-> 📄 **[Executive Summary](docs/EXECUTIVE_SUMMARY.html)** — a one-page overview of the project for a general audience.
+> 📄 **[Executive Summary — Compare Patterns](docs/EXECUTIVE_SUMMARY_INDEX.html)** — six one-page design variations of the project overview for a general audience. Open the index to preview and compare all patterns side by side.
 
 ## Features
 

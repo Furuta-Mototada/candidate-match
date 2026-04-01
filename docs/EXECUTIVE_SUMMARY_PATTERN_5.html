@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Executive Summary — Pattern 5: Dashboard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    @page { size: letter; margin: 0.4in 0.5in; }
+
+    body {
+      font-family: "Inter", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      font-size: 9.5pt;
+      line-height: 1.4;
+      color: #1a1a2e;
+      max-width: 7.5in;
+      margin: 0 auto;
+      padding: 0.4in 0.5in;
+      background: #f4f6f9;
+    }
+
+    /* ── Header ─────────────────────────────────────── */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8pt;
+    }
+    .header-left h1 {
+      font-size: 17pt;
+      font-weight: 800;
+      color: #1a1a2e;
+    }
+    .header-left .sub {
+      font-size: 9pt;
+      color: #6b7280;
+      margin-top: 1pt;
+    }
+    .header-right {
+      text-align: right;
+      font-size: 8pt;
+      color: #6b7280;
+    }
+    .header-right strong { color: #1a1a2e; }
+
+    /* ── Dashboard Grid ─────────────────────────────── */
+    .dashboard {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 7pt;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 8px;
+      padding: 8pt 10pt;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+    .card h2 {
+      font-size: 8.5pt;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.4pt;
+      margin-bottom: 4pt;
+      color: #6b7280;
+    }
+    .card p { font-size: 8.5pt; }
+    .card ul { margin: 2pt 0 0 14pt; font-size: 8.5pt; }
+    .card li { margin-bottom: 1pt; }
+    .card strong { color: #1a1a2e; }
+
+    /* Spans */
+    .span-2 { grid-column: span 2; }
+    .span-3 { grid-column: span 3; }
+    .span-4 { grid-column: span 4; }
+
+    /* ── Metric Cards ───────────────────────────────── */
+    .metric {
+      text-align: center;
+      padding: 6pt 4pt;
+    }
+    .metric .m-icon { font-size: 18pt; margin-bottom: 2pt; }
+    .metric .m-value {
+      font-size: 20pt;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .metric .m-label {
+      font-size: 7pt;
+      color: #6b7280;
+      margin-top: 2pt;
+      text-transform: uppercase;
+      letter-spacing: 0.3pt;
+    }
+    .metric-blue .m-value { color: #2563eb; }
+    .metric-green .m-value { color: #16a34a; }
+    .metric-amber .m-value { color: #d97706; }
+    .metric-purple .m-value { color: #7c3aed; }
+
+    /* ── Accent borders ─────────────────────────────── */
+    .accent-blue   { border-top: 3px solid #2563eb; }
+    .accent-green  { border-top: 3px solid #16a34a; }
+    .accent-amber  { border-top: 3px solid #d97706; }
+    .accent-purple { border-top: 3px solid #7c3aed; }
+    .accent-red    { border-top: 3px solid #dc2626; }
+
+    /* ── SVG ─────────────────────────────────────────── */
+    .card svg { display: block; width: 100%; }
+    .caption {
+      font-size: 6.5pt;
+      color: #9ca3af;
+      text-align: center;
+      margin-top: 2pt;
+      font-style: italic;
+    }
+
+    /* ── Timeline ────────────────────────────────────── */
+    .timeline { display: flex; align-items: flex-start; gap: 0; margin-top: 4pt; }
+    .t-step {
+      flex: 1;
+      text-align: center;
+      position: relative;
+    }
+    .t-step::after {
+      content: "";
+      position: absolute;
+      top: 14pt;
+      right: -50%;
+      width: 100%;
+      height: 2px;
+      background: #e5e7eb;
+      z-index: 0;
+    }
+    .t-step:last-child::after { display: none; }
+    .t-dot {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28pt;
+      height: 28pt;
+      border-radius: 50%;
+      font-size: 14pt;
+      position: relative;
+      z-index: 1;
+      margin-bottom: 3pt;
+    }
+    .t-step:nth-child(1) .t-dot { background: #dbeafe; }
+    .t-step:nth-child(2) .t-dot { background: #dcfce7; }
+    .t-step:nth-child(3) .t-dot { background: #fef3c7; }
+    .t-step:nth-child(4) .t-dot { background: #f3e8ff; }
+    .t-step:nth-child(5) .t-dot { background: #fce7f3; }
+    .t-label { font-size: 7pt; font-weight: 700; color: #374151; }
+    .t-desc { font-size: 6pt; color: #6b7280; margin-top: 1pt; }
+
+    /* ── Tech Stack Grid ─────────────────────────────── */
+    .tech-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 4pt;
+      margin-top: 4pt;
+    }
+    .tech-item {
+      background: #f9fafb;
+      border-radius: 4px;
+      padding: 4pt 6pt;
+      text-align: center;
+      border: 1px solid #e5e7eb;
+    }
+    .tech-item .t-icon { font-size: 14pt; }
+    .tech-item .t-name { font-size: 6.5pt; font-weight: 700; color: #374151; margin-top: 1pt; }
+    .tech-item .t-role { font-size: 5.5pt; color: #9ca3af; }
+
+    /* ── Feature List ────────────────────────────────── */
+    .feat-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4pt;
+      margin-top: 3pt;
+    }
+    .feat-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 4pt;
+      background: #f9fafb;
+      border-radius: 4px;
+      padding: 4pt 6pt;
+    }
+    .feat-item .f-icon { font-size: 14pt; flex-shrink: 0; }
+    .feat-item .f-name { font-size: 7pt; font-weight: 700; color: #374151; }
+    .feat-item .f-desc { font-size: 6pt; color: #6b7280; }
+
+    /* ── Footer ──────────────────────────────────────── */
+    .footer {
+      text-align: center;
+      font-size: 7pt;
+      color: #9ca3af;
+      margin-top: 6pt;
+    }
+
+    @media print {
+      body { padding: 0; max-width: none; background: #f4f6f9; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════ HEADER ═══════ -->
+<div class="header">
+  <div class="header-left">
+    <h1>🗳️ Candidate Match</h1>
+    <div class="sub">AI-Powered Political Matching for the Japanese National Diet</div>
+  </div>
+  <div class="header-right">
+    <strong>Mototada Furuta</strong><br/>
+    Minerva University Capstone · 2025
+  </div>
+</div>
+
+<!-- ═══════ DASHBOARD GRID ═══════ -->
+<div class="dashboard">
+
+  <!-- Row 1: Metrics -->
+  <div class="card metric metric-blue">
+    <div class="m-icon">📜</div>
+    <div class="m-value">700+</div>
+    <div class="m-label">Bills Analyzed</div>
+  </div>
+  <div class="card metric metric-green">
+    <div class="m-icon">👤</div>
+    <div class="m-value">700+</div>
+    <div class="m-label">Diet Members</div>
+  </div>
+  <div class="card metric metric-amber">
+    <div class="m-icon">🧠</div>
+    <div class="m-value">3</div>
+    <div class="m-label">ML Models</div>
+  </div>
+  <div class="card metric metric-purple">
+    <div class="m-icon">🌐</div>
+    <div class="m-value">2</div>
+    <div class="m-label">Languages</div>
+  </div>
+
+  <!-- Row 2: Problem + Solution side-by-side -->
+  <div class="card span-2 accent-red">
+    <h2>❌ The Problem</h2>
+    <p>Japan's National Diet passes hundreds of bills each session, yet most voters have <strong>no insight</strong> into how their representatives actually vote. Media focuses on party labels and personalities — not policy. Citizens cannot easily find politicians who share their views.</p>
+    <!-- Mini illustration -->
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 40" style="margin-top:4pt;" role="img" aria-label="Information gap illustration">
+      <text x="40" y="22" text-anchor="middle" font-size="18">👥</text>
+      <text x="40" y="36" text-anchor="middle" font-size="6" fill="#dc2626" font-weight="bold">Voters</text>
+      <line x1="68" y1="18" x2="120" y2="18" stroke="#e5e7eb" stroke-width="2" stroke-dasharray="4,4"/>
+      <text x="150" y="22" text-anchor="middle" font-size="14">🔒</text>
+      <text x="150" y="36" text-anchor="middle" font-size="5" fill="#6b7280">Opaque</text>
+      <line x1="180" y1="18" x2="232" y2="18" stroke="#e5e7eb" stroke-width="2" stroke-dasharray="4,4"/>
+      <text x="260" y="22" text-anchor="middle" font-size="18">🏛️</text>
+      <text x="260" y="36" text-anchor="middle" font-size="6" fill="#dc2626" font-weight="bold">Diet</text>
+    </svg>
+  </div>
+
+  <div class="card span-2 accent-green">
+    <h2>✅ The Solution</h2>
+    <p><strong>Candidate Match</strong> uses <em>Computerized Adaptive Testing</em> (CAT) and machine learning. Users answer questions about real bills — "Support or Oppose?" — and get matched with Diet members whose voting records are most similar to their own preferences.</p>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 40" style="margin-top:4pt;" role="img" aria-label="Connection restored illustration">
+      <text x="40" y="22" text-anchor="middle" font-size="18">👥</text>
+      <text x="40" y="36" text-anchor="middle" font-size="6" fill="#16a34a" font-weight="bold">Voters</text>
+      <line x1="68" y1="18" x2="120" y2="18" stroke="#16a34a" stroke-width="2"/>
+      <text x="150" y="22" text-anchor="middle" font-size="14">🗳️</text>
+      <text x="150" y="36" text-anchor="middle" font-size="5" fill="#16a34a" font-weight="bold">Match</text>
+      <line x1="180" y1="18" x2="232" y2="18" stroke="#16a34a" stroke-width="2"/>
+      <text x="260" y="22" text-anchor="middle" font-size="18">🏛️</text>
+      <text x="260" y="36" text-anchor="middle" font-size="6" fill="#16a34a" font-weight="bold">Diet</text>
+    </svg>
+  </div>
+
+  <!-- Row 3: User Journey Timeline -->
+  <div class="card span-4 accent-blue">
+    <h2>🗺️ User Journey</h2>
+    <div class="timeline">
+      <div class="t-step">
+        <div class="t-dot">📝</div>
+        <div class="t-label">Sign Up</div>
+        <div class="t-desc">Create an account</div>
+      </div>
+      <div class="t-step">
+        <div class="t-dot">🗳️</div>
+        <div class="t-label">Answer Bills</div>
+        <div class="t-desc">Support / Oppose / Skip</div>
+      </div>
+      <div class="t-step">
+        <div class="t-dot">🧠</div>
+        <div class="t-label">AI Processes</div>
+        <div class="t-desc">Adaptive matching runs</div>
+      </div>
+      <div class="t-step">
+        <div class="t-dot">🎯</div>
+        <div class="t-label">Get Matches</div>
+        <div class="t-desc">Ranked members + parties</div>
+      </div>
+      <div class="t-step">
+        <div class="t-dot">🔍</div>
+        <div class="t-label">Explore</div>
+        <div class="t-desc">Visualize, compare, share</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Row 4: Features + Tech -->
+  <div class="card span-2 accent-amber">
+    <h2>✨ Core Features</h2>
+    <div class="feat-grid">
+      <div class="feat-item">
+        <div class="f-icon">🎯</div>
+        <div><div class="f-name">Adaptive Matching</div><div class="f-desc">Asks the most informative bills first</div></div>
+      </div>
+      <div class="feat-item">
+        <div class="f-icon">📊</div>
+        <div><div class="f-name">Legislation Scores</div><div class="f-desc">Every member's vote on every bill</div></div>
+      </div>
+      <div class="feat-item">
+        <div class="f-icon">🧩</div>
+        <div><div class="f-name">Bill Clustering</div><div class="f-desc">ML-powered policy topic grouping</div></div>
+      </div>
+      <div class="feat-item">
+        <div class="f-icon">🗺️</div>
+        <div><div class="f-name">Member Map</div><div class="f-desc">Interactive political position map</div></div>
+      </div>
+      <div class="feat-item">
+        <div class="f-icon">🤝</div>
+        <div><div class="f-name">Vote Delegation</div><div class="f-desc">Delegate and compare with friends</div></div>
+      </div>
+      <div class="feat-item">
+        <div class="f-icon">🌐</div>
+        <div><div class="f-name">Bilingual</div><div class="f-desc">Full Japanese + English support</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card span-2 accent-purple">
+    <h2>🛠️ Technology Stack</h2>
+    <div class="tech-grid">
+      <div class="tech-item">
+        <div class="t-icon">⚡</div>
+        <div class="t-name">SvelteKit</div>
+        <div class="t-role">Frontend Framework</div>
+      </div>
+      <div class="tech-item">
+        <div class="t-icon">🐘</div>
+        <div class="t-name">PostgreSQL</div>
+        <div class="t-role">Database</div>
+      </div>
+      <div class="tech-item">
+        <div class="t-icon">🐍</div>
+        <div class="t-name">Python</div>
+        <div class="t-role">Data Pipeline</div>
+      </div>
+      <div class="tech-item">
+        <div class="t-icon">📐</div>
+        <div class="t-name">scikit-learn</div>
+        <div class="t-role">ML / Clustering</div>
+      </div>
+      <div class="tech-item">
+        <div class="t-icon">🔤</div>
+        <div class="t-name">Transformers</div>
+        <div class="t-role">Bill Embeddings</div>
+      </div>
+      <div class="tech-item">
+        <div class="t-icon">🤖</div>
+        <div class="t-name">OpenAI API</div>
+        <div class="t-role">Bill Summaries</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Row 5: Impact -->
+  <div class="card span-4 accent-green" style="display:flex;gap:10pt;align-items:center;">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 60" style="width:80pt;flex-shrink:0;" role="img" aria-label="Vision: expanding from national to local to global">
+      <circle cx="20" cy="30" r="15" fill="#dcfce7" stroke="#16a34a" stroke-width="1"/>
+      <text x="20" y="34" text-anchor="middle" font-size="14">🏛️</text>
+      <circle cx="50" cy="30" r="15" fill="#dbeafe" stroke="#2563eb" stroke-width="1"/>
+      <text x="50" y="34" text-anchor="middle" font-size="14">🏢</text>
+      <circle cx="80" cy="30" r="15" fill="#f3e8ff" stroke="#7c3aed" stroke-width="1"/>
+      <text x="80" y="34" text-anchor="middle" font-size="14">🌍</text>
+      <text x="20" y="54" text-anchor="middle" font-size="5" fill="#16a34a" font-weight="bold">National</text>
+      <text x="50" y="54" text-anchor="middle" font-size="5" fill="#2563eb" font-weight="bold">Local</text>
+      <text x="80" y="54" text-anchor="middle" font-size="5" fill="#7c3aed" font-weight="bold">Global</text>
+    </svg>
+    <div>
+      <h2>🚀 Impact &amp; Vision</h2>
+      <p>By making legislative data accessible and personal, Candidate Match strengthens democratic participation in Japan. The vision: expand to <strong>local assemblies</strong>, support <strong>civic education</strong> for young voters, and help everyone engage with politics based on <strong>policy, not party labels</strong>.</p>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════ FOOTER ═══════ -->
+<p class="footer">
+  Candidate Match · Mototada Furuta · Minerva University Capstone · 2025
+  &ensp;|&ensp; github.com/Furuta-Mototada/candidate-match
+</p>
+
+</body>
+</html>
