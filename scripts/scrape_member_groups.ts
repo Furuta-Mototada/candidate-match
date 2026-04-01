@@ -49,7 +49,7 @@ import {
 
 // Configuration
 const KOKKAI_API_BASE = 'https://kokkai.ndl.go.jp/api/speech';
-const RATE_LIMIT_MS = 3000; // 3 seconds as recommended by API docs
+const RATE_LIMIT_MS = 1500; // 1.5 seconds (API docs say "数秒程度" = a few seconds)
 const MAX_RECORDS_PER_REQUEST = 100;
 const CHECKPOINT_PATH = '.cache/member_groups_checkpoint.json';
 
@@ -346,15 +346,41 @@ async function insertMemberGroups(
 }
 
 /**
- * Process a single member
- * Tries all names in the member's names array to find speeches
- * Filters speeches for exact name matches and validates speakerYomi if available
- *
- * Optimizations:
- * - Early exit if no member_party records with chamber info
- * - Deduplicate speeches by speechID across name searches
- * - Skip alternate name searches if all speeches found with primary name
+ * Compute a narrowed date range for a member based on their member_party records.
+ * Uses the earliest startDate minus 1 year and latest endDate plus 1 year as buffer,
+ * clamped to the global from/until range.
  */
+function getMemberDateRange(
+	memberPartyRecords: MemberPartyRecord[],
+	globalFrom: string,
+	globalUntil: string
+): { from: string; until: string } {
+	let earliest: string | null = null;
+	let latest: string | null = null;
+
+	for (const record of memberPartyRecords) {
+		if (record.startDate && (!earliest || record.startDate < earliest)) {
+			earliest = record.startDate;
+		}
+		if (record.endDate && (!latest || record.endDate > latest)) {
+			latest = record.endDate;
+		}
+	}
+
+	// Apply 1-year buffer and clamp to global range
+	const bufferFrom = earliest
+		? `${parseInt(earliest.slice(0, 4)) - 1}${earliest.slice(4)}`
+		: globalFrom;
+	const bufferUntil = latest
+		? `${parseInt(latest.slice(0, 4)) + 1}${latest.slice(4)}`
+		: globalUntil;
+
+	return {
+		from: bufferFrom > globalFrom ? bufferFrom : globalFrom,
+		until: bufferUntil < globalUntil ? bufferUntil : globalUntil
+	};
+}
+
 async function processMember(
 	db: DrizzleDB | null,
 	member: { id: number; names: string[]; nameReading: string | null },
@@ -371,6 +397,16 @@ async function processMember(
 		console.log(`  Skipping: No member_party records with chamber found`);
 		return { affiliationCount: 0, inserted: 0 };
 	}
+
+	// Narrow date range to member's actual active period (± 1 year buffer)
+	const { from: memberFrom, until: memberUntil } = getMemberDateRange(
+		memberPartyRecords,
+		fromDate,
+		untilDate
+	);
+	log(
+		`  Date range narrowed: ${memberFrom} to ${memberUntil} (global: ${fromDate} to ${untilDate})`
+	);
 
 	if (member.names.length > 1) {
 		log(`  Also trying alternate names: ${member.names.slice(1).join(', ')}`);
@@ -392,7 +428,7 @@ async function processMember(
 		// Fetch all speeches with pagination for this name
 		while (hasMore) {
 			try {
-				const data = await fetchSpeechesForMember(memberName, fromDate, untilDate, startRecord);
+				const data = await fetchSpeechesForMember(memberName, memberFrom, memberUntil, startRecord);
 
 				if (data.message) {
 					log(`  API message for "${memberName}": ${data.message}`);
