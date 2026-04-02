@@ -13,20 +13,35 @@
 			status?: string;
 			isMe?: boolean;
 			isAnonymous?: boolean;
+			isTerminal?: boolean;
 			votes?: number;
 			statusColor?: string;
 			avatarUrl?: string | null;
+			terminalVoteScore?: number | null;
 		};
 		sourcePosition?: Position;
 		targetPosition?: Position;
 	} = $props();
+
+	function getVoteLabel(score: number): string {
+		if (score === 1) return '賛成';
+		if (score === -1) return '反対';
+		return 'わからない';
+	}
 </script>
 
 <Handle type="target" position={targetPosition ?? Position.Left} />
 
-<div class="delegation-node" class:me={data.isMe} class:anonymous={data.isAnonymous}>
+<div
+	class="delegation-node"
+	class:me={data.isMe}
+	class:anonymous={data.isAnonymous}
+	class:terminal={data.isTerminal}
+>
 	{#if data.isAnonymous}
 		<span class="anonymous-icon">?</span>
+	{:else if data.isTerminal}
+		<span class="terminal-icon">···</span>
 	{:else}
 		<Avatar username={data.label} avatarUrl={data.avatarUrl} size="xs" />
 	{/if}
@@ -43,7 +58,11 @@
 			{/if}
 		{/if}
 	</span>
-	<span class="label">{data.label}</span>
+	{#if data.isTerminal && data.status === 'voted' && data.terminalVoteScore != null}
+		<span class="label">{getVoteLabel(data.terminalVoteScore)}</span>
+	{:else}
+		<span class="label">{data.label}</span>
+	{/if}
 	{#if data.votes && data.votes > 1}
 		<span class="votes">{data.votes}票</span>
 	{/if}
@@ -80,6 +99,30 @@
 		border-color: #a5b4fc;
 		color: #4338ca;
 		font-weight: 600;
+	}
+
+	.delegation-node.terminal {
+		background: #fefce8;
+		border-color: #d4d4d8;
+		border-style: dashed;
+		color: #52525b;
+		font-weight: 600;
+		min-width: 60px;
+	}
+
+	.terminal-icon {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 24px;
+		height: 24px;
+		border-radius: 50%;
+		background: #e4e4e7;
+		color: #71717a;
+		font-size: 0.7rem;
+		font-weight: 700;
+		flex-shrink: 0;
+		letter-spacing: -1px;
 	}
 
 	.anonymous-icon {

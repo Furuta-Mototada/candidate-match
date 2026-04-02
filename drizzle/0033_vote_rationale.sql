@@ -1,0 +1,1 @@
+ALTER TABLE "vote_delegation" ADD COLUMN "vote_rationale" text;

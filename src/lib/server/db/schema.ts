@@ -607,6 +607,7 @@ export const voteDelegation = pgTable(
 			.notNull()
 			.references(() => bill.id),
 		status: delegationStatusEnum('status').notNull().default('pending'),
+		voteRationale: text('vote_rationale'),
 		createdAt: timestamp('created_at').notNull().defaultNow(),
 		updatedAt: timestamp('updated_at').notNull().defaultNow()
 	},

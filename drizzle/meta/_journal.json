@@ -232,6 +232,13 @@
       "when": 1775030790035,
       "tag": "0032_broad_typhoid_mary",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1775147693449,
+      "tag": "0033_vote_rationale",
+      "breakpoints": true
     }
   ]
 }

@@ -56,6 +56,7 @@
 		billSubmissionSession: number;
 		billNumber: number;
 		status: string;
+		voteRationale: string | null;
 		myExistingScore: number | null;
 		upstreamChain: { username: string; status: string }[];
 		upstreamPaths: Array<Array<{ username: string; status: string }>>;
@@ -74,9 +75,12 @@
 		billSubmissionSession: number;
 		billNumber: number;
 		status: string;
+		voteRationale: string | null;
 		myVoteScore: number | null;
 		chain: { username: string; status: string; totalVotes?: number }[];
 		delegateVotes?: number;
+		terminalStatus?: string | null;
+		terminalVoteScore?: number | null;
 		createdAt: string;
 		updatedAt: string;
 	};
@@ -444,6 +448,7 @@
 
 	// Delegation vote modal
 	let votingDelegation: IncomingDelegation | null = $state(null);
+	let voteRationaleInput: string = $state('');
 
 	// Redelegate modal
 	let redelegatingDelegation: IncomingDelegation | null = $state(null);
@@ -464,6 +469,11 @@
 
 	// Proxy voting: when user clicks 代理投票する in 委任 tab, navigate to 回答履歴 with this delegation
 	let proxyVotingDelegation: IncomingDelegation | null = $state(null);
+	// After proxy vote is cast, show rationale prompt before accepting
+	let proxyRationalePrompt: boolean = $state(false);
+	let proxyRationaleInput: string = $state('');
+	// Loading state when navigating to proxy vote in answers tab
+	let proxyVoteLoading: boolean = $state(false);
 
 	// Group delegations by bill for unified view
 	let delegationGroups: DelegationGroup[] = $derived.by(() => {
@@ -609,13 +619,19 @@
 		return '';
 	}
 
+	function getVoteScoreClass(score: number | null): string {
+		if (score === 1) return 'vote-for';
+		if (score === -1) return 'vote-against';
+		return 'vote-neutral';
+	}
+
 	/** Force-reload delegations from server to keep client state consistent */
 	async function reloadDelegations() {
 		delegationsLoaded = false;
 		await loadDelegations();
 	}
 
-	async function acceptDelegation(delegationId: number, score?: number) {
+	async function acceptDelegation(delegationId: number, score?: number, rationale?: string) {
 		isLoading = true;
 		error = null;
 
@@ -623,6 +639,9 @@
 			const payload: Record<string, unknown> = { action: 'accept', delegationId };
 			if (score !== undefined) {
 				payload.score = score;
+			}
+			if (rationale) {
+				payload.rationale = rationale;
 			}
 
 			const res = await fetch('/api/delegations', {
@@ -637,6 +656,7 @@
 			}
 
 			votingDelegation = null;
+			voteRationaleInput = '';
 			await reloadDelegations();
 		} catch (e) {
 			error = e instanceof Error ? e.message : '不明なエラーが発生しました';
@@ -901,9 +921,11 @@
 
 	/** Navigate from 委任 tab to 回答履歴 tab and open BillDetailModal for proxy voting */
 	async function startProxyVoteInAnswerTab(delegation: IncomingDelegation) {
+		proxyVoteLoading = true;
 		proxyVotingDelegation = delegation;
 		await loadAllBills();
 		activeTab = 'answers';
+		proxyVoteLoading = false;
 		// Open the modal immediately
 		const bill = allBills.find((b) => b.id === delegation.billId);
 		if (bill) {
@@ -923,19 +945,36 @@
 	async function handleProxyModalVote(billId: number, score: number) {
 		// First, cast the direct vote
 		await handleModalVote(billId, score);
-		// Then accept the delegation (server will use the existing vote)
+		// Show rationale prompt before accepting the delegation
 		if (proxyVotingDelegation && proxyVotingDelegation.billId === billId) {
-			await acceptDelegation(proxyVotingDelegation.id);
-			proxyVotingDelegation = null;
-			// Reload allBills to reflect updated hasIncomingDelegation
-			allBillsLoaded = false;
-			await loadAllBills();
-			// Refresh the selected bill
-			if (selectedBill && selectedBill.id === billId) {
-				const updated = allBills.find((b) => b.id === billId);
-				if (updated) selectedBill = updated;
-			}
+			proxyRationalePrompt = true;
 		}
+	}
+
+	/** Accept the proxy vote delegation with optional rationale */
+	async function confirmProxyVoteWithRationale() {
+		if (!proxyVotingDelegation) return;
+		const delegationId = proxyVotingDelegation.id;
+		const billId = proxyVotingDelegation.billId;
+		const rationale = proxyRationaleInput.trim() || undefined;
+		proxyRationalePrompt = false;
+		proxyRationaleInput = '';
+		await acceptDelegation(delegationId, undefined, rationale);
+		proxyVotingDelegation = null;
+		// Reload allBills to reflect updated hasIncomingDelegation
+		allBillsLoaded = false;
+		await loadAllBills();
+		// Refresh the selected bill
+		if (selectedBill && selectedBill.id === billId) {
+			const updated = allBills.find((b) => b.id === billId);
+			if (updated) selectedBill = updated;
+		}
+	}
+
+	/** Skip rationale and accept proxy vote */
+	async function skipProxyRationale() {
+		proxyRationaleInput = '';
+		await confirmProxyVoteWithRationale();
 	}
 
 	/** Navigate to 委任 tab targeting a specific bill */
@@ -1517,9 +1556,25 @@
 													{getDelegationStatusLabel(outgoing.status)}
 												</span>
 											</div>
-											{#if outgoing.status === 'voted' && outgoing.myVoteScore !== null}
+											{#if (outgoing.status === 'voted' || (outgoing.status === 'redelegated' && outgoing.terminalStatus === 'voted')) && outgoing.terminalVoteScore != null}
 												<div class="delegation-vote-result">
-													投票結果: {getVoteScoreLabel(outgoing.myVoteScore)}
+													<span class="vote-result-label">投票結果</span>
+													<span
+														class="vote-result-badge {getVoteScoreClass(
+															outgoing.terminalVoteScore
+														)}">{getVoteScoreLabel(outgoing.terminalVoteScore)}</span
+													>
+												</div>
+												{#if outgoing.voteRationale}
+													<div class="delegation-rationale">
+														<span class="rationale-label">投票理由</span>
+														<p class="rationale-text">{outgoing.voteRationale}</p>
+													</div>
+												{/if}
+											{:else if outgoing.voteRationale}
+												<div class="delegation-rationale">
+													<span class="rationale-label">投票理由</span>
+													<p class="rationale-text">{outgoing.voteRationale}</p>
 												</div>
 											{/if}
 										{/if}
@@ -1592,9 +1647,41 @@
 												)}
 												{#if votedIncoming}
 													<div class="delegation-vote-result">
-														投票結果: {getVoteScoreLabel(votedIncoming.myExistingScore)}
+														<span class="vote-result-label">投票結果</span>
+														<span
+															class="vote-result-badge {getVoteScoreClass(
+																votedIncoming.myExistingScore
+															)}">{getVoteScoreLabel(votedIncoming.myExistingScore)}</span
+														>
+													</div>
+													{#if votedIncoming.voteRationale}
+														<div class="delegation-rationale">
+															<span class="rationale-label">投票理由</span>
+															<p class="rationale-text">{votedIncoming.voteRationale}</p>
+														</div>
+													{/if}
+												{/if}
+											{:else if outgoing && (outgoing.status === 'voted' || (outgoing.status === 'redelegated' && outgoing.terminalStatus === 'voted')) && outgoing.terminalVoteScore != null}
+												<!-- Middleman: show the downstream voter's result -->
+												<div class="delegation-vote-result">
+													<span class="vote-result-label">投票結果</span>
+													<span
+														class="vote-result-badge {getVoteScoreClass(
+															outgoing.terminalVoteScore
+														)}">{getVoteScoreLabel(outgoing.terminalVoteScore)}</span
+													>
+												</div>
+												{#if outgoing.voteRationale}
+													<div class="delegation-rationale">
+														<span class="rationale-label">投票理由</span>
+														<p class="rationale-text">{outgoing.voteRationale}</p>
 													</div>
 												{/if}
+											{:else if outgoing && outgoing.voteRationale}
+												<div class="delegation-rationale">
+													<span class="rationale-label">投票理由</span>
+													<p class="rationale-text">{outgoing.voteRationale}</p>
+												</div>
 											{/if}
 										{/if}
 
@@ -1607,7 +1694,7 @@
 													{#if firstPending.myExistingScore !== null}
 														<button
 															class="btn-vote-for"
-															onclick={() => acceptDelegation(firstPending.id)}
+															onclick={() => (votingDelegation = firstPending)}
 															disabled={isLoading}
 														>
 															<CircleCheck size={16} class="inline-icon" color="#22c55e" /> 既存の投票で承認（{getVoteScoreLabel(
@@ -1618,9 +1705,13 @@
 														<button
 															class="btn-vote-for"
 															onclick={() => startProxyVoteInAnswerTab(firstPending)}
-															disabled={isLoading}
+															disabled={isLoading || proxyVoteLoading}
 														>
-															<Vote size={16} class="inline-icon" /> 代理投票する
+															{#if proxyVoteLoading}
+																<span class="btn-spinner"></span> 読み込み中…
+															{:else}
+																<Vote size={16} class="inline-icon" /> 代理投票する
+															{/if}
 														</button>
 													{/if}
 													<button
@@ -1698,10 +1789,16 @@
 		<div
 			class="vote-modal-backdrop"
 			onclick={(e) => {
-				if (e.target === e.currentTarget) votingDelegation = null;
+				if (e.target === e.currentTarget) {
+					votingDelegation = null;
+					voteRationaleInput = '';
+				}
 			}}
 			onkeydown={(e) => {
-				if (e.key === 'Escape') votingDelegation = null;
+				if (e.key === 'Escape') {
+					votingDelegation = null;
+					voteRationaleInput = '';
+				}
 			}}
 			role="dialog"
 			aria-modal="true"
@@ -1710,8 +1807,12 @@
 			<div class="vote-modal">
 				<div class="vote-modal-header">
 					<h3><Vote size={18} class="inline-icon" /> 代理投票</h3>
-					<button class="modal-close-btn" onclick={() => (votingDelegation = null)}
-						><X size={16} /></button
+					<button
+						class="modal-close-btn"
+						onclick={() => {
+							votingDelegation = null;
+							voteRationaleInput = '';
+						}}><X size={16} /></button
 					>
 				</div>
 				<div class="vote-modal-body">
@@ -1739,29 +1840,63 @@
 							>
 						{/if}
 					</p>
-					<div class="vote-modal-buttons">
-						<button
-							class="vote-modal-btn vote-agree"
-							onclick={() => acceptDelegation(votingDelegation!.id, 1)}
-							disabled={isLoading}
-						>
-							<ThumbsUp size={16} class="inline-icon" /> 賛成
-						</button>
-						<button
-							class="vote-modal-btn vote-neutral"
-							onclick={() => acceptDelegation(votingDelegation!.id, 0)}
-							disabled={isLoading}
-						>
-							<CircleQuestionMark size={16} class="inline-icon" /> わからない
-						</button>
-						<button
-							class="vote-modal-btn vote-disagree"
-							onclick={() => acceptDelegation(votingDelegation!.id, -1)}
-							disabled={isLoading}
-						>
-							<ThumbsDown size={16} class="inline-icon" /> 反対
-						</button>
+					<div class="vote-rationale-section">
+						<label for="vote-rationale">投票理由（任意）</label>
+						<textarea
+							id="vote-rationale"
+							bind:value={voteRationaleInput}
+							placeholder="投票の理由を簡単に記入してください..."
+							maxlength={500}
+							rows={3}
+						></textarea>
+						<span class="rationale-char-count">{voteRationaleInput.length}/500</span>
 					</div>
+					{#if votingDelegation.myExistingScore !== null}
+						<div class="vote-modal-existing">
+							既存の投票: <strong>{getVoteScoreLabel(votingDelegation.myExistingScore)}</strong>
+						</div>
+						<div class="vote-modal-buttons">
+							<button
+								class="vote-modal-btn vote-confirm"
+								onclick={() =>
+									acceptDelegation(
+										votingDelegation!.id,
+										undefined,
+										voteRationaleInput || undefined
+									)}
+								disabled={isLoading}
+							>
+								<CircleCheck size={16} class="inline-icon" /> この投票で承認
+							</button>
+						</div>
+					{:else}
+						<div class="vote-modal-buttons">
+							<button
+								class="vote-modal-btn vote-agree"
+								onclick={() =>
+									acceptDelegation(votingDelegation!.id, 1, voteRationaleInput || undefined)}
+								disabled={isLoading}
+							>
+								<ThumbsUp size={16} class="inline-icon" /> 賛成
+							</button>
+							<button
+								class="vote-modal-btn vote-neutral"
+								onclick={() =>
+									acceptDelegation(votingDelegation!.id, 0, voteRationaleInput || undefined)}
+								disabled={isLoading}
+							>
+								<CircleQuestionMark size={16} class="inline-icon" /> わからない
+							</button>
+							<button
+								class="vote-modal-btn vote-disagree"
+								onclick={() =>
+									acceptDelegation(votingDelegation!.id, -1, voteRationaleInput || undefined)}
+								disabled={isLoading}
+							>
+								<ThumbsDown size={16} class="inline-icon" /> 反対
+							</button>
+						</div>
+					{/if}
 				</div>
 			</div>
 		</div>
@@ -1894,6 +2029,8 @@
 			onClose={() => {
 				selectedBill = null;
 				proxyVotingDelegation = null;
+				proxyRationalePrompt = false;
+				proxyRationaleInput = '';
 			}}
 			onVote={proxyVotingDelegation ? handleProxyModalVote : handleModalVote}
 			onRetract={handleModalRetract}
@@ -1905,6 +2042,49 @@
 				goToDelegationsForBill(selectedBill!.id);
 			}}
 		/>
+	{/if}
+
+	<!-- Proxy vote rationale prompt (shown after voting in BillDetailModal during proxy voting) -->
+	{#if proxyRationalePrompt}
+		<!-- svelte-ignore a11y_interactive_supports_focus -->
+		<div
+			class="vote-modal-backdrop"
+			onclick={(e) => {
+				if (e.target === e.currentTarget) skipProxyRationale();
+			}}
+			onkeydown={(e) => {
+				if (e.key === 'Escape') skipProxyRationale();
+			}}
+			role="dialog"
+			aria-modal="true"
+			aria-label="投票理由"
+		>
+			<div class="proxy-rationale-modal">
+				<div class="proxy-rationale-header">
+					<h3>投票理由を記入（任意）</h3>
+					<button class="modal-close-btn" onclick={skipProxyRationale}><X size={16} /></button>
+				</div>
+				<p class="proxy-rationale-desc">委任者に表示されます</p>
+				<div class="vote-rationale-section">
+					<textarea
+						id="proxy-vote-rationale"
+						bind:value={proxyRationaleInput}
+						placeholder="投票の理由を簡単に記入してください..."
+						maxlength={500}
+						rows={3}
+					></textarea>
+					<span class="rationale-char-count">{proxyRationaleInput.length}/500</span>
+				</div>
+				<div class="proxy-rationale-actions">
+					<button class="btn-primary" onclick={confirmProxyVoteWithRationale} disabled={isLoading}>
+						<CircleCheck size={16} class="inline-icon" /> 理由を添えて承認
+					</button>
+					<button class="btn-text" onclick={skipProxyRationale} disabled={isLoading}>
+						スキップして承認
+					</button>
+				</div>
+			</div>
+		</div>
 	{/if}
 
 	<!-- Delegate from bill list modal -->
@@ -2925,10 +3105,71 @@
 	}
 
 	.delegation-vote-result {
-		font-size: 0.85rem;
-		color: #4b5563;
-		margin-top: 0.25rem;
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin-top: 0.5rem;
+		padding: 0.4rem 0.65rem;
+		background: #f8fafc;
+		border-radius: 8px;
+		border: 1px solid #e2e8f0;
+	}
+
+	.vote-result-label {
+		font-size: 0.78rem;
+		color: #64748b;
 		font-weight: 500;
+	}
+
+	.vote-result-badge {
+		font-size: 0.78rem;
+		font-weight: 600;
+		padding: 0.15rem 0.55rem;
+		border-radius: 999px;
+		line-height: 1.3;
+	}
+
+	.vote-result-badge.vote-for {
+		background: #dcfce7;
+		color: #166534;
+	}
+
+	.vote-result-badge.vote-against {
+		background: #fee2e2;
+		color: #991b1b;
+	}
+
+	.vote-result-badge.vote-neutral {
+		background: #f1f5f9;
+		color: #475569;
+	}
+
+	.delegation-rationale {
+		margin-top: 0.4rem;
+		padding: 0.5rem 0.65rem;
+		background: #f8fafc;
+		border-left: 3px solid #a5b4fc;
+		border-radius: 0 8px 8px 0;
+		font-size: 0.82rem;
+		color: #4b5563;
+		line-height: 1.4;
+		word-break: break-word;
+	}
+
+	.rationale-label {
+		display: block;
+		font-size: 0.72rem;
+		font-weight: 600;
+		color: #6366f1;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+		margin-bottom: 0.2rem;
+	}
+
+	.rationale-text {
+		margin: 0;
+		font-weight: 400;
+		color: #374151;
 	}
 
 	.delegation-actions {
@@ -3175,6 +3416,104 @@
 		padding: 1.5rem;
 	}
 
+	.vote-modal-footer {
+		display: flex;
+		gap: 0.75rem;
+		padding: 1rem 1.5rem;
+		border-top: 1px solid #e5e7eb;
+		justify-content: flex-end;
+	}
+
+	.vote-modal-info {
+		font-size: 0.9rem;
+		color: #6b7280;
+		margin-bottom: 0.75rem;
+	}
+
+	.btn-spinner {
+		display: inline-block;
+		width: 14px;
+		height: 14px;
+		border: 2px solid rgba(255, 255, 255, 0.3);
+		border-top-color: white;
+		border-radius: 50%;
+		animation: spin 0.6s linear infinite;
+		vertical-align: middle;
+	}
+
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+
+	.proxy-rationale-modal {
+		background: white;
+		border-radius: 16px;
+		box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+		width: min(420px, 90vw);
+		padding: 1.25rem 1.5rem;
+	}
+
+	.proxy-rationale-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 0.25rem;
+	}
+
+	.proxy-rationale-header h3 {
+		font-size: 1rem;
+		font-weight: 700;
+		color: #1f2937;
+		margin: 0;
+	}
+
+	.proxy-rationale-desc {
+		font-size: 0.8rem;
+		color: #9ca3af;
+		margin: 0 0 0.75rem;
+	}
+
+	.proxy-rationale-actions {
+		display: flex;
+		gap: 0.75rem;
+		align-items: center;
+		margin-top: 0.75rem;
+	}
+
+	.proxy-rationale-actions .btn-primary {
+		flex: 1;
+		padding: 0.55rem 1rem;
+		background: linear-gradient(135deg, #6366f1, #8b5cf6);
+		color: white;
+		border: none;
+		border-radius: 8px;
+		font-weight: 600;
+		font-size: 0.85rem;
+		cursor: pointer;
+		transition: all 0.2s ease;
+	}
+
+	.proxy-rationale-actions .btn-primary:hover:not(:disabled) {
+		transform: translateY(-1px);
+		box-shadow: 0 4px 8px rgba(99, 102, 241, 0.3);
+	}
+
+	.proxy-rationale-actions .btn-text {
+		background: none;
+		border: none;
+		color: #6b7280;
+		font-size: 0.82rem;
+		cursor: pointer;
+		padding: 0.5rem;
+		white-space: nowrap;
+	}
+
+	.proxy-rationale-actions .btn-text:hover:not(:disabled) {
+		color: #374151;
+	}
+
 	.vote-modal-delegator {
 		font-size: 0.95rem;
 		color: #4b5563;
@@ -3203,6 +3542,64 @@
 		display: grid;
 		grid-template-columns: repeat(3, 1fr);
 		gap: 0.75rem;
+	}
+
+	.vote-rationale-section {
+		margin-bottom: 1rem;
+	}
+
+	.vote-rationale-section label {
+		display: block;
+		font-size: 0.85rem;
+		font-weight: 600;
+		color: #374151;
+		margin-bottom: 0.35rem;
+	}
+
+	.vote-rationale-section textarea {
+		width: 100%;
+		padding: 0.6rem 0.75rem;
+		border: 1.5px solid #d1d5db;
+		border-radius: 8px;
+		font-size: 0.85rem;
+		font-family: inherit;
+		resize: vertical;
+		transition: border-color 0.2s ease;
+		box-sizing: border-box;
+	}
+
+	.vote-rationale-section textarea:focus {
+		outline: none;
+		border-color: #6366f1;
+		box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+	}
+
+	.rationale-char-count {
+		display: block;
+		text-align: right;
+		font-size: 0.72rem;
+		color: #9ca3af;
+		margin-top: 0.2rem;
+	}
+
+	.vote-modal-existing {
+		font-size: 0.9rem;
+		color: #4b5563;
+		margin-bottom: 0.75rem;
+		padding: 0.5rem 0.75rem;
+		background: #f0fdf4;
+		border-radius: 8px;
+		border: 1px solid #bbf7d0;
+	}
+
+	.vote-modal-btn.vote-confirm {
+		border-color: rgba(34, 197, 94, 0.3);
+		grid-column: 1 / -1;
+	}
+
+	.vote-modal-btn.vote-confirm:hover:not(:disabled) {
+		background: rgba(34, 197, 94, 0.1);
+		border-color: #22c55e;
 	}
 
 	.vote-modal-btn {

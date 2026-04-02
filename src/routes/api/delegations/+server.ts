@@ -128,6 +128,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 				billSubmissionSession: table.bill.submissionSession,
 				billNumber: table.bill.number,
 				status: table.voteDelegation.status,
+				voteRationale: table.voteDelegation.voteRationale,
 				createdAt: table.voteDelegation.createdAt,
 				updatedAt: table.voteDelegation.updatedAt
 			})
@@ -172,6 +173,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 				billSubmissionSession: table.bill.submissionSession,
 				billNumber: table.bill.number,
 				status: table.voteDelegation.status,
+				voteRationale: table.voteDelegation.voteRationale,
 				createdAt: table.voteDelegation.createdAt,
 				updatedAt: table.voteDelegation.updatedAt
 			})
@@ -255,12 +257,121 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 		}
 
 		// Outgoing: only direct delegate info, no forward chain
-		const outgoing = outgoingRaw.map((d: (typeof outgoingRaw)[number]) => ({
-			...d,
-			chain: [],
-			delegateVotes: undefined,
-			myVoteScore: myOutgoingVotesMap.get(d.billId) ?? null
-		}));
+		// For 'redelegated' delegations, walk downstream to find terminal info
+		async function findDownstreamTerminal(
+			delegateId: string,
+			billId: number
+		): Promise<{
+			rationale: string | null;
+			terminalStatus: string | null;
+			terminalVoteScore: number | null;
+		}> {
+			const visited = new Set<string>();
+			let current = delegateId;
+			let lastStatus: string | null = null;
+			while (current && !visited.has(current)) {
+				visited.add(current);
+				const [del] = await db
+					.select({
+						delegateId: table.voteDelegation.delegateId,
+						status: table.voteDelegation.status,
+						voteRationale: table.voteDelegation.voteRationale
+					})
+					.from(table.voteDelegation)
+					.where(
+						and(
+							eq(table.voteDelegation.delegatorId, current),
+							eq(table.voteDelegation.billId, billId)
+						)
+					)
+					.limit(1);
+				if (!del) {
+					// No further delegation - the current person hasn't delegated further
+					// Check if they have a direct vote
+					const [vote] = await db
+						.select({ answer: table.userBillAnswer.answer })
+						.from(table.userBillAnswer)
+						.where(
+							and(eq(table.userBillAnswer.userId, current), eq(table.userBillAnswer.billId, billId))
+						)
+						.limit(1);
+					if (vote && vote.answer !== 'delegated') {
+						return {
+							rationale: null,
+							terminalStatus: lastStatus,
+							terminalVoteScore: answerToScore(vote.answer)
+						};
+					}
+					return { rationale: null, terminalStatus: lastStatus, terminalVoteScore: null };
+				}
+				lastStatus = del.status;
+				if (del.status === 'voted') {
+					// Find the vote score from the delegate (the person who actually voted)
+					const [vote] = await db
+						.select({ answer: table.userBillAnswer.answer })
+						.from(table.userBillAnswer)
+						.where(
+							and(
+								eq(table.userBillAnswer.userId, del.delegateId),
+								eq(table.userBillAnswer.billId, billId)
+							)
+						)
+						.limit(1);
+					return {
+						rationale: del.voteRationale,
+						terminalStatus: 'voted',
+						terminalVoteScore:
+							vote && vote.answer !== 'delegated' ? answerToScore(vote.answer) : null
+					};
+				}
+				if (del.status !== 'redelegated') {
+					return { rationale: null, terminalStatus: del.status, terminalVoteScore: null };
+				}
+				current = del.delegateId;
+			}
+			return { rationale: null, terminalStatus: lastStatus, terminalVoteScore: null };
+		}
+
+		const outgoing = await Promise.all(
+			outgoingRaw.map(async (d: (typeof outgoingRaw)[number]) => {
+				let terminalStatus: string | null = null;
+				let terminalVoteScore: number | null = null;
+				let rationale = d.voteRationale;
+
+				if (d.status === 'redelegated') {
+					const terminal = await findDownstreamTerminal(d.delegateId, d.billId);
+					terminalStatus = terminal.terminalStatus;
+					terminalVoteScore = terminal.terminalVoteScore;
+					rationale = terminal.rationale ?? d.voteRationale;
+				} else if (d.status === 'voted') {
+					// Direct delegate voted — look up their actual vote
+					const [delegateVote] = await db
+						.select({ answer: table.userBillAnswer.answer })
+						.from(table.userBillAnswer)
+						.where(
+							and(
+								eq(table.userBillAnswer.userId, d.delegateId),
+								eq(table.userBillAnswer.billId, d.billId)
+							)
+						)
+						.limit(1);
+					terminalVoteScore =
+						delegateVote && delegateVote.answer !== 'delegated'
+							? answerToScore(delegateVote.answer)
+							: null;
+				}
+
+				return {
+					...d,
+					chain: [],
+					delegateVotes: undefined,
+					myVoteScore: myOutgoingVotesMap.get(d.billId) ?? null,
+					voteRationale: rationale,
+					terminalStatus,
+					terminalVoteScore
+				};
+			})
+		);
 
 		// Incoming: anonymize - strip delegator identity, provide bucketed count per bill
 		const incomingCountByBill = new Map<number, number>();
@@ -279,6 +390,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 			billSubmissionSession: d.billSubmissionSession,
 			billNumber: d.billNumber,
 			status: d.status,
+			voteRationale: d.voteRationale,
 			myExistingScore: d.myExistingScore,
 			upstreamChain: [],
 			upstreamPaths: [],
@@ -513,7 +625,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	// ── Accept a delegation and cast a vote ──
 	// This applies to ALL pending incoming delegations for the same bill
 	if (action === 'accept') {
-		const { delegationId, score: providedScore } = body;
+		const { delegationId, score: providedScore, rationale } = body;
+		const sanitizedRationale =
+			typeof rationale === 'string' ? rationale.trim().slice(0, 500) : null;
 
 		if (!delegationId) {
 			return json({ error: '委任IDが必要です' }, { status: 400 });
@@ -586,11 +700,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				)
 			);
 
-		// Mark ALL pending incoming delegations as voted
+		// Mark ALL pending incoming delegations as voted (with optional rationale)
 		for (const d of allPending) {
 			await db
 				.update(table.voteDelegation)
-				.set({ status: 'voted', updatedAt: new Date() })
+				.set({
+					status: 'voted',
+					voteRationale: sanitizedRationale || null,
+					updatedAt: new Date()
+				})
 				.where(eq(table.voteDelegation.id, d.id));
 		}
 
@@ -604,7 +722,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				d.id,
 				delegation.billId,
 				billTitle,
-				score
+				score,
+				sanitizedRationale
 			);
 		}
 
@@ -615,7 +734,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			currentUsername,
 			delegation.billId,
 			billTitle,
-			score
+			score,
+			sanitizedRationale
 		);
 
 		return json({
@@ -938,7 +1058,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		// Revert ALL to pending
 		await db
 			.update(table.voteDelegation)
-			.set({ status: 'pending', updatedAt: new Date() })
+			.set({ status: 'pending', voteRationale: null, updatedAt: new Date() })
 			.where(
 				and(
 					eq(table.voteDelegation.delegateId, userId),

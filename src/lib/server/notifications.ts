@@ -136,17 +136,19 @@ export async function notifyDelegationVoted(
 	delegationId: number,
 	billId: number,
 	billTitle: string | null,
-	score: number
+	score: number,
+	rationale?: string | null
 ) {
 	const billLabel = billTitle ? `「${billTitle}」` : `法案#${billId}`;
 	const voteLabel = score === 1 ? '賛成' : score === -1 ? '反対' : 'わからない';
+	const rationaleText = rationale ? `\n理由: ${rationale}` : '';
 	await createNotification({
 		userId: delegatorId,
 		type: 'delegation_voted',
 		actorId,
 		resourceId: delegationId,
 		billId,
-		message: `${delegateUsername} さんが${billLabel}に「${voteLabel}」と委任投票しました`
+		message: `${delegateUsername} さんが${billLabel}に「${voteLabel}」と委任投票しました${rationaleText}`
 	});
 }
 
@@ -217,7 +219,8 @@ export async function notifyUpstreamDelegatorsVoted(
 	voterUsername: string,
 	billId: number,
 	billTitle: string | null,
-	score: number
+	score: number,
+	rationale?: string | null
 ) {
 	// Find all 'redelegated' delegations pointing at this delegate for this bill
 	const redelegated = await db
@@ -242,7 +245,8 @@ export async function notifyUpstreamDelegatorsVoted(
 			d.id,
 			billId,
 			billTitle,
-			score
+			score,
+			rationale
 		);
 		// Recursively notify further upstream
 		await notifyUpstreamDelegatorsVoted(
@@ -251,7 +255,8 @@ export async function notifyUpstreamDelegatorsVoted(
 			voterUsername,
 			billId,
 			billTitle,
-			score
+			score,
+			rationale
 		);
 	}
 }

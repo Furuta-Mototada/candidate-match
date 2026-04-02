@@ -22,6 +22,8 @@
 		delegateVotes?: number;
 		chain: ChainLink[];
 		status: string;
+		terminalStatus?: string | null;
+		terminalVoteScore?: number | null;
 	};
 
 	let {
@@ -76,6 +78,18 @@
 			type: 'smoothstep',
 			animated: status === 'pending',
 			style: `stroke: ${color}; stroke-width: 2;`
+		};
+	}
+
+	function makeDashedEdge(source: string, target: string, status: string): Edge {
+		const color = getStatusColor(status);
+		return {
+			id: `e-${source}-${target}`,
+			source,
+			target,
+			type: 'smoothstep',
+			animated: status === 'pending',
+			style: `stroke: ${color}; stroke-width: 2; stroke-dasharray: 6 3;`
 		};
 	}
 
@@ -140,6 +154,22 @@
 					})
 				);
 				es.push(makeEdge(meId, delegateId, outgoing.status));
+
+				// When delegate has redelegated, show "?" node for downstream chain
+				if (outgoing.status === 'redelegated') {
+					const terminalNodeId = getNodeId('forward-terminal');
+					const tStatus = outgoing.terminalStatus ?? 'pending';
+					ns.push(
+						makeNode(terminalNodeId, (meCol + 2) * X_GAP, meY, {
+							label: '',
+							isTerminal: true,
+							status: tStatus,
+							statusColor: getStatusColor(tStatus),
+							terminalVoteScore: outgoing.terminalVoteScore
+						})
+					);
+					es.push(makeDashedEdge(delegateId, terminalNodeId, tStatus));
+				}
 			}
 
 			return { nodes: ns, edges: es };
@@ -251,12 +281,13 @@
 			es.push(makeEdge(meId, delegateId, outgoing.status));
 
 			let prevId = delegateId;
+			let nextCol = meCol + 2;
 			if (outgoing.chain) {
 				for (let i = 0; i < outgoing.chain.length; i++) {
 					const link = outgoing.chain[i];
 					const linkId = getNodeId(`forward-chain-${i}-${link.username}`);
 					ns.push(
-						makeNode(linkId, (meCol + 2 + i) * X_GAP, meY, {
+						makeNode(linkId, nextCol * X_GAP, meY, {
 							label: link.username,
 							status: link.status,
 							statusColor: getStatusColor(link.status),
@@ -265,7 +296,24 @@
 					);
 					es.push(makeEdge(prevId, linkId, link.status));
 					prevId = linkId;
+					nextCol++;
 				}
+			}
+
+			// When delegate has redelegated and no debug chain shown, show "?" terminal node
+			if (outgoing.status === 'redelegated' && (!outgoing.chain || outgoing.chain.length === 0)) {
+				const terminalNodeId = getNodeId('forward-terminal');
+				const tStatus = outgoing.terminalStatus ?? 'pending';
+				ns.push(
+					makeNode(terminalNodeId, nextCol * X_GAP, meY, {
+						label: '',
+						isTerminal: true,
+						status: tStatus,
+						statusColor: getStatusColor(tStatus),
+						terminalVoteScore: outgoing.terminalVoteScore
+					})
+				);
+				es.push(makeDashedEdge(prevId, terminalNodeId, tStatus));
 			}
 		}
 
