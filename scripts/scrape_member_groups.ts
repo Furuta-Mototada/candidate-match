@@ -365,6 +365,11 @@ function getMemberDateRange(
 		if (record.endDate && (!latest || record.endDate > latest)) {
 			latest = record.endDate;
 		}
+		// For records with null endDate (currently serving), use startDate as a lower bound
+		// so we don't fall back to the full global range
+		if (!record.endDate && record.startDate && (!latest || record.startDate > latest)) {
+			latest = record.startDate;
+		}
 	}
 
 	// Apply 1-year buffer and clamp to global range

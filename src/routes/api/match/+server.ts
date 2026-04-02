@@ -241,7 +241,7 @@ async function handleStart(
 		clusterInfo = cluster;
 
 		// Calculate cluster vectors using Python script
-		let cmd = `source venv/bin/activate && python scripts/calculate_cluster_vectors.py --cluster-id ${clusterId} --n-components ${nComponents}`;
+		let cmd = `./venv/bin/python3 scripts/calculate_cluster_vectors.py --cluster-id ${clusterId} --n-components ${nComponents}`;
 		if (clusterLabel !== null && clusterLabel !== undefined) {
 			cmd += ` --cluster-label ${clusterLabel}`;
 		}

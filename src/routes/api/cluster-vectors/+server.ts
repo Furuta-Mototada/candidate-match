@@ -72,7 +72,7 @@ export const POST: RequestHandler = async ({ request, locals }): Promise<Respons
 		}
 
 		// Build command
-		let cmd = `python scripts/calculate_cluster_vectors.py --cluster-id ${clusterId} --n-components ${nComponents}`;
+		let cmd = `./venv/bin/python3 scripts/calculate_cluster_vectors.py --cluster-id ${clusterId} --n-components ${nComponents}`;
 		if (clusterLabel !== undefined) {
 			cmd += ` --cluster-label ${clusterLabel}`;
 		}

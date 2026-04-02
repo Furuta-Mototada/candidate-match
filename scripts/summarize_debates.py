@@ -42,7 +42,7 @@ except ImportError:
 
 DELAY_BETWEEN_REQUESTS = 0.5  # Reduced delay for efficiency
 LLM_MODEL = "gpt-5.4-nano"  # 400K context, 128K output, cheapest GPT-5.4-class
-MAX_CONTEXT_CHARS = 300000  # ~75K tokens, fits well in 400K context
+MAX_CONTEXT_CHARS = 180000  # ~135K tokens for Japanese text, stays under 200K TPM limit
 MAX_SPEECH_CHARS = 3000  # Allow longer individual speeches
 CHUNK_SIZE = 100  # Number of speeches per chunk for hierarchical summarization
 

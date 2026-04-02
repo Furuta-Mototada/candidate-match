@@ -78,7 +78,7 @@ export const GET: RequestHandler = async ({ url }): Promise<Response> => {
 			console.log(`⚠ Visualization not found for cluster ${clusterIdNum}, generating...`);
 			try {
 				const startTime = Date.now();
-				await execAsync(`python scripts/visualize_embeddings_2d.py ${clusterIdNum}`, {
+				await execAsync(`./venv/bin/python3 scripts/visualize_embeddings_2d.py ${clusterIdNum}`, {
 					cwd: process.cwd()
 				});
 				const elapsed = Date.now() - startTime;

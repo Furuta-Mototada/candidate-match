@@ -22,8 +22,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			return json({ error: 'Missing required parameters' }, { status: 400 });
 		}
 
-		// Build command
-		let command = `python3 scripts/cluster_bills.py ${algorithm} "${name}"`;
+		// Build command - use venv Python to ensure dependencies are available
+		let command = `./venv/bin/python3 scripts/cluster_bills.py ${algorithm} "${name}"`;
 
 		if (algorithm === 'kmeans') {
 			if (!n_clusters) {

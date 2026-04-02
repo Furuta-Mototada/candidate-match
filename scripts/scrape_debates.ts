@@ -1069,26 +1069,39 @@ async function main() {
 			const startTime = Date.now();
 
 			// Stagger starts by 1000ms to avoid overwhelming hourei.ndl.go.jp
-			const results = await runStaggered(
-				batch.map((bill, idx) => () => processBill(workers[idx].page, db, bill, options.dryRun)),
+			// Use Promise.allSettled so one failure doesn't lose entire batch progress
+			const settled = await runStaggered(
+				batch.map((bill, idx) => async () => {
+					try {
+						return await processBill(workers[idx].page, db, bill, options.dryRun);
+					} catch (error) {
+						console.error(`[Bill ${bill.id}] Error:`, error);
+						return { meetingsFound: 0, speechesSaved: 0, error: true };
+					}
+				}),
 				1000
 			);
 
 			for (let j = 0; j < batch.length; j++) {
 				const bill = batch[j];
-				const result = results[j];
+				const result = settled[j] as {
+					meetingsFound: number;
+					speechesSaved: number;
+					error?: boolean;
+				};
 
 				totalMeetings += result.meetingsFound;
 				totalSpeeches += result.speechesSaved;
 				processedCount++;
-				if (result.meetingsFound === 0) notFoundCount++;
+				if (result.meetingsFound === 0 && !result.error) notFoundCount++;
 
-				// Save progress after each bill
-				progress.markProcessed(bill.id);
-				progress.updateMetadata({ lastBillId: bill.id });
+				// Save progress per-bill so crashes mid-batch don't lose completed work
+				if (!result.error) {
+					progress.markProcessed(bill.id);
+					progress.updateMetadata({ lastBillId: bill.id });
+					progress.save();
+				}
 			}
-
-			progress.save();
 
 			const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 			const remaining = billsToProcess.length - processedCount;

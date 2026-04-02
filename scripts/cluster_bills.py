@@ -349,7 +349,7 @@ def main():
                 import subprocess
 
                 result = subprocess.run(
-                    ["python", "scripts/name_clusters.py", str(cluster_id)],
+                    ["./venv/bin/python3", "scripts/name_clusters.py", str(cluster_id)],
                     capture_output=True,
                     text=True,
                     cwd=os.getcwd(),
@@ -360,12 +360,16 @@ def main():
             except Exception as e:
                 print("Warning: Failed to" f" auto-generate cluster names: {e}")
                 print(
-                    "You can run manually:" " python scripts/name_clusters.py",
+                    "You can run manually:"
+                    " ./venv/bin/python3 scripts/name_clusters.py",
                     cluster_id,
                 )
         else:
             print("\nNote: Set OPENAI_API_KEY to auto-generate cluster names")
-            print("Run manually: python" f" scripts/name_clusters.py {cluster_id}")
+            print(
+                "Run manually: ./venv/bin/python3"
+                f" scripts/name_clusters.py {cluster_id}"
+            )
 
     finally:
         clusterer.close()

@@ -2,7 +2,19 @@
 	import { SvelteMap } from 'svelte/reactivity';
 	import type { PageData } from './$types.js';
 	import { PageHero, ClusterCard, EmptyState } from '$lib/components/index.js';
-	import { ChartColumn, RotateCcw, X, BookOpen, ThumbsUp, ThumbsDown, Target, Lightbulb, Layers, GitBranch, Eye } from '@lucide/svelte';
+	import {
+		ChartColumn,
+		RotateCcw,
+		X,
+		BookOpen,
+		ThumbsUp,
+		ThumbsDown,
+		Target,
+		Lightbulb,
+		Layers,
+		GitBranch,
+		Eye
+	} from '@lucide/svelte';
 
 	interface CommitteeInfo {
 		name: string | null;
@@ -448,7 +460,10 @@
 						<p>2つのクラスタリング手法から選択できます。</p>
 						<ul>
 							<li><strong>K-Means</strong>：クラスタ数を事前に指定。均等なグループに分割</li>
-							<li><strong>HDBSCAN</strong>：密度ベースで自動的にクラスタ数を決定。ノイズ（外れ値）も検出</li>
+							<li>
+								<strong>HDBSCAN</strong
+								>：密度ベースで自動的にクラスタ数を決定。ノイズ（外れ値）も検出
+							</li>
 						</ul>
 						<p class="detail-note">
 							<Lightbulb size={14} class="inline-icon" color="#f59e0b" /> 法案の種類や数に応じて、適切なアルゴリズムを選んでください。
@@ -803,7 +818,7 @@
 								<div class="session-group">
 									<div class="session-label">第{session}回国会</div>
 									<div class="committees">
-										{#each sessionCommittees as committee (committee.name)}
+										{#each sessionCommittees as committee, i (`${committee.chamber}-${committee.name}-${i}`)}
 											<div class="committee-tag">
 												{committee.chamber} - {committee.name}
 											</div>
