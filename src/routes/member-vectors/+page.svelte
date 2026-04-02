@@ -86,8 +86,20 @@
 	let { data }: { data: PageData } = $props();
 	let isAdmin = $derived(data.user?.role === 'admin');
 
-	let availableClusters: ClusterInfo[] = $state(data.clusters || []);
+	let availableClusters: ClusterInfo[] = $state([]);
 	let selectedClusterId: number | null = $state(null);
+
+	// Resolve streamed clusters data
+	$effect(() => {
+		const promise = data.clusters;
+		if (promise && typeof promise.then === 'function') {
+			promise.then((resolved: ClusterInfo[]) => {
+				availableClusters = resolved || [];
+			});
+		} else if (Array.isArray(promise)) {
+			availableClusters = promise as ClusterInfo[];
+		}
+	});
 	let selectedClusterLabel: number | null = $state(null);
 	let clusterLabels: ClusterLabel[] = $state([]);
 	let isLoadingLabels: boolean = $state(false);

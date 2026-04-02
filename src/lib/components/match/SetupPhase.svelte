@@ -155,9 +155,9 @@
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		margin-bottom: 0.75rem;
+		margin-bottom: 0.5rem;
 		flex-wrap: wrap;
-		gap: 1rem;
+		gap: 0.75rem;
 	}
 
 	.setup-title {
@@ -184,7 +184,7 @@
 		font-size: 1.0625rem;
 		color: #6b7280;
 		line-height: 1.6;
-		margin-bottom: 2rem;
+		margin-bottom: 1rem;
 	}
 
 	.view-saved-link {
@@ -213,12 +213,12 @@
 		background: linear-gradient(135deg, #faf5ff 0%, #eff6ff 100%);
 		border: 1px solid #e0e7ff;
 		border-radius: 16px;
-		padding: 1.5rem;
-		margin-bottom: 1.5rem;
+		padding: 1.25rem;
+		margin-bottom: 1rem;
 	}
 
 	.selected-config-summary {
-		margin-bottom: 1.25rem;
+		margin-bottom: 1rem;
 	}
 
 	.config-badge {
@@ -250,7 +250,7 @@
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
-		margin-bottom: 0.75rem;
+		margin-bottom: 0.5rem;
 	}
 
 	.stat {
@@ -266,11 +266,11 @@
 	.cluster-tags {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.5rem;
+		gap: 0.375rem;
 	}
 
 	.cluster-tag {
-		padding: 0.375rem 0.75rem;
+		padding: 0.25rem 0.625rem;
 		background: white;
 		border: 1px solid #e5e7eb;
 		border-radius: 6px;
@@ -283,9 +283,9 @@
 		background: #f9fafb;
 		border: 1px dashed #d1d5db;
 		border-radius: 12px;
-		padding: 1.5rem;
+		padding: 1rem;
 		text-align: center;
-		margin-bottom: 1.5rem;
+		margin-bottom: 1rem;
 	}
 
 	.prompt-text {
@@ -297,7 +297,7 @@
 	/* Advanced settings */
 	.advanced-settings-section {
 		border-top: 1px solid #e5e7eb;
-		padding-top: 1rem;
+		padding-top: 0.75rem;
 	}
 
 	.advanced-toggle {
@@ -369,7 +369,7 @@
 		background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
 		color: white;
 		border: none;
-		padding: 1rem 2rem;
+		padding: 0.875rem 2rem;
 		border-radius: 12px;
 		font-size: 1rem;
 		font-weight: 600;

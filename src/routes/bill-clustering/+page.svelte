@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { SvelteMap } from 'svelte/reactivity';
 	import type { PageData } from './$types.js';
-	import { PageHero, ClusterCard, EmptyState } from '$lib/components/index.js';
+	import { PageHero, ClusterCard, EmptyState, LoadingSpinner } from '$lib/components/index.js';
 	import {
 		ChartColumn,
 		RotateCcw,
@@ -38,6 +38,34 @@
 
 	let { data }: { data: PageData } = $props();
 	let isAdmin = $derived(data.user?.role === 'admin');
+
+	// Streamed data
+	type ClusterRecord = {
+		id: number;
+		name: string;
+		algorithm: string;
+		parameters: string;
+		embeddingModel: string;
+		createdAt: Date;
+	};
+	let clusters: ClusterRecord[] = $state([]);
+	let pageDataLoading = $state(true);
+
+	// Resolve streamed data
+	$effect(() => {
+		const promise = data.streamed;
+		if (promise && typeof promise.then === 'function') {
+			pageDataLoading = true;
+			promise
+				.then((resolved: { clusters: ClusterRecord[]; embeddingCount: number }) => {
+					clusters = resolved.clusters || [];
+					pageDataLoading = false;
+				})
+				.catch(() => {
+					pageDataLoading = false;
+				});
+		}
+	});
 
 	// State for clustering parameters
 	let algorithm = $state<'kmeans' | 'hdbscan'>('kmeans');
@@ -575,7 +603,9 @@
 			<h2>保存済みクラスタリング分析</h2>
 		</div>
 
-		{#if data.clusters.length === 0}
+		{#if pageDataLoading}
+			<LoadingSpinner message="データを読み込み中..." size="medium" />
+		{:else if clusters.length === 0}
 			<EmptyState
 				message="保存済みのクラスタリング分析がありません。上記のフォームから新しい分析を実行してください。"
 			>
@@ -583,7 +613,7 @@
 			</EmptyState>
 		{:else}
 			<div class="cluster-list">
-				{#each data.clusters as cluster (cluster.id)}
+				{#each clusters as cluster (cluster.id)}
 					<ClusterCard
 						name={cluster.name}
 						algorithm={cluster.algorithm}

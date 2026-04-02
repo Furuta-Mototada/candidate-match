@@ -1,16 +1,19 @@
 import type { PageServerLoad } from './$types.js';
 
-export const load: PageServerLoad = async ({ fetch }) => {
+async function loadStats(fetch: typeof globalThis.fetch) {
 	try {
 		const response = await fetch('/api/stats');
 		if (response.ok) {
-			const data = await response.json();
-			return { stats: data };
+			return await response.json();
 		}
 	} catch {
 		// Fall through to default
 	}
+	return { totalBills: 0, totalMembers: 0, totalVotes: 0, sessionsAnalyzed: 0 };
+}
+
+export const load: PageServerLoad = ({ fetch }) => {
 	return {
-		stats: { totalBills: 0, totalMembers: 0, totalVotes: 0, sessionsAnalyzed: 0 }
+		stats: loadStats(fetch)
 	};
 };

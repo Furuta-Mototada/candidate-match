@@ -1,24 +1,23 @@
 import type { PageServerLoad } from './$types.js';
 
-export const load: PageServerLoad = async ({
-	fetch
-}): Promise<{
-	savedVectors: unknown[];
-}> => {
+async function loadSavedVectors(fetch: typeof globalThis.fetch) {
 	try {
 		const response = await fetch('/api/match');
 		if (!response.ok) {
 			console.error('Failed to fetch data for matching');
-			return { savedVectors: [] };
+			return [];
 		}
 
 		const data = await response.json();
-
-		return {
-			savedVectors: data.savedVectors || []
-		};
+		return data.savedVectors || [];
 	} catch (error) {
 		console.error('Error loading match page data:', error);
-		return { savedVectors: [] };
+		return [];
 	}
+}
+
+export const load: PageServerLoad = ({ fetch }) => {
+	return {
+		savedVectors: loadSavedVectors(fetch)
+	};
 };

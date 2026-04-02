@@ -58,8 +58,20 @@
 	}
 
 	// State
-	let savedVectors: SavedVector[] = $state((data.savedVectors || []) as SavedVector[]);
+	let savedVectors: SavedVector[] = $state([]);
 	let selectedVectorId: number | null = $state(null);
+
+	// Resolve streamed savedVectors data
+	$effect(() => {
+		const promise = data.savedVectors;
+		if (promise && typeof promise.then === 'function') {
+			promise.then((resolved: SavedVector[]) => {
+				savedVectors = resolved || [];
+			});
+		} else if (Array.isArray(promise)) {
+			savedVectors = promise as SavedVector[];
+		}
+	});
 	let maxQuestions = $state(20);
 	let sampleSize = $state(10);
 	let convergeThreshold = $state(0.2);

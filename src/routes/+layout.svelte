@@ -4,6 +4,7 @@
 	import NotificationDropdown from '$lib/components/NotificationDropdown.svelte';
 	import Avatar from '$lib/components/Avatar.svelte';
 	import { ChevronDown, Users, Settings, LogOut } from '@lucide/svelte';
+	import { navigating } from '$app/stores';
 
 	import type { Snippet } from 'svelte';
 	let { data, children }: { data: LayoutData; children: Snippet } = $props();
@@ -27,6 +28,12 @@
 </script>
 
 <svelte:document onclick={handleClickOutside} />
+
+{#if $navigating}
+	<div class="nav-progress-bar" aria-hidden="true">
+		<div class="nav-progress-bar-inner"></div>
+	</div>
+{/if}
 
 <nav class="navbar">
 	<div class="navbar-inner">
@@ -323,6 +330,36 @@
 
 		.user-chip {
 			padding: 0.25rem;
+		}
+	}
+
+	/* Navigation loading bar */
+	.nav-progress-bar {
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		height: 3px;
+		z-index: 9999;
+		background: rgba(99, 102, 241, 0.1);
+		overflow: hidden;
+	}
+
+	.nav-progress-bar-inner {
+		height: 100%;
+		background: linear-gradient(90deg, #6366f1, #818cf8, #6366f1);
+		background-size: 200% 100%;
+		animation: nav-progress 1.5s ease-in-out infinite;
+		width: 100%;
+		border-radius: 0 2px 2px 0;
+	}
+
+	@keyframes nav-progress {
+		0% {
+			background-position: 200% 0;
+		}
+		100% {
+			background-position: -200% 0;
 		}
 	}
 </style>

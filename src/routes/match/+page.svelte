@@ -17,7 +17,8 @@
 		SetupPhase,
 		QuestioningPhase,
 		GlobalResultsPhase,
-		MatchTutorial
+		MatchTutorial,
+		LoadingSpinner
 	} from '$lib/components/index.js';
 	import type {
 		SavedVectorInfo,
@@ -46,8 +47,34 @@
 	let { data }: { data: PageData } = $props();
 
 	// State
-	let savedVectors: SavedVectorInfo[] = $state((data.savedVectors || []) as SavedVectorInfo[]);
+	let savedVectors: SavedVectorInfo[] = $state([]);
+	let savedVectorsLoading: boolean = $state(true);
 	let selectedSavedVectorKey: string | null = $state(null);
+
+	// Resolve streamed savedVectors data
+	$effect(() => {
+		const promise = data.savedVectors;
+		if (promise && typeof promise.then === 'function') {
+			savedVectorsLoading = true;
+			promise.then((resolved: SavedVectorInfo[]) => {
+				savedVectors = resolved || [];
+				savedVectorsLoading = false;
+			}).catch(() => {
+				savedVectorsLoading = false;
+			});
+		} else if (Array.isArray(promise)) {
+			savedVectors = promise as SavedVectorInfo[];
+			savedVectorsLoading = false;
+		}
+	});
+
+	// Auto-select default configuration reactively when vectors become available
+	$effect(() => {
+		if (!selectedSavedVectorKey && groupedSavedVectors.length > 0) {
+			const defaultGroup = groupedSavedVectors.find((g) => g.isDefault);
+			selectedSavedVectorKey = defaultGroup ? defaultGroup.key : groupedSavedVectors[0].key;
+		}
+	});
 
 	let phase: MatchingPhase = $state('setup');
 	let isLoading: boolean = $state(false);
@@ -1291,14 +1318,6 @@
 			mounted = true;
 		}, 100);
 
-		// Auto-select default configuration if none selected
-		if (!selectedSavedVectorKey && groupedSavedVectors.length > 0) {
-			const defaultGroup = groupedSavedVectors.find((g) => g.isDefault);
-			if (defaultGroup) {
-				selectedSavedVectorKey = defaultGroup.key;
-			}
-		}
-
 		// Check for pending save after login/register
 		const pendingSave = sessionStorage.getItem('pendingSaveData');
 		if (pendingSave && data.user) {
@@ -1557,14 +1576,18 @@
 		{/if}
 
 		{#if phase === 'setup'}
-			<SetupPhase
-				{groupedSavedVectors}
-				bind:selectedSavedVectorKey
-				{selectedGroupedVector}
-				{isLoading}
-				isAdmin={data.user?.role === 'admin'}
-				onStart={startWithSavedVector}
-			/>
+			{#if savedVectorsLoading}
+				<LoadingSpinner message="設定を読み込み中..." size="large" />
+			{:else}
+				<SetupPhase
+					{groupedSavedVectors}
+					bind:selectedSavedVectorKey
+					{selectedGroupedVector}
+					{isLoading}
+					isAdmin={data.user?.role === 'admin'}
+					onStart={startWithSavedVector}
+				/>
+			{/if}
 		{:else if phase === 'questioning'}
 			<QuestioningPhase
 				{currentClusterDisplayName}
@@ -1793,7 +1816,7 @@
 	/* ===== HERO SECTION ===== */
 	.hero {
 		text-align: center;
-		padding: 4rem 2rem 3rem;
+		padding: 2rem 2rem 1.5rem;
 		max-width: 900px;
 		margin: 0 auto;
 	}
@@ -1806,7 +1829,7 @@
 		border-radius: 100px;
 		font-size: 0.9rem;
 		font-weight: 600;
-		margin-bottom: 1.5rem;
+		margin-bottom: 1rem;
 	}
 
 	.hero-title {
@@ -1814,7 +1837,7 @@
 		font-weight: 800;
 		line-height: 1.15;
 		color: #1a1a2e;
-		margin-bottom: 1.5rem;
+		margin-bottom: 1rem;
 		letter-spacing: -0.02em;
 	}
 
@@ -1832,7 +1855,7 @@
 		color: #64748b;
 		line-height: 1.7;
 		max-width: 600px;
-		margin: 0 auto 2rem;
+		margin: 0 auto 1rem;
 	}
 
 	/* ===== COMPACT HEADER ===== */

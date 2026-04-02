@@ -5,7 +5,7 @@
 
 	let { data: pageData }: { data: PageData } = $props();
 
-	let stats = $state(pageData.stats);
+	let stats = $state({ totalBills: 0, totalMembers: 0, totalVotes: 0, sessionsAnalyzed: 0 });
 
 	let mounted = $state(false);
 
@@ -35,20 +35,36 @@
 		totalVotes: 0
 	});
 
+	function animateStats(resolvedStats: typeof stats) {
+		if (resolvedStats.totalBills || resolvedStats.totalMembers || resolvedStats.totalVotes) {
+			setTimeout(() => {
+				animateValue(0, resolvedStats.totalBills, 1500, (val) => (displayStats.totalBills = val));
+				animateValue(0, resolvedStats.totalMembers, 1500, (val) => (displayStats.totalMembers = val));
+				animateValue(0, resolvedStats.totalVotes, 2000, (val) => (displayStats.totalVotes = val));
+			}, 300);
+		}
+	}
+
+	// Resolve streamed stats data
+	$effect(() => {
+		const promise = pageData?.stats;
+		if (!promise) return;
+		if (typeof promise.then === 'function') {
+			promise.then((resolved: typeof stats) => {
+				stats = resolved;
+				animateStats(resolved);
+			});
+		} else {
+			stats = promise as unknown as typeof stats;
+			animateStats(stats);
+		}
+	});
+
 	onMount(() => {
 		// Trigger mount animations
 		setTimeout(() => {
 			mounted = true;
 		}, 100);
-
-		// Data already loaded from server — animate counters
-		if (stats.totalBills || stats.totalMembers || stats.totalVotes) {
-			setTimeout(() => {
-				animateValue(0, stats.totalBills, 1500, (val) => (displayStats.totalBills = val));
-				animateValue(0, stats.totalMembers, 1500, (val) => (displayStats.totalMembers = val));
-				animateValue(0, stats.totalVotes, 2000, (val) => (displayStats.totalVotes = val));
-			}, 300);
-		}
 	});
 </script>
 

@@ -1,21 +1,23 @@
 import type { PageServerLoad } from './$types.js';
-import { error, redirect } from '@sveltejs/kit';
+import { redirect } from '@sveltejs/kit';
 
-export const load: PageServerLoad = async ({ params, fetch, locals }) => {
-	if (!locals.user) {
-		throw redirect(302, '/auth/login');
-	}
-
-	const snapshotId = params.id;
-
+async function loadSnapshot(fetch: typeof globalThis.fetch, snapshotId: string) {
 	const response = await fetch(`/api/saved-sessions?id=${snapshotId}`);
 	const data = await response.json();
 
 	if (!response.ok || !data.success) {
-		throw error(404, 'スナップショットが見つかりません');
+		return { error: true, snapshot: null };
+	}
+
+	return { error: false, snapshot: data.snapshot };
+}
+
+export const load: PageServerLoad = ({ params, fetch, locals }) => {
+	if (!locals.user) {
+		throw redirect(302, '/auth/login');
 	}
 
 	return {
-		snapshot: data.snapshot
+		streamed: loadSnapshot(fetch, params.id)
 	};
 };

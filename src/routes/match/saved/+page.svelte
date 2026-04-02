@@ -2,6 +2,7 @@
 	import { onMount, tick, untrack } from 'svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { goto } from '$app/navigation';
+	import { LoadingSpinner } from '$lib/components/index.js';
 	import type { PageData } from './$types.js';
 	import type {
 		SnapshotListItem,
@@ -92,8 +93,8 @@
 
 	let { data }: { data: PageData } = $props();
 
-	let snapshots: SnapshotListItem[] = $state(data.snapshots || []);
-	let answers: AnsweredBill[] = $state(data.answers || []);
+	let snapshots: SnapshotListItem[] = $state([]);
+	let answers: AnsweredBill[] = $state([]);
 	let allBills: BillListItem[] = $state([]);
 	let incomingDelegations: IncomingDelegation[] = $state([]);
 	let outgoingDelegations: OutgoingDelegation[] = $state([]);
@@ -101,9 +102,26 @@
 	let error: string | null = $state(null);
 	let mounted: boolean = $state(false);
 	let activeTab: 'snapshots' | 'answers' | 'delegations' = $state('snapshots');
+	let pageDataLoading: boolean = $state(true);
 
 	// ── Live results state ──
-	let savedVectors: SavedVectorInfo[] = $state((data.savedVectors || []) as SavedVectorInfo[]);
+	let savedVectors: SavedVectorInfo[] = $state([]);
+
+	// Resolve streamed data
+	$effect(() => {
+		const promise = data.streamed;
+		if (promise && typeof promise.then === 'function') {
+			pageDataLoading = true;
+			promise.then((resolved: { snapshots: SnapshotListItem[]; answers: AnsweredBill[]; savedVectors: SavedVectorInfo[] }) => {
+				snapshots = resolved.snapshots || [];
+				answers = resolved.answers || [];
+				savedVectors = (resolved.savedVectors || []) as SavedVectorInfo[];
+				pageDataLoading = false;
+			}).catch(() => {
+				pageDataLoading = false;
+			});
+		}
+	});
 
 	// Group saved vectors by name+clusterId (same logic as /match page)
 	let groupedSavedVectors = $derived.by(() => {
@@ -952,6 +970,9 @@
 	</header>
 
 	<main class="main-container">
+		{#if pageDataLoading}
+			<LoadingSpinner message="データを読み込み中..." size="large" />
+		{:else}
 		{#if error}
 			<div class="error-alert animate-in">
 				<div class="error-icon"><TriangleAlert size={20} color="#f59e0b" /></div>
@@ -1580,6 +1601,7 @@
 					{/if}
 				</div>
 			{/if}
+		{/if}
 		{/if}
 	</main>
 

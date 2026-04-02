@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Users, Mailbox, Search } from '@lucide/svelte';
+	import { LoadingSpinner } from '$lib/components/index.js';
 	import Avatar from '$lib/components/Avatar.svelte';
 	import type { PageData } from './$types.js';
 
@@ -37,15 +38,32 @@
 	};
 
 	let tab: 'friends' | 'requests' | 'search' = $state('friends');
-	let friends: Friend[] = $state(data.friends);
-	let incoming: IncomingRequest[] = $state(data.incoming);
-	let outgoing: OutgoingRequest[] = $state(data.outgoing);
+	let friends: Friend[] = $state([]);
+	let incoming: IncomingRequest[] = $state([]);
+	let outgoing: OutgoingRequest[] = $state([]);
 	let searchQuery = $state('');
 	let searchResults: SearchUser[] = $state([]);
 	let loading = $state(false);
+	let pageDataLoading = $state(true);
 	let searchLoading = $state(false);
 	let message: { text: string; type: 'success' | 'error' } | null = $state(null);
 	let searchTimeout: ReturnType<typeof setTimeout> | null = null;
+
+	// Resolve streamed data
+	$effect(() => {
+		const promise = data.streamed;
+		if (promise && typeof promise.then === 'function') {
+			pageDataLoading = true;
+			promise.then((resolved: { friends: Friend[]; incoming: IncomingRequest[]; outgoing: OutgoingRequest[] }) => {
+				friends = resolved.friends || [];
+				incoming = resolved.incoming || [];
+				outgoing = resolved.outgoing || [];
+				pageDataLoading = false;
+			}).catch(() => {
+				pageDataLoading = false;
+			});
+		}
+	});
 
 	function showMessage(text: string, type: 'success' | 'error') {
 		message = { text, type };
@@ -199,6 +217,10 @@
 <div class="friends-page">
 	<div class="friends-container">
 		<h1 class="page-title">フレンド</h1>
+
+		{#if pageDataLoading}
+			<LoadingSpinner message="データを読み込み中..." size="large" />
+		{:else}
 
 		{#if message}
 			<div class="toast toast-{message.type}">{message.text}</div>
@@ -400,6 +422,7 @@
 					</div>
 				{/if}
 			</div>
+		{/if}
 		{/if}
 	</div>
 </div>

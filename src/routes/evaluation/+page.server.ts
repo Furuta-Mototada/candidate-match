@@ -1,14 +1,20 @@
 import type { PageServerLoad } from './$types.js';
 
-export const load: PageServerLoad = async ({ fetch }) => {
+async function loadSavedVectors(fetch: typeof globalThis.fetch) {
 	try {
 		const response = await fetch('/api/evaluation');
 		if (!response.ok) {
-			return { savedVectors: [] };
+			return [];
 		}
 		const data = await response.json();
-		return { savedVectors: data.savedVectors || [] };
+		return data.savedVectors || [];
 	} catch {
-		return { savedVectors: [] };
+		return [];
 	}
+}
+
+export const load: PageServerLoad = ({ fetch }) => {
+	return {
+		savedVectors: loadSavedVectors(fetch)
+	};
 };
