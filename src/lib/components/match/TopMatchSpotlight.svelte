@@ -18,6 +18,7 @@
 	}
 
 	function getBarColor(sim: number): string {
+		if (sim < 0) return 'bg-dark-red';
 		if (sim >= 0.7) return 'bg-emerald-500';
 		if (sim >= 0.5) return 'bg-blue-500';
 		return 'bg-red-500';
@@ -272,6 +273,10 @@
 		height: 100%;
 		border-radius: 3px;
 		transition: width 1s ease-out;
+	}
+
+	.progress-bar-fill.bg-dark-red {
+		background: #991b1b;
 	}
 
 	.fade-in-up {

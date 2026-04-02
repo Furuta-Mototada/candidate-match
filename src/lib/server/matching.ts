@@ -90,7 +90,7 @@ export interface NextQuestion {
 
 export interface MatchResult {
 	member: MemberInfo;
-	similarity: number; // 0-1 cosine similarity
+	similarity: number; // [-1, 1] cosine similarity
 	rank: number;
 }
 

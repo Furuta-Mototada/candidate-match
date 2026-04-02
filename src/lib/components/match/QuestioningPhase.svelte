@@ -818,7 +818,9 @@
 									<span class="spotlight-name">{match.name}</span>
 									<span class="spotlight-group">{match.group || '無所属'}</span>
 								</div>
-								<div class="spotlight-score">{(match.similarity * 100).toFixed(1)}%</div>
+								<div class="spotlight-score" class:score-negative={match.similarity < 0}>
+									{(match.similarity * 100).toFixed(1)}%
+								</div>
 							</button>
 						{/each}
 					</div>
@@ -880,11 +882,13 @@
 										<span class="table-col-name">{partyItem.partyName}</span>
 										<span class="table-col-group">{partyItem.memberCount}名</span>
 										<span
-											class="table-col-score score-{partyItem.globalScore >= 0.7
-												? 'high'
-												: partyItem.globalScore >= 0.5
-													? 'med'
-													: 'low'}"
+											class="table-col-score score-{partyItem.globalScore < 0
+												? 'neg'
+												: partyItem.globalScore >= 0.7
+													? 'high'
+													: partyItem.globalScore >= 0.5
+														? 'med'
+														: 'low'}"
 										>
 											{(partyItem.globalScore * 100).toFixed(1)}%
 										</span>
@@ -933,11 +937,13 @@
 									<span class="table-col-name">{match.name}</span>
 									<span class="table-col-group">{match.group || '無所属'}</span>
 									<span
-										class="table-col-score score-{match.similarity >= 0.7
-											? 'high'
-											: match.similarity >= 0.5
-												? 'med'
-												: 'low'}">{(match.similarity * 100).toFixed(1)}%</span
+										class="table-col-score score-{match.similarity < 0
+											? 'neg'
+											: match.similarity >= 0.7
+												? 'high'
+												: match.similarity >= 0.5
+													? 'med'
+													: 'low'}">{(match.similarity * 100).toFixed(1)}%</span
 									>
 								</button>
 							{/each}
@@ -2319,6 +2325,11 @@
 
 	.score-low {
 		color: #dc2626;
+	}
+
+	.score-neg,
+	.score-negative {
+		color: #991b1b;
 	}
 
 	.member-table-empty {

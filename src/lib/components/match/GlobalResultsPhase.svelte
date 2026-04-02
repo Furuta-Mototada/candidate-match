@@ -364,6 +364,17 @@
 		saveError = null;
 		showSaveModal = true;
 	}
+
+	/** Portal action: moves the element to document.body so position:fixed works
+	 *  even when an ancestor has transform (which creates a containing block). */
+	function portal(node: HTMLElement) {
+		document.body.appendChild(node);
+		return {
+			destroy() {
+				node.remove();
+			}
+		};
+	}
 </script>
 
 <div class="results-container">
@@ -932,11 +943,13 @@
 			{/if}
 		</div>
 	{/if}
+</div>
 
-	<!-- Member Detail Panel -->
-	{#if selectedMember}
-		<!-- svelte-ignore a11y_click_events_have_key_events -->
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
+<!-- Member Detail Panel (portaled to body to escape ancestor transforms) -->
+{#if selectedMember}
+	<!-- svelte-ignore a11y_click_events_have_key_events -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div use:portal style="display: contents;">
 		<div class="member-detail-overlay" onclick={closeMemberDetail}></div>
 		<div class="member-detail-drawer">
 			<div class="drawer-header">
@@ -1180,18 +1193,20 @@
 				{/if}
 			</div>
 		</div>
-	{/if}
+	</div>
+{/if}
 
-	<!-- Save Modal -->
-	{#if showSaveModal}
-		<!-- svelte-ignore a11y_click_events_have_key_events -->
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
+<!-- Save Modal (portaled to body to escape ancestor transforms) -->
+{#if showSaveModal}
+	<!-- svelte-ignore a11y_click_events_have_key_events -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div use:portal style="display: contents;">
 		<div class="modal-overlay" onclick={() => (showSaveModal = false)}>
 			<!-- svelte-ignore a11y_click_events_have_key_events -->
 			<div class="modal-container" onclick={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
 				<button class="modal-close-btn" onclick={() => (showSaveModal = false)}>×</button>
 
-				<h2 class="modal-title">� スナップショットを保存</h2>
+				<h2 class="modal-title">📋 スナップショットを保存</h2>
 				<p class="modal-desc">現在のマッチング結果をスナップショットとして保存します。</p>
 
 				{#if saveError}
@@ -1220,8 +1235,8 @@
 				</div>
 			</div>
 		</div>
-	{/if}
-</div>
+	</div>
+{/if}
 
 <style>
 	.results-container {

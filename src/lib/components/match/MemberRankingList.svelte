@@ -39,6 +39,7 @@
 	// Helper to match the logic in QuestioningPhase/ClusterReviewPhase
 	// high >= 0.7, medium >= 0.5, low < 0.5
 	function getScoreClass(score: number): string {
+		if (score < 0) return 'negative';
 		if (score >= 0.7) return 'high';
 		if (score >= 0.5) return 'medium';
 		return 'low';
@@ -221,5 +222,9 @@
 
 	.low {
 		color: #ef4444;
+	}
+
+	.negative {
+		color: #991b1b;
 	}
 </style>
