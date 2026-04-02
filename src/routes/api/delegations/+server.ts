@@ -111,6 +111,10 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 	}
 
 	if (action === 'all') {
+		// Admin debug mode: only admins can see full delegation details
+		const isAdmin = locals.user.role === 'admin';
+		const debugMode = isAdmin && url.searchParams.get('debug') === 'true';
+
 		// Get both incoming and outgoing for the management page
 		const incomingRaw = await db
 			.select({
@@ -196,44 +200,106 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 			}
 		}
 
-		const outgoing = await Promise.all(
-			outgoingRaw.map(async (d: (typeof outgoingRaw)[number]) => {
-				const chain = await getDelegationChainDownstream(d.delegateId, d.billId);
-				// Add vote counts for each person in the forward chain
-				const delegateVotes = await countTotalVotes(d.delegateId, d.billId);
-				const chainWithVotes = await Promise.all(
-					chain.map(async (link) => {
-						// Look up userId for this username to count their votes
-						const [u] = await db
-							.select({ id: table.user.id })
-							.from(table.user)
-							.where(eq(table.user.username, link.username))
-							.limit(1);
-						const votes = u ? await countTotalVotes(u.id, d.billId) : 1;
-						return { ...link, totalVotes: votes };
-					})
-				);
-				return {
-					...d,
-					chain: chainWithVotes,
-					delegateVotes,
-					myVoteScore: myOutgoingVotesMap.get(d.billId) ?? null
-				};
-			})
-		);
+		if (debugMode) {
+			// Admin debug mode: full chain info, upstream paths, delegator identities
+			const outgoing = await Promise.all(
+				outgoingRaw.map(async (d: (typeof outgoingRaw)[number]) => {
+					const chain = await getDelegationChainDownstream(d.delegateId, d.billId);
+					const delegateVotes = await countTotalVotes(d.delegateId, d.billId);
+					const chainWithVotes = await Promise.all(
+						chain.map(async (link) => {
+							const [u] = await db
+								.select({ id: table.user.id })
+								.from(table.user)
+								.where(eq(table.user.username, link.username))
+								.limit(1);
+							const votes = u ? await countTotalVotes(u.id, d.billId) : 1;
+							return { ...link, totalVotes: votes };
+						})
+					);
+					return {
+						...d,
+						chain: chainWithVotes,
+						delegateVotes,
+						myVoteScore: myOutgoingVotesMap.get(d.billId) ?? null
+					};
+				})
+			);
 
-		// Build upstream paths for incoming delegations (full tree, all branches)
-		const incomingWithChain = await Promise.all(
-			incoming.map(async (d: (typeof incoming)[number]) => {
-				const tree = await getDelegationTreeUpstream(d.delegatorId, d.billId);
-				const upstreamPaths = flattenUpstreamTree(tree);
-				// Also keep the old linear chain for compatibility
-				const chain = await getDelegationChainUpstream(d.delegatorId, d.billId);
-				return { ...d, upstreamChain: chain, upstreamPaths };
-			})
-		);
+			const incomingWithChain = await Promise.all(
+				incoming.map(async (d: (typeof incoming)[number]) => {
+					const tree = await getDelegationTreeUpstream(d.delegatorId, d.billId);
+					const upstreamPaths = flattenUpstreamTree(tree);
+					const chain = await getDelegationChainUpstream(d.delegatorId, d.billId);
+					return { ...d, upstreamChain: chain, upstreamPaths };
+				})
+			);
 
-		return json({ success: true, incoming: incomingWithChain, outgoing });
+			return json({
+				success: true,
+				incoming: incomingWithChain,
+				outgoing,
+				isAdmin,
+				debugMode: true
+			});
+		}
+
+		// Normal mode: anonymous incoming, no redelegation chain for outgoing
+		// Helper to bucket counts for privacy
+		function bucketCount(count: number): string {
+			if (count === 0) return '0';
+			if (count <= 3) return '1〜3';
+			if (count <= 10) return '4〜10';
+			if (count <= 30) return '11〜30';
+			return '30+';
+		}
+
+		// Outgoing: only direct delegate info, no forward chain
+		const outgoing = outgoingRaw.map((d: (typeof outgoingRaw)[number]) => ({
+			...d,
+			chain: [],
+			delegateVotes: undefined,
+			myVoteScore: myOutgoingVotesMap.get(d.billId) ?? null
+		}));
+
+		// Incoming: anonymize - strip delegator identity, provide bucketed count per bill
+		const incomingCountByBill = new Map<number, number>();
+		for (const d of incoming) {
+			incomingCountByBill.set(d.billId, (incomingCountByBill.get(d.billId) ?? 0) + 1);
+		}
+
+		const anonymizedIncoming = incoming.map((d: (typeof incoming)[number]) => ({
+			id: d.id,
+			delegatorId: '', // stripped for privacy
+			delegatorUsername: '', // stripped for privacy
+			delegatorAvatarUrl: null,
+			billId: d.billId,
+			billTitle: d.billTitle,
+			billType: d.billType,
+			billSubmissionSession: d.billSubmissionSession,
+			billNumber: d.billNumber,
+			status: d.status,
+			myExistingScore: d.myExistingScore,
+			upstreamChain: [],
+			upstreamPaths: [],
+			createdAt: d.createdAt,
+			updatedAt: d.updatedAt
+		}));
+
+		// Attach bucketed count info at the response level
+		const incomingCountBuckets: Record<number, string> = {};
+		for (const [billId, count] of incomingCountByBill) {
+			incomingCountBuckets[billId] = bucketCount(count);
+		}
+
+		return json({
+			success: true,
+			incoming: anonymizedIncoming,
+			outgoing,
+			isAdmin,
+			debugMode: false,
+			incomingCountBuckets
+		});
 	}
 
 	return json({ error: '無効なアクションです' }, { status: 400 });

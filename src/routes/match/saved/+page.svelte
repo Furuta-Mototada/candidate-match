@@ -104,6 +104,11 @@
 	let activeTab: 'snapshots' | 'answers' | 'delegations' = $state('snapshots');
 	let pageDataLoading: boolean = $state(true);
 
+	// Admin debug mode for delegation visibility
+	let isAdmin = $derived(data.user?.role === 'admin');
+	let delegationDebugMode: boolean = $state(false);
+	let incomingCountBuckets: Record<number, string> = $state({});
+
 	// ── Live results state ──
 	let savedVectors: SavedVectorInfo[] = $state([]);
 
@@ -112,14 +117,22 @@
 		const promise = data.streamed;
 		if (promise && typeof promise.then === 'function') {
 			pageDataLoading = true;
-			promise.then((resolved: { snapshots: SnapshotListItem[]; answers: AnsweredBill[]; savedVectors: SavedVectorInfo[] }) => {
-				snapshots = resolved.snapshots || [];
-				answers = resolved.answers || [];
-				savedVectors = (resolved.savedVectors || []) as SavedVectorInfo[];
-				pageDataLoading = false;
-			}).catch(() => {
-				pageDataLoading = false;
-			});
+			promise
+				.then(
+					(resolved: {
+						snapshots: SnapshotListItem[];
+						answers: AnsweredBill[];
+						savedVectors: SavedVectorInfo[];
+					}) => {
+						snapshots = resolved.snapshots || [];
+						answers = resolved.answers || [];
+						savedVectors = (resolved.savedVectors || []) as SavedVectorInfo[];
+						pageDataLoading = false;
+					}
+				)
+				.catch(() => {
+					pageDataLoading = false;
+				});
 		}
 	});
 
@@ -315,11 +328,13 @@
 		if (delegationsLoaded) return;
 		delegationsLoading = true;
 		try {
-			const res = await fetch('/api/delegations?action=all');
+			const debugParam = delegationDebugMode ? '&debug=true' : '';
+			const res = await fetch(`/api/delegations?action=all${debugParam}`);
 			const data = await res.json();
 			if (data.success) {
 				incomingDelegations = data.incoming || [];
 				outgoingDelegations = data.outgoing || [];
+				incomingCountBuckets = data.incomingCountBuckets || {};
 			}
 		} catch (e) {
 			console.error('Error loading delegations:', e);
@@ -973,635 +988,707 @@
 		{#if pageDataLoading}
 			<LoadingSpinner message="データを読み込み中..." size="large" />
 		{:else}
-		{#if error}
-			<div class="error-alert animate-in">
-				<div class="error-icon"><TriangleAlert size={20} color="#f59e0b" /></div>
-				<div>
-					<span class="error-title">エラー</span>
-					<p class="error-message">{error}</p>
+			{#if error}
+				<div class="error-alert animate-in">
+					<div class="error-icon"><TriangleAlert size={20} color="#f59e0b" /></div>
+					<div>
+						<span class="error-title">エラー</span>
+						<p class="error-message">{error}</p>
+					</div>
 				</div>
+			{/if}
+
+			<!-- Tabs -->
+			<div class="tabs animate-in" style="--delay: 0">
+				<button
+					class="tab-btn"
+					class:active={activeTab === 'snapshots'}
+					onclick={() => switchTab('snapshots')}
+				>
+					<Camera size={16} class="inline-icon" /> スナップショット ({snapshots.length})
+				</button>
+				<button
+					class="tab-btn"
+					class:active={activeTab === 'answers'}
+					onclick={() => switchTab('answers')}
+				>
+					<FileText size={16} class="inline-icon" /> 回答履歴 ({allBillsLoaded
+						? `${answeredCount}/${allBills.length}`
+						: '...'})
+				</button>
+				<button
+					class="tab-btn"
+					class:active={activeTab === 'delegations'}
+					onclick={() => switchTab('delegations')}
+				>
+					<Handshake size={16} class="inline-icon" /> 委任 ({delegationsLoaded
+						? totalDelegationCount
+						: '...'})
+					{#if pendingIncomingCount > 0}
+						<span class="tab-badge">{pendingIncomingCount}</span>
+					{/if}
+				</button>
 			</div>
-		{/if}
 
-		<!-- Tabs -->
-		<div class="tabs animate-in" style="--delay: 0">
-			<button
-				class="tab-btn"
-				class:active={activeTab === 'snapshots'}
-				onclick={() => switchTab('snapshots')}
-			>
-				<Camera size={16} class="inline-icon" /> スナップショット ({snapshots.length})
-			</button>
-			<button
-				class="tab-btn"
-				class:active={activeTab === 'answers'}
-				onclick={() => switchTab('answers')}
-			>
-				<FileText size={16} class="inline-icon" /> 回答履歴 ({allBillsLoaded
-					? `${answeredCount}/${allBills.length}`
-					: '...'})
-			</button>
-			<button
-				class="tab-btn"
-				class:active={activeTab === 'delegations'}
-				onclick={() => switchTab('delegations')}
-			>
-				<Handshake size={16} class="inline-icon" /> 委任 ({delegationsLoaded
-					? totalDelegationCount
-					: '...'})
-				{#if pendingIncomingCount > 0}
-					<span class="tab-badge">{pendingIncomingCount}</span>
-				{/if}
-			</button>
-		</div>
-
-		<!-- Snapshots Tab -->
-		{#if activeTab === 'snapshots'}
-			<!-- Live Results Section -->
-			<section class="live-results-section animate-in" style="--delay: 0">
-				<div class="live-results-header">
-					<h2 class="section-title"><Activity size={18} class="inline-icon" /> リアルタイム結果</h2>
-					<p class="section-desc">保存済みの回答から、リアルタイムのマッチング結果を表示します。</p>
-				</div>
-
-				<div class="live-results-controls">
-					<div class="control-row">
-						<label class="control-label" for="vector-group-select">設定</label>
-						<select
-							id="vector-group-select"
-							class="control-select"
-							bind:value={selectedVectorGroupKey}
-							onchange={() => {
-								showLiveResult = false;
-								liveGlobalScores = [];
-								liveClusterResults = [];
-							}}
-						>
-							<option value={null}>選択してください</option>
-							{#each groupedSavedVectors as group (group.key)}
-								<option value={group.key}>{group.name}</option>
-							{/each}
-						</select>
+			<!-- Snapshots Tab -->
+			{#if activeTab === 'snapshots'}
+				<!-- Live Results Section -->
+				<section class="live-results-section animate-in" style="--delay: 0">
+					<div class="live-results-header">
+						<h2 class="section-title">
+							<Activity size={18} class="inline-icon" /> リアルタイム結果
+						</h2>
+						<p class="section-desc">
+							保存済みの回答から、リアルタイムのマッチング結果を表示します。
+						</p>
 					</div>
 
-					{#if selectedVectorGroup}
-						<button
-							class="btn-advanced-toggle"
-							onclick={() => (showAdvancedControls = !showAdvancedControls)}
-						>
-							<span class="advanced-toggle-icon" class:open={showAdvancedControls}>›</span>
-							詳細設定
-						</button>
+					<div class="live-results-controls">
+						<div class="control-row">
+							<label class="control-label" for="vector-group-select">設定</label>
+							<select
+								id="vector-group-select"
+								class="control-select"
+								bind:value={selectedVectorGroupKey}
+								onchange={() => {
+									showLiveResult = false;
+									liveGlobalScores = [];
+									liveClusterResults = [];
+								}}
+							>
+								<option value={null}>選択してください</option>
+								{#each groupedSavedVectors as group (group.key)}
+									<option value={group.key}>{group.name}</option>
+								{/each}
+							</select>
+						</div>
 
-						{#if showAdvancedControls}
-							<div class="importance-weights animate-in" style="--delay: 0">
-								<span class="control-label">カテゴリ重み</span>
-								<div class="weights-grid">
-									{#each selectedVectorGroup.clusterLabels as cl (cl.label)}
-										<div class="weight-item">
-											<label class="weight-label" for="weight-{cl.label}">
-												{cl.labelName || `クラスター${cl.label}`}
-												<span class="weight-bill-count">({cl.billCount}件)</span>
-											</label>
-											<div class="weight-control">
-												<div class="weight-stars">
-													{#each [1, 2, 3, 4, 5] as star (star)}
-														<button
-															class="weight-star-btn"
-															class:selected={star <=
-																(liveImportanceWeights[String(cl.label)] || 3)}
-															onclick={() => (liveImportanceWeights[String(cl.label)] = star)}
-														>
-															<Star
-																size={20}
-																fill={star <= (liveImportanceWeights[String(cl.label)] || 3)
-																	? '#fbbf24'
-																	: 'none'}
-																color={star <= (liveImportanceWeights[String(cl.label)] || 3)
-																	? '#f59e0b'
-																	: '#d1d5db'}
-															/>
-														</button>
-													{/each}
+						{#if selectedVectorGroup}
+							<button
+								class="btn-advanced-toggle"
+								onclick={() => (showAdvancedControls = !showAdvancedControls)}
+							>
+								<span class="advanced-toggle-icon" class:open={showAdvancedControls}>›</span>
+								詳細設定
+							</button>
+
+							{#if showAdvancedControls}
+								<div class="importance-weights animate-in" style="--delay: 0">
+									<span class="control-label">カテゴリ重み</span>
+									<div class="weights-grid">
+										{#each selectedVectorGroup.clusterLabels as cl (cl.label)}
+											<div class="weight-item">
+												<label class="weight-label" for="weight-{cl.label}">
+													{cl.labelName || `クラスター${cl.label}`}
+													<span class="weight-bill-count">({cl.billCount}件)</span>
+												</label>
+												<div class="weight-control">
+													<div class="weight-stars">
+														{#each [1, 2, 3, 4, 5] as star (star)}
+															<button
+																class="weight-star-btn"
+																class:selected={star <=
+																	(liveImportanceWeights[String(cl.label)] || 3)}
+																onclick={() => (liveImportanceWeights[String(cl.label)] = star)}
+															>
+																<Star
+																	size={20}
+																	fill={star <= (liveImportanceWeights[String(cl.label)] || 3)
+																		? '#fbbf24'
+																		: 'none'}
+																	color={star <= (liveImportanceWeights[String(cl.label)] || 3)
+																		? '#f59e0b'
+																		: '#d1d5db'}
+																/>
+															</button>
+														{/each}
+													</div>
 												</div>
 											</div>
-										</div>
-									{/each}
+										{/each}
+									</div>
 								</div>
-							</div>
+							{/if}
+
+							<button class="btn-compute" onclick={fetchLiveResults} disabled={liveLoading}>
+								{#if liveLoading}
+									<span class="loading-spinner-small"></span>
+									計算中...
+								{:else}
+									<RefreshCw size={16} />
+									結果を計算
+								{/if}
+							</button>
 						{/if}
+					</div>
 
-						<button class="btn-compute" onclick={fetchLiveResults} disabled={liveLoading}>
-							{#if liveLoading}
-								<span class="loading-spinner-small"></span>
-								計算中...
-							{:else}
-								<RefreshCw size={16} />
-								結果を計算
-							{/if}
-						</button>
+					{#if liveError}
+						<div class="error-alert animate-in">
+							<div class="error-icon"><TriangleAlert size={20} color="#f59e0b" /></div>
+							<div>
+								<span class="error-title">エラー</span>
+								<p class="error-message">{liveError}</p>
+							</div>
+						</div>
 					{/if}
-				</div>
 
-				{#if liveError}
-					<div class="error-alert animate-in">
-						<div class="error-icon"><TriangleAlert size={20} color="#f59e0b" /></div>
-						<div>
-							<span class="error-title">エラー</span>
-							<p class="error-message">{liveError}</p>
-						</div>
-					</div>
-				{/if}
-
-				{#if showLiveResult && liveGlobalScores.length > 0}
-					<div class="live-result-summary animate-in" style="--delay: 0">
-						<div class="snapshot-stats">
-							<div class="stat-row">
-								<span class="stat-label">回答数</span>
-								<span class="stat-value">
-									{liveTotalAnswered}件
-									{#if liveDelegatedCount > 0}
-										<span class="delegated-badge">（うち委任 {liveDelegatedCount}件）</span>
-									{/if}
-								</span>
-							</div>
-							{#if liveTopMatch}
-								<div class="stat-row">
-									<span class="stat-label">トップマッチ</span>
-									<span class="stat-value"
-										>{liveTopMatch.name} ({formatSimilarity(liveTopMatch.score)})</span
-									>
-								</div>
-							{/if}
-						</div>
-						<div class="live-result-actions">
-							{#if snapshotSaved}
-								<span class="snapshot-saved-badge"><CircleCheck size={16} /> 保存しました</span>
-							{:else}
-								<button class="btn-save-snapshot" onclick={openSaveModal}>
-									<Save size={16} />
-									スナップショットとして保存
-								</button>
-							{/if}
-						</div>
-					</div>
-
-					<div class="live-result-detail">
-						<GlobalResultsPhase
-							clusterResults={liveClusterResults}
-							globalScores={liveGlobalScores}
-							partyScores={livePartyScores}
-							readonly={true}
-						/>
-					</div>
-				{:else if showLiveResult && liveTotalAnswered === 0}
-					<div class="empty-state animate-in" style="--delay: 0">
-						<div class="empty-icon"><Mailbox size={32} /></div>
-						<p class="empty-desc">この設定に対応する回答がまだありません。</p>
-						<a href="/match" class="btn-primary"> マッチングへ </a>
-					</div>
-				{/if}
-			</section>
-
-			<!-- Saved Snapshots -->
-			{#if snapshots.length === 0}
-				<div class="empty-state animate-in" style="--delay: 1">
-					<div class="empty-icon"><Camera size={32} /></div>
-					<h2 class="empty-title">保存済みスナップショットがありません</h2>
-					<p class="empty-desc">マッチングでスナップショットを保存すると、ここに表示されます。</p>
-				</div>
-			{:else}
-				<div class="snapshots-grid">
-					{#each snapshots as snapshot, idx (snapshot.id)}
-						<article class="snapshot-card animate-in" style="--delay: {idx + 1}">
-							<div class="snapshot-header">
-								<div class="snapshot-meta">
-									<span class="snapshot-date">{formatDate(snapshot.createdAt)}</span>
-								</div>
-								<h3 class="snapshot-name">{snapshot.name}</h3>
-							</div>
-
+					{#if showLiveResult && liveGlobalScores.length > 0}
+						<div class="live-result-summary animate-in" style="--delay: 0">
 							<div class="snapshot-stats">
 								<div class="stat-row">
 									<span class="stat-label">回答数</span>
-									<span class="stat-value">{snapshot.totalAnswered}件</span>
+									<span class="stat-value">
+										{liveTotalAnswered}件
+										{#if liveDelegatedCount > 0}
+											<span class="delegated-badge">（うち委任 {liveDelegatedCount}件）</span>
+										{/if}
+									</span>
 								</div>
-								{#if snapshot.topMatch}
+								{#if liveTopMatch}
 									<div class="stat-row">
 										<span class="stat-label">トップマッチ</span>
-										<span class="stat-value">
-											{snapshot.topMatch.name} ({formatSimilarity(snapshot.topMatch.score)})
-										</span>
+										<span class="stat-value"
+											>{liveTopMatch.name} ({formatSimilarity(liveTopMatch.score)})</span
+										>
 									</div>
 								{/if}
 							</div>
-
-							<div class="snapshot-actions">
-								<button
-									class="btn-view"
-									onclick={() => navigateToSnapshot(snapshot.id)}
-									disabled={isLoading}
-								>
-									<span><Eye size={16} /></span>
-									詳細を見る
-								</button>
-
-								{#if deleteConfirmId === snapshot.id}
-									<div class="delete-confirm">
-										<span>本当に削除しますか？</span>
-										<button
-											class="btn-confirm-delete"
-											onclick={() => deleteSnapshot(snapshot.id)}
-											disabled={isLoading}
-										>
-											削除
-										</button>
-										<button
-											class="btn-cancel"
-											onclick={() => (deleteConfirmId = null)}
-											disabled={isLoading}
-										>
-											キャンセル
-										</button>
-									</div>
+							<div class="live-result-actions">
+								{#if snapshotSaved}
+									<span class="snapshot-saved-badge"><CircleCheck size={16} /> 保存しました</span>
 								{:else}
-									<button
-										class="btn-delete"
-										onclick={() => (deleteConfirmId = snapshot.id)}
-										disabled={isLoading}
-									>
-										<span><Trash2 size={16} /></span>
-										削除
+									<button class="btn-save-snapshot" onclick={openSaveModal}>
+										<Save size={16} />
+										スナップショットとして保存
 									</button>
 								{/if}
 							</div>
-						</article>
-					{/each}
-				</div>
-			{/if}
-		{/if}
-
-		<!-- Answers Tab -->
-		{#if activeTab === 'answers'}
-			{#if allBillsLoading}
-				<div class="loading-state animate-in" style="--delay: 1">
-					<div class="loading-spinner"></div>
-					<p>法案データを読み込み中...</p>
-				</div>
-			{:else}
-				<div class="bills-section animate-in" style="--delay: 1">
-					<!-- Search bar -->
-					<div class="bills-search-bar">
-						<span class="search-icon"><Search size={16} /></span>
-						<input
-							type="text"
-							class="bills-search-input"
-							placeholder="法案名で検索..."
-							bind:value={billSearchQuery}
-						/>
-						{#if billSearchQuery}
-							<button class="search-clear-btn" onclick={() => (billSearchQuery = '')}
-								><X size={14} /></button
-							>
-						{/if}
-					</div>
-
-					<!-- Filters -->
-					<div class="bills-filters">
-						<div class="filter-group">
-							<label class="filter-label" for="filter-status">ステータス</label>
-							<select id="filter-status" class="filter-select" bind:value={billStatusFilter}>
-								<option value="all">すべて</option>
-								<option value="answered">回答済み ({answeredCount})</option>
-								<option value="unanswered">未回答</option>
-								<option value="delegated">委任済み ({delegatedCount})</option>
-							</select>
 						</div>
 
-						{#if billStatusFilter === 'answered' || billStatusFilter === 'all'}
+						<div class="live-result-detail">
+							<GlobalResultsPhase
+								clusterResults={liveClusterResults}
+								globalScores={liveGlobalScores}
+								partyScores={livePartyScores}
+								readonly={true}
+							/>
+						</div>
+					{:else if showLiveResult && liveTotalAnswered === 0}
+						<div class="empty-state animate-in" style="--delay: 0">
+							<div class="empty-icon"><Mailbox size={32} /></div>
+							<p class="empty-desc">この設定に対応する回答がまだありません。</p>
+							<a href="/match" class="btn-primary"> マッチングへ </a>
+						</div>
+					{/if}
+				</section>
+
+				<!-- Saved Snapshots -->
+				{#if snapshots.length === 0}
+					<div class="empty-state animate-in" style="--delay: 1">
+						<div class="empty-icon"><Camera size={32} /></div>
+						<h2 class="empty-title">保存済みスナップショットがありません</h2>
+						<p class="empty-desc">マッチングでスナップショットを保存すると、ここに表示されます。</p>
+					</div>
+				{:else}
+					<div class="snapshots-grid">
+						{#each snapshots as snapshot, idx (snapshot.id)}
+							<article class="snapshot-card animate-in" style="--delay: {idx + 1}">
+								<div class="snapshot-header">
+									<div class="snapshot-meta">
+										<span class="snapshot-date">{formatDate(snapshot.createdAt)}</span>
+									</div>
+									<h3 class="snapshot-name">{snapshot.name}</h3>
+								</div>
+
+								<div class="snapshot-stats">
+									<div class="stat-row">
+										<span class="stat-label">回答数</span>
+										<span class="stat-value">{snapshot.totalAnswered}件</span>
+									</div>
+									{#if snapshot.topMatch}
+										<div class="stat-row">
+											<span class="stat-label">トップマッチ</span>
+											<span class="stat-value">
+												{snapshot.topMatch.name} ({formatSimilarity(snapshot.topMatch.score)})
+											</span>
+										</div>
+									{/if}
+								</div>
+
+								<div class="snapshot-actions">
+									<button
+										class="btn-view"
+										onclick={() => navigateToSnapshot(snapshot.id)}
+										disabled={isLoading}
+									>
+										<span><Eye size={16} /></span>
+										詳細を見る
+									</button>
+
+									{#if deleteConfirmId === snapshot.id}
+										<div class="delete-confirm">
+											<span>本当に削除しますか？</span>
+											<button
+												class="btn-confirm-delete"
+												onclick={() => deleteSnapshot(snapshot.id)}
+												disabled={isLoading}
+											>
+												削除
+											</button>
+											<button
+												class="btn-cancel"
+												onclick={() => (deleteConfirmId = null)}
+												disabled={isLoading}
+											>
+												キャンセル
+											</button>
+										</div>
+									{:else}
+										<button
+											class="btn-delete"
+											onclick={() => (deleteConfirmId = snapshot.id)}
+											disabled={isLoading}
+										>
+											<span><Trash2 size={16} /></span>
+											削除
+										</button>
+									{/if}
+								</div>
+							</article>
+						{/each}
+					</div>
+				{/if}
+			{/if}
+
+			<!-- Answers Tab -->
+			{#if activeTab === 'answers'}
+				{#if allBillsLoading}
+					<div class="loading-state animate-in" style="--delay: 1">
+						<div class="loading-spinner"></div>
+						<p>法案データを読み込み中...</p>
+					</div>
+				{:else}
+					<div class="bills-section animate-in" style="--delay: 1">
+						<!-- Search bar -->
+						<div class="bills-search-bar">
+							<span class="search-icon"><Search size={16} /></span>
+							<input
+								type="text"
+								class="bills-search-input"
+								placeholder="法案名で検索..."
+								bind:value={billSearchQuery}
+							/>
+							{#if billSearchQuery}
+								<button class="search-clear-btn" onclick={() => (billSearchQuery = '')}
+									><X size={14} /></button
+								>
+							{/if}
+						</div>
+
+						<!-- Filters -->
+						<div class="bills-filters">
 							<div class="filter-group">
-								<label class="filter-label" for="filter-answer">回答</label>
-								<select id="filter-answer" class="filter-select" bind:value={billAnswerFilter}>
+								<label class="filter-label" for="filter-status">ステータス</label>
+								<select id="filter-status" class="filter-select" bind:value={billStatusFilter}>
 									<option value="all">すべて</option>
-									<option value="agree">賛成</option>
-									<option value="disagree">反対</option>
-									<option value="skip">スキップ</option>
+									<option value="answered">回答済み ({answeredCount})</option>
+									<option value="unanswered">未回答</option>
+									<option value="delegated">委任済み ({delegatedCount})</option>
 								</select>
+							</div>
+
+							{#if billStatusFilter === 'answered' || billStatusFilter === 'all'}
+								<div class="filter-group">
+									<label class="filter-label" for="filter-answer">回答</label>
+									<select id="filter-answer" class="filter-select" bind:value={billAnswerFilter}>
+										<option value="all">すべて</option>
+										<option value="agree">賛成</option>
+										<option value="disagree">反対</option>
+										<option value="skip">スキップ</option>
+									</select>
+								</div>
+							{/if}
+
+							<div class="filter-group">
+								<label class="filter-label" for="filter-type">種類</label>
+								<select id="filter-type" class="filter-select" bind:value={billTypeFilter}>
+									<option value="all">すべて</option>
+									{#each availableTypes as type (type)}
+										<option value={type}>{type}</option>
+									{/each}
+								</select>
+							</div>
+
+							<div class="filter-group">
+								<label class="filter-label" for="filter-session">回次</label>
+								<select id="filter-session" class="filter-select" bind:value={billSessionFilter}>
+									<option value="all">すべて</option>
+									{#each availableSessions as session (session)}
+										<option value={session.toString()}>第{session}回</option>
+									{/each}
+								</select>
+							</div>
+
+							<div class="filter-group">
+								<label class="filter-label" for="filter-result">結果</label>
+								<select id="filter-result" class="filter-select" bind:value={billResultFilter}>
+									<option value="all">すべて</option>
+									<option value="可決">可決</option>
+									<option value="否決">否決</option>
+									<option value="撤回">撤回</option>
+									<option value="未了">未了</option>
+									<option value="none">審議中</option>
+								</select>
+							</div>
+						</div>
+
+						<!-- Results summary -->
+						<p class="bills-summary">
+							{filteredBills.length} 件表示 / 全 {allBills.length} 件（回答済み {answeredCount} 件、委任
+							{delegatedCount} 件）
+						</p>
+
+						<!-- Bill list -->
+						{#if filteredBills.length === 0}
+							<div class="empty-state-inline">
+								<p>該当する法案がありません</p>
+							</div>
+						{:else}
+							<div class="bills-list">
+								{#each filteredBills as b (b.id)}
+									<!-- svelte-ignore a11y_click_events_have_key_events -->
+									<!-- svelte-ignore a11y_no_static_element_interactions -->
+									<div
+										id="bill-item-{b.id}"
+										class="bill-item bill-item-clickable"
+										class:bill-item-answered={b.answerScore !== null}
+										class:bill-item-delegated={b.delegation !== null && b.answerScore === null}
+										onclick={() => (selectedBill = b)}
+									>
+										<div class="bill-item-header">
+											<span class="bill-item-id">
+												第{b.submissionSession}回 {b.type} 第{b.number}号
+											</span>
+											{#if b.result}
+												<span
+													class="bill-result-badge"
+													class:result-passed={b.result === '可決'}
+													class:result-rejected={b.result === '否決'}
+													class:result-withdrawn={b.result === '撤回'}
+													class:result-expired={b.result === '未了'}
+												>
+													{b.result}
+												</span>
+											{:else}
+												<span class="bill-result-badge result-pending">審議中</span>
+											{/if}
+										</div>
+
+										<div class="bill-item-main">
+											<span class="bill-item-title">{b.title || `法案 #${b.id}`}</span>
+										</div>
+
+										<div class="bill-item-status-row">
+											<!-- Answer status -->
+											{#if b.answerScore !== null}
+												<span class="answer-badge {getAnswerClass(b.answerScore)}">
+													{getAnswerLabel(b.answerScore)}
+												</span>
+											{:else if b.delegation}
+												<!-- Delegation status with no direct answer -->
+												<span
+													class="delegation-badge {getDelegationStatusClass(b.delegation.status)}"
+												>
+													<Handshake size={14} class="inline-icon" />
+													{b.delegation.delegateUsername}に委任 ({getDelegationStatusLabel(
+														b.delegation.status
+													)})
+												</span>
+											{:else}
+												<span class="answer-badge answer-none">未回答</span>
+											{/if}
+
+											<!-- If answered AND also delegated, show delegation info too -->
+											{#if b.answerScore !== null && b.delegation}
+												<span
+													class="delegation-badge {getDelegationStatusClass(b.delegation.status)}"
+												>
+													<Handshake size={14} class="inline-icon" />
+													{b.delegation.delegateUsername}に委任 ({getDelegationStatusLabel(
+														b.delegation.status
+													)})
+												</span>
+											{/if}
+
+											<span class="bill-item-chevron">›</span>
+										</div>
+									</div>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				{/if}
+			{/if}
+
+			<!-- Delegations Tab -->
+			{#if activeTab === 'delegations'}
+				{#if delegationsLoading}
+					<div class="loading-state animate-in" style="--delay: 1">
+						<div class="loading-spinner"></div>
+						<p>委任データを読み込み中...</p>
+					</div>
+				{:else}
+					<div class="delegations-container animate-in" style="--delay: 1">
+						<!-- Admin debug toggle -->
+						{#if isAdmin}
+							<div class="admin-debug-toggle">
+								<label class="debug-toggle-label">
+									<input
+										type="checkbox"
+										bind:checked={delegationDebugMode}
+										onchange={async () => {
+											delegationsLoaded = false;
+											await loadDelegations();
+										}}
+									/>
+									<span class="debug-toggle-text">管理者デバッグモード（全委任チェーン表示）</span>
+								</label>
 							</div>
 						{/if}
 
-						<div class="filter-group">
-							<label class="filter-label" for="filter-type">種類</label>
-							<select id="filter-type" class="filter-select" bind:value={billTypeFilter}>
-								<option value="all">すべて</option>
-								{#each availableTypes as type (type)}
-									<option value={type}>{type}</option>
-								{/each}
-							</select>
-						</div>
-
-						<div class="filter-group">
-							<label class="filter-label" for="filter-session">回次</label>
-							<select id="filter-session" class="filter-select" bind:value={billSessionFilter}>
-								<option value="all">すべて</option>
-								{#each availableSessions as session (session)}
-									<option value={session.toString()}>第{session}回</option>
-								{/each}
-							</select>
-						</div>
-
-						<div class="filter-group">
-							<label class="filter-label" for="filter-result">結果</label>
-							<select id="filter-result" class="filter-select" bind:value={billResultFilter}>
-								<option value="all">すべて</option>
-								<option value="可決">可決</option>
-								<option value="否決">否決</option>
-								<option value="撤回">撤回</option>
-								<option value="未了">未了</option>
-								<option value="none">審議中</option>
-							</select>
-						</div>
-					</div>
-
-					<!-- Results summary -->
-					<p class="bills-summary">
-						{filteredBills.length} 件表示 / 全 {allBills.length} 件（回答済み {answeredCount} 件、委任
-						{delegatedCount} 件）
-					</p>
-
-					<!-- Bill list -->
-					{#if filteredBills.length === 0}
-						<div class="empty-state-inline">
-							<p>該当する法案がありません</p>
-						</div>
-					{:else}
-						<div class="bills-list">
-							{#each filteredBills as b (b.id)}
-								<!-- svelte-ignore a11y_click_events_have_key_events -->
-								<!-- svelte-ignore a11y_no_static_element_interactions -->
-								<div
-									id="bill-item-{b.id}"
-									class="bill-item bill-item-clickable"
-									class:bill-item-answered={b.answerScore !== null}
-									class:bill-item-delegated={b.delegation !== null && b.answerScore === null}
-									onclick={() => (selectedBill = b)}
-								>
-									<div class="bill-item-header">
-										<span class="bill-item-id">
-											第{b.submissionSession}回 {b.type} 第{b.number}号
-										</span>
-										{#if b.result}
-											<span
-												class="bill-result-badge"
-												class:result-passed={b.result === '可決'}
-												class:result-rejected={b.result === '否決'}
-												class:result-withdrawn={b.result === '撤回'}
-												class:result-expired={b.result === '未了'}
-											>
-												{b.result}
+						{#if delegationGroups.length === 0}
+							<div class="empty-state">
+								<div class="empty-icon"><Handshake size={32} /></div>
+								<h2 class="empty-title">委任はありません</h2>
+								<p class="empty-desc">
+									マッチングで法案をフレンドに委任すると、ここに表示されます。
+								</p>
+								<a href="/match" class="btn-primary">マッチングへ</a>
+							</div>
+						{:else}
+							<div class="delegation-list">
+								{#each delegationGroups as group (group.billId)}
+									{@const incomingList = group.incomingList}
+									{@const outgoing = group.outgoing}
+									{@const hasIncoming = incomingList.length > 0}
+									{@const isMiddleman = hasIncoming && outgoing !== null}
+									{@const hasPendingIncoming = incomingList.some((d) => d.status === 'pending')}
+									{@const primaryStatus = hasPendingIncoming
+										? 'pending'
+										: (outgoing?.status ?? incomingList[0]?.status ?? '')}
+									<div
+										id="delegation-bill-{group.billId}"
+										class="delegation-card"
+										class:delegation-card-pending={primaryStatus === 'pending'}
+									>
+										<!-- Bill info -->
+										<div class="delegation-bill-header">
+											<span class="delegation-bill-id">
+												第{group.billSubmissionSession}回 {group.billType} 第{group.billNumber}号
 											</span>
-										{:else}
-											<span class="bill-result-badge result-pending">審議中</span>
-										{/if}
-									</div>
-
-									<div class="bill-item-main">
-										<span class="bill-item-title">{b.title || `法案 #${b.id}`}</span>
-									</div>
-
-									<div class="bill-item-status-row">
-										<!-- Answer status -->
-										{#if b.answerScore !== null}
-											<span class="answer-badge {getAnswerClass(b.answerScore)}">
-												{getAnswerLabel(b.answerScore)}
+											<span class="delegation-bill-title">
+												{group.billTitle || `法案 #${group.billId}`}
 											</span>
-										{:else if b.delegation}
-											<!-- Delegation status with no direct answer -->
-											<span
-												class="delegation-badge {getDelegationStatusClass(b.delegation.status)}"
-											>
-												<Handshake size={14} class="inline-icon" />
-												{b.delegation.delegateUsername}に委任 ({getDelegationStatusLabel(
-													b.delegation.status
-												)})
-											</span>
-										{:else}
-											<span class="answer-badge answer-none">未回答</span>
-										{/if}
-
-										<!-- If answered AND also delegated, show delegation info too -->
-										{#if b.answerScore !== null && b.delegation}
-											<span
-												class="delegation-badge {getDelegationStatusClass(b.delegation.status)}"
-											>
-												<Handshake size={14} class="inline-icon" />
-												{b.delegation.delegateUsername}に委任 ({getDelegationStatusLabel(
-													b.delegation.status
-												)})
-											</span>
-										{/if}
-
-										<span class="bill-item-chevron">›</span>
-									</div>
-								</div>
-							{/each}
-						</div>
-					{/if}
-				</div>
-			{/if}
-		{/if}
-
-		<!-- Delegations Tab -->
-		{#if activeTab === 'delegations'}
-			{#if delegationsLoading}
-				<div class="loading-state animate-in" style="--delay: 1">
-					<div class="loading-spinner"></div>
-					<p>委任データを読み込み中...</p>
-				</div>
-			{:else}
-				<div class="delegations-container animate-in" style="--delay: 1">
-					{#if delegationGroups.length === 0}
-						<div class="empty-state">
-							<div class="empty-icon"><Handshake size={32} /></div>
-							<h2 class="empty-title">委任はありません</h2>
-							<p class="empty-desc">マッチングで法案をフレンドに委任すると、ここに表示されます。</p>
-							<a href="/match" class="btn-primary">マッチングへ</a>
-						</div>
-					{:else}
-						<div class="delegation-list">
-							{#each delegationGroups as group (group.billId)}
-								{@const incomingList = group.incomingList}
-								{@const outgoing = group.outgoing}
-								{@const hasIncoming = incomingList.length > 0}
-								{@const isMiddleman = hasIncoming && outgoing !== null}
-								{@const hasPendingIncoming = incomingList.some((d) => d.status === 'pending')}
-								{@const primaryStatus = hasPendingIncoming
-									? 'pending'
-									: (outgoing?.status ?? incomingList[0]?.status ?? '')}
-								<div
-									id="delegation-bill-{group.billId}"
-									class="delegation-card"
-									class:delegation-card-pending={primaryStatus === 'pending'}
-								>
-									<!-- Bill info -->
-									<div class="delegation-bill-header">
-										<span class="delegation-bill-id">
-											第{group.billSubmissionSession}回 {group.billType} 第{group.billNumber}号
-										</span>
-										<span class="delegation-bill-title">
-											{group.billTitle || `法案 #${group.billId}`}
-										</span>
-										{#if isMiddleman}
-											<span class="delegation-role role-middleman"
-												><RefreshCw size={14} class="inline-icon" /> 転送</span
-											>
-										{:else if hasIncoming}
-											<span class="delegation-role role-incoming"
-												><Inbox size={14} class="inline-icon" /> 受信</span
-											>
-										{:else}
-											<span class="delegation-role role-outgoing"
-												><Upload size={14} class="inline-icon" /> 送信</span
-											>
-										{/if}
-									</div>
-
-									<!-- Chain visualization for outgoing-only -->
-									{#if !hasIncoming && outgoing}
-										<DelegationFlowChart {incomingList} {outgoing} />
-										<div class="delegation-status-row">
-											<span class="delegation-status {getDelegationStatusClass(outgoing.status)}">
-												{getDelegationStatusLabel(outgoing.status)}
-											</span>
-										</div>
-										{#if outgoing.status === 'voted' && outgoing.myVoteScore !== null}
-											<div class="delegation-vote-result">
-												投票結果: {getVoteScoreLabel(outgoing.myVoteScore)}
-											</div>
-										{/if}
-									{/if}
-
-									<!-- Combined chain visualization for incoming -->
-									{#if hasIncoming}
-										<DelegationFlowChart {incomingList} {outgoing} />
-
-										<!-- Combined status row -->
-										<div class="delegation-status-row">
-											{#each incomingList as incoming (incoming.id)}
-												<span class="delegation-status {getDelegationStatusClass(incoming.status)}">
-													{incoming.delegatorUsername}: {getDelegationStatusLabel(incoming.status)}
-												</span>
-											{/each}
-											{#if outgoing}
-												<span class="delegation-status {getDelegationStatusClass(outgoing.status)}">
-													転送先: {getDelegationStatusLabel(outgoing.status)}
-												</span>
+											{#if isMiddleman}
+												<span class="delegation-role role-middleman"
+													><RefreshCw size={14} class="inline-icon" /> 転送</span
+												>
+											{:else if hasIncoming}
+												<span class="delegation-role role-incoming"
+													><Inbox size={14} class="inline-icon" /> 受信</span
+												>
+											{:else}
+												<span class="delegation-role role-outgoing"
+													><Upload size={14} class="inline-icon" /> 送信</span
+												>
 											{/if}
 										</div>
 
-										{#if incomingList.some((d) => d.status === 'voted' && d.myExistingScore !== null)}
-											{@const votedIncoming = incomingList.find(
-												(d) => d.status === 'voted' && d.myExistingScore !== null
-											)}
-											{#if votedIncoming}
+										<!-- Chain visualization for outgoing-only -->
+										{#if !hasIncoming && outgoing}
+											{#if delegationDebugMode}
+												<DelegationFlowChart {incomingList} {outgoing} />
+											{:else}
+												<!-- Simplified: only show direct delegate, no forward chain -->
+												<DelegationFlowChart {incomingList} outgoing={{ ...outgoing, chain: [] }} />
+											{/if}
+											<div class="delegation-status-row">
+												<span class="delegation-status {getDelegationStatusClass(outgoing.status)}">
+													{getDelegationStatusLabel(outgoing.status)}
+												</span>
+											</div>
+											{#if outgoing.status === 'voted' && outgoing.myVoteScore !== null}
 												<div class="delegation-vote-result">
-													投票結果: {getVoteScoreLabel(votedIncoming.myExistingScore)}
+													投票結果: {getVoteScoreLabel(outgoing.myVoteScore)}
 												</div>
 											{/if}
 										{/if}
-									{/if}
 
-									<!-- Bill-level incoming actions (apply to ALL incoming for this bill) -->
-									<!-- Hide when user has an outgoing delegation (middleman - already forwarded) -->
-									{#if hasPendingIncoming && !outgoing}
-										{@const firstPending = incomingList.find((d) => d.status === 'pending')}
-										{#if firstPending}
-											<div class="delegation-actions">
-												{#if firstPending.myExistingScore !== null}
-													<button
-														class="btn-vote-for"
-														onclick={() => acceptDelegation(firstPending.id)}
-														disabled={isLoading}
-													>
-														<CircleCheck size={16} class="inline-icon" color="#22c55e" /> 既存の投票で承認（{getVoteScoreLabel(
-															firstPending.myExistingScore
-														)}）
-													</button>
-												{:else}
-													<button
-														class="btn-vote-for"
-														onclick={() => startProxyVoteInAnswerTab(firstPending)}
-														disabled={isLoading}
-													>
-														<Vote size={16} class="inline-icon" /> 代理投票する
-													</button>
+										<!-- Combined chain visualization for incoming -->
+										{#if hasIncoming}
+											{#if delegationDebugMode}
+												<!-- Admin debug: full flow chart with identities -->
+												<DelegationFlowChart {incomingList} {outgoing} />
+
+												<div class="delegation-status-row">
+													{#each incomingList as incoming (incoming.id)}
+														<span
+															class="delegation-status {getDelegationStatusClass(incoming.status)}"
+														>
+															{incoming.delegatorUsername}: {getDelegationStatusLabel(
+																incoming.status
+															)}
+														</span>
+													{/each}
+													{#if outgoing}
+														<span
+															class="delegation-status {getDelegationStatusClass(outgoing.status)}"
+														>
+															転送先: {getDelegationStatusLabel(outgoing.status)}
+														</span>
+													{/if}
+												</div>
+											{:else}
+												<!-- Normal mode: anonymous flow chart for upstream -->
+												{@const countBucket = incomingCountBuckets[group.billId] || '?'}
+												{@const pendingCount = incomingList.filter(
+													(d) => d.status === 'pending'
+												).length}
+												{@const votedCount = incomingList.filter(
+													(d) => d.status === 'voted'
+												).length}
+												{@const rejectedCount = incomingList.filter(
+													(d) => d.status === 'rejected'
+												).length}
+												{@const redelegatedCount = incomingList.filter(
+													(d) => d.status === 'redelegated'
+												).length}
+												<DelegationFlowChart
+													{incomingList}
+													outgoing={outgoing ? { ...outgoing, chain: [] } : null}
+													anonymous={true}
+													anonymousCountBucket={countBucket}
+												/>
+
+												<div class="delegation-status-row">
+													{#if pendingCount > 0}
+														<span class="delegation-status status-pending">保留中</span>
+													{/if}
+													{#if votedCount > 0}
+														<span class="delegation-status status-accepted">投票済み</span>
+													{/if}
+													{#if rejectedCount > 0}
+														<span class="delegation-status status-rejected">拒否</span>
+													{/if}
+													{#if redelegatedCount > 0}
+														<span class="delegation-status status-redelegated">転送済み</span>
+													{/if}
+												</div>
+											{/if}
+
+											{#if incomingList.some((d) => d.status === 'voted' && d.myExistingScore !== null)}
+												{@const votedIncoming = incomingList.find(
+													(d) => d.status === 'voted' && d.myExistingScore !== null
+												)}
+												{#if votedIncoming}
+													<div class="delegation-vote-result">
+														投票結果: {getVoteScoreLabel(votedIncoming.myExistingScore)}
+													</div>
 												{/if}
+											{/if}
+										{/if}
+
+										<!-- Bill-level incoming actions (apply to ALL incoming for this bill) -->
+										<!-- Hide when user has an outgoing delegation (middleman - already forwarded) -->
+										{#if hasPendingIncoming && !outgoing}
+											{@const firstPending = incomingList.find((d) => d.status === 'pending')}
+											{#if firstPending}
+												<div class="delegation-actions">
+													{#if firstPending.myExistingScore !== null}
+														<button
+															class="btn-vote-for"
+															onclick={() => acceptDelegation(firstPending.id)}
+															disabled={isLoading}
+														>
+															<CircleCheck size={16} class="inline-icon" color="#22c55e" /> 既存の投票で承認（{getVoteScoreLabel(
+																firstPending.myExistingScore
+															)}）
+														</button>
+													{:else}
+														<button
+															class="btn-vote-for"
+															onclick={() => startProxyVoteInAnswerTab(firstPending)}
+															disabled={isLoading}
+														>
+															<Vote size={16} class="inline-icon" /> 代理投票する
+														</button>
+													{/if}
+													<button
+														class="btn-redelegate"
+														onclick={() => openRedelegateModal(firstPending)}
+														disabled={isLoading}
+													>
+														<RefreshCw size={16} class="inline-icon" /> 別のフレンドに転送
+													</button>
+													<button
+														class="btn-reject-delegation"
+														onclick={() => rejectDelegation(firstPending.id)}
+														disabled={isLoading}
+													>
+														拒否する
+													</button>
+												</div>
+											{/if}
+										{/if}
+										{#if hasIncoming && incomingList.every((d) => d.status === 'voted')}
+											<div class="delegation-actions">
 												<button
-													class="btn-redelegate"
-													onclick={() => openRedelegateModal(firstPending)}
+													class="btn-undo"
+													onclick={() => undoVoteDelegation(incomingList[0].id)}
 													disabled={isLoading}
 												>
-													<RefreshCw size={16} class="inline-icon" /> 別のフレンドに転送
-												</button>
-												<button
-													class="btn-reject-delegation"
-													onclick={() => rejectDelegation(firstPending.id)}
-													disabled={isLoading}
-												>
-													拒否する
+													<Undo2 size={16} class="inline-icon" /> 投票を取り消す
 												</button>
 											</div>
 										{/if}
-									{/if}
-									{#if hasIncoming && incomingList.every((d) => d.status === 'voted')}
-										<div class="delegation-actions">
-											<button
-												class="btn-undo"
-												onclick={() => undoVoteDelegation(incomingList[0].id)}
-												disabled={isLoading}
-											>
-												<Undo2 size={16} class="inline-icon" /> 投票を取り消す
-											</button>
-										</div>
-									{/if}
-									{#if hasIncoming && incomingList.every((d) => d.status === 'rejected')}
-										<div class="delegation-actions">
-											<button
-												class="btn-undo"
-												onclick={() => undoRejectDelegation(incomingList[0].id)}
-												disabled={isLoading}
-											>
-												<Undo2 size={16} class="inline-icon" /> 拒否を取り消す
-											</button>
-										</div>
-									{/if}
+										{#if hasIncoming && incomingList.every((d) => d.status === 'rejected')}
+											<div class="delegation-actions">
+												<button
+													class="btn-undo"
+													onclick={() => undoRejectDelegation(incomingList[0].id)}
+													disabled={isLoading}
+												>
+													<Undo2 size={16} class="inline-icon" /> 拒否を取り消す
+												</button>
+											</div>
+										{/if}
 
-									<!-- Outgoing actions (retract available for ALL statuses) -->
-									{#if outgoing}
-										<div class="delegation-actions">
-											<button
-												class="btn-retract"
-												onclick={() => retractDelegation(outgoing.id)}
-												disabled={isLoading}
-											>
-												<Undo2 size={16} class="inline-icon" />
-												{isMiddleman
-													? '転送を取り消す'
-													: outgoing.status === 'voted'
-														? '委任を取り消す'
-														: outgoing.status === 'rejected'
-															? '拒否された委任を削除する'
-															: '取り消して自分で投票する'}
-											</button>
-										</div>
-									{/if}
-								</div>
-							{/each}
-						</div>
-					{/if}
-				</div>
+										<!-- Outgoing actions (retract available for ALL statuses) -->
+										{#if outgoing}
+											<div class="delegation-actions">
+												<button
+													class="btn-retract"
+													onclick={() => retractDelegation(outgoing.id)}
+													disabled={isLoading}
+												>
+													<Undo2 size={16} class="inline-icon" />
+													{isMiddleman
+														? '転送を取り消す'
+														: outgoing.status === 'voted'
+															? '委任を取り消す'
+															: outgoing.status === 'rejected'
+																? '拒否された委任を削除する'
+																: '取り消して自分で投票する'}
+												</button>
+											</div>
+										{/if}
+									</div>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				{/if}
 			{/if}
-		{/if}
 		{/if}
 	</main>
 
@@ -1629,12 +1716,16 @@
 				</div>
 				<div class="vote-modal-body">
 					<p class="vote-modal-delegator">
-						<Avatar
-							username={votingDelegation.delegatorUsername}
-							avatarUrl={votingDelegation.delegatorAvatarUrl}
-							size="sm"
-						/>
-						<strong>{votingDelegation.delegatorUsername}</strong> さんの代わりに投票します
+						{#if delegationDebugMode && votingDelegation.delegatorUsername}
+							<Avatar
+								username={votingDelegation.delegatorUsername}
+								avatarUrl={votingDelegation.delegatorAvatarUrl}
+								size="sm"
+							/>
+							<strong>{votingDelegation.delegatorUsername}</strong> さんの代わりに投票します
+						{:else}
+							委任者の代わりに投票します
+						{/if}
 					</p>
 					<p class="vote-modal-bill">
 						法案: <strong>{votingDelegation.billTitle || `#${votingDelegation.billId}`}</strong>
@@ -1700,12 +1791,16 @@
 				</div>
 				<div class="vote-modal-body">
 					<p class="vote-modal-delegator">
-						<Avatar
-							username={redelegatingDelegation.delegatorUsername}
-							avatarUrl={redelegatingDelegation.delegatorAvatarUrl}
-							size="sm"
-						/>
-						<strong>{redelegatingDelegation.delegatorUsername}</strong> さんからの委任を別のフレンドに転送します
+						{#if delegationDebugMode && redelegatingDelegation.delegatorUsername}
+							<Avatar
+								username={redelegatingDelegation.delegatorUsername}
+								avatarUrl={redelegatingDelegation.delegatorAvatarUrl}
+								size="sm"
+							/>
+							<strong>{redelegatingDelegation.delegatorUsername}</strong> さんからの委任を別のフレンドに転送します
+						{:else}
+							受信した委任を別のフレンドに転送します
+						{/if}
 					</p>
 					<p class="vote-modal-bill">
 						法案: <strong
@@ -2651,6 +2746,59 @@
 	}
 
 	/* Delegations */
+	.admin-debug-toggle {
+		padding: 0.5rem 0.75rem;
+		background: #fef3c7;
+		border: 1px solid #f59e0b;
+		border-radius: 8px;
+		margin-bottom: 0.5rem;
+	}
+
+	.debug-toggle-label {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		cursor: pointer;
+		font-size: 0.85rem;
+		color: #92400e;
+		font-weight: 500;
+	}
+
+	.debug-toggle-text {
+		user-select: none;
+	}
+
+	.delegation-anonymous-info {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0.6rem 0.8rem;
+		background: #f0f4ff;
+		border-radius: 8px;
+		font-size: 0.85rem;
+		color: #4338ca;
+		margin: 0.4rem 0;
+	}
+
+	.anonymous-count {
+		font-weight: 600;
+		background: #e0e7ff;
+		padding: 0.1rem 0.4rem;
+		border-radius: 4px;
+	}
+
+	.delegation-outgoing-info {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0.6rem 0.8rem;
+		background: #f0fdf4;
+		border-radius: 8px;
+		font-size: 0.85rem;
+		color: #166534;
+		margin: 0.4rem 0;
+	}
+
 	.delegations-container {
 		display: flex;
 		flex-direction: column;

@@ -84,10 +84,10 @@ export async function notifyDelegationReceived(
 	await createNotification({
 		userId: delegateId,
 		type: 'delegation_received',
-		actorId: delegatorId,
+		actorId: undefined, // anonymous: don't reveal who delegated
 		resourceId: delegationId,
 		billId,
-		message: `${delegatorUsername} さんが${billLabel}の投票を委任しました`
+		message: `${billLabel}の投票があなたに委任されました`
 	});
 }
 
@@ -162,10 +162,9 @@ export async function notifyDelegationRetracted(
 	await createNotification({
 		userId: delegateId,
 		type: 'delegation_retracted',
-		actorId: delegatorId,
 		resourceId: delegationId,
 		billId,
-		message: `${delegatorUsername} さんが${billLabel}の委任を取り消しました`
+		message: `${billLabel}の委任が取り消されました`
 	});
 }
 
@@ -202,10 +201,9 @@ export async function notifyDelegationOverridden(
 	await createNotification({
 		userId: delegateId,
 		type: 'delegation_overridden',
-		actorId: delegatorId,
 		resourceId: delegationId,
 		billId,
-		message: `${delegatorUsername} さんが${billLabel}に直接投票し、委任を取り消しました`
+		message: `${billLabel}の委任者が直接投票し、委任が取り消されました`
 	});
 }
 

@@ -12,6 +12,7 @@
 			label: string;
 			status?: string;
 			isMe?: boolean;
+			isAnonymous?: boolean;
 			votes?: number;
 			statusColor?: string;
 			avatarUrl?: string | null;
@@ -23,8 +24,12 @@
 
 <Handle type="target" position={targetPosition ?? Position.Left} />
 
-<div class="delegation-node" class:me={data.isMe}>
-	<Avatar username={data.label} avatarUrl={data.avatarUrl} size="xs" />
+<div class="delegation-node" class:me={data.isMe} class:anonymous={data.isAnonymous}>
+	{#if data.isAnonymous}
+		<span class="anonymous-icon">?</span>
+	{:else}
+		<Avatar username={data.label} avatarUrl={data.avatarUrl} size="xs" />
+	{/if}
 	<span class="status-icon" style:color={data.isMe ? 'white' : (data.statusColor ?? '#6b7280')}>
 		{#if !data.isMe}
 			{#if data.status === 'pending'}
@@ -68,6 +73,27 @@
 		color: white;
 		border-color: #4f46e5;
 		font-weight: 600;
+	}
+
+	.delegation-node.anonymous {
+		background: #f0f4ff;
+		border-color: #a5b4fc;
+		color: #4338ca;
+		font-weight: 600;
+	}
+
+	.anonymous-icon {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 24px;
+		height: 24px;
+		border-radius: 50%;
+		background: #c7d2fe;
+		color: #4338ca;
+		font-size: 0.75rem;
+		font-weight: 700;
+		flex-shrink: 0;
 	}
 
 	.status-icon {

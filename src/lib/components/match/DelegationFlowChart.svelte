@@ -26,10 +26,14 @@
 
 	let {
 		incomingList = [],
-		outgoing = null
+		outgoing = null,
+		anonymous = false,
+		anonymousCountBucket = ''
 	}: {
 		incomingList: IncomingDelegation[];
 		outgoing: OutgoingDelegation | null;
+		anonymous?: boolean;
+		anonymousCountBucket?: string;
 	} = $props();
 
 	const nodeTypes = { delegation: DelegationFlowNode };
@@ -89,6 +93,59 @@
 		}
 
 		const seenUpstream = new SvelteSet<string>();
+
+		// In anonymous mode, skip individual upstream nodes entirely
+		if (anonymous && incomingList.length > 0) {
+			// Simple layout: [anonymous node] -> [Me] -> [delegate]
+			const meCol = 1;
+			const meY = 0;
+
+			// "Me" node
+			const meId = getNodeId('me');
+			ns.push(makeNode(meId, meCol * X_GAP, meY, { label: 'あなた', isMe: true }));
+
+			// Single anonymous incoming node
+			const anonId = getNodeId('anonymous-incoming');
+			// Determine dominant status for the edge color
+			const hasPending = incomingList.some((d) => d.status === 'pending');
+			const hasVoted = incomingList.some((d) => d.status === 'voted');
+			const hasRejected = incomingList.some((d) => d.status === 'rejected');
+			const dominantStatus = hasPending
+				? 'pending'
+				: hasVoted
+					? 'voted'
+					: hasRejected
+						? 'rejected'
+						: 'redelegated';
+			ns.push(
+				makeNode(anonId, 0, meY, {
+					label: `${anonymousCountBucket}人`,
+					isAnonymous: true,
+					status: dominantStatus,
+					statusColor: getStatusColor(dominantStatus)
+				})
+			);
+			es.push(makeEdge(anonId, meId, dominantStatus));
+
+			// Forward chain (outgoing)
+			if (outgoing) {
+				const delegateId = getNodeId(`forward-${outgoing.delegateUsername}`);
+				ns.push(
+					makeNode(delegateId, (meCol + 1) * X_GAP, meY, {
+						label: outgoing.delegateUsername,
+						status: outgoing.status,
+						statusColor: getStatusColor(outgoing.status),
+						votes: outgoing.delegateVotes,
+						avatarUrl: outgoing.delegateAvatarUrl
+					})
+				);
+				es.push(makeEdge(meId, delegateId, outgoing.status));
+			}
+
+			return { nodes: ns, edges: es };
+		}
+
+		// Non-anonymous mode: full graph
 
 		// Find max upstream depth
 		let maxUpstreamDepth = 0;
