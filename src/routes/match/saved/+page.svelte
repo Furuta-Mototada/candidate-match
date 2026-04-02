@@ -40,7 +40,8 @@
 		ThumbsDown,
 		CircleQuestionMark,
 		Activity,
-		Save
+		Save,
+		Star
 	} from '@lucide/svelte';
 
 	type IncomingDelegation = {
@@ -1042,20 +1043,26 @@
 												<span class="weight-bill-count">({cl.billCount}件)</span>
 											</label>
 											<div class="weight-control">
-												<input
-													id="weight-{cl.label}"
-													type="range"
-													min="1"
-													max="5"
-													step="1"
-													bind:value={liveImportanceWeights[String(cl.label)]}
-													class="weight-slider"
-												/>
-												<span class="weight-value">
-													{'★'.repeat(liveImportanceWeights[String(cl.label)] || 3)}{'☆'.repeat(
-														5 - (liveImportanceWeights[String(cl.label)] || 3)
-													)}
-												</span>
+												<div class="weight-stars">
+													{#each [1, 2, 3, 4, 5] as star (star)}
+														<button
+															class="weight-star-btn"
+															class:selected={star <=
+																(liveImportanceWeights[String(cl.label)] || 3)}
+															onclick={() => (liveImportanceWeights[String(cl.label)] = star)}
+														>
+															<Star
+																size={20}
+																fill={star <= (liveImportanceWeights[String(cl.label)] || 3)
+																	? '#fbbf24'
+																	: 'none'}
+																color={star <= (liveImportanceWeights[String(cl.label)] || 3)
+																	? '#f59e0b'
+																	: '#d1d5db'}
+															/>
+														</button>
+													{/each}
+												</div>
 											</div>
 										</div>
 									{/each}
@@ -2152,18 +2159,24 @@
 		gap: 0.75rem;
 	}
 
-	.weight-slider {
-		flex: 1;
-		height: 6px;
-		accent-color: #6366f1;
-		cursor: pointer;
+	.weight-stars {
+		display: flex;
+		gap: 0.25rem;
 	}
 
-	.weight-value {
-		font-size: 0.85rem;
-		color: #f59e0b;
-		white-space: nowrap;
-		min-width: 5em;
+	.weight-star-btn {
+		background: none;
+		border: none;
+		cursor: pointer;
+		padding: 0.125rem;
+		border-radius: 4px;
+		display: flex;
+		align-items: center;
+		transition: transform 0.15s ease;
+	}
+
+	.weight-star-btn:hover {
+		transform: scale(1.2);
 	}
 
 	.btn-compute {

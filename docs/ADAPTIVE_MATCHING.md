@@ -56,7 +56,7 @@ Each bill $j$ is assigned a confidence weight $w_j$ based on its legislative out
 | 撤回 (withdrawn) | 0.3 |
 | 未了 (expired) | 0.2 |
 
-The weight matrix is $\mathbf{W} = \operatorname{diag}(w_1, w_2, \ldots, w_n) \in \mathbb{R}^{n \times n}$, and the weighted voting matrix is:
+The weight matrix is $\mathbf{W} = \text{diag}(w_1, w_2, \ldots, w_n) \in \mathbb{R}^{n \times n}$, and the weighted voting matrix is:
 
 $$
 \tilde{\mathbf{R}} = \mathbf{R} \mathbf{W}
@@ -76,7 +76,7 @@ $$
 \mathbf{C} \approx \mathbf{U}_d \, \boldsymbol{\Sigma}_d \, \mathbf{V}_d^T
 $$
 
-where $\mathbf{U}_d \in \mathbb{R}^{M \times d}$, $\boldsymbol{\Sigma}_d = \operatorname{diag}(\sigma_1, \ldots, \sigma_d)$, and $\mathbf{V}_d \in \mathbb{R}^{n \times d}$.
+where $\mathbf{U}_d \in \mathbb{R}^{M \times d}$, $\boldsymbol{\Sigma}_d = \text{diag}(\sigma_1, \ldots, \sigma_d)$, and $\mathbf{V}_d \in \mathbb{R}^{n \times d}$.
 
 #### 1.5 Member Latent Vectors and Bill Loadings
 
@@ -142,7 +142,7 @@ p_i^{(j)} = \mathbf{z}_i \cdot \mathbf{v}_j = \sum_{k=1}^{d} z_{ik} \, v_{jk}
 $$
 
 $$
-\operatorname{Var}(j) = \frac{1}{M} \sum_{i=1}^{M} \left( p_i^{(j)} - \bar{p}^{(j)} \right)^2, \qquad \bar{p}^{(j)} = \frac{1}{M}\sum_{i=1}^{M} p_i^{(j)}
+\text{Var}(j) = \frac{1}{M} \sum_{i=1}^{M} \left( p_i^{(j)} - \bar{p}^{(j)} \right)^2, \qquad \bar{p}^{(j)} = \frac{1}{M}\sum_{i=1}^{M} p_i^{(j)}
 $$
 
 #### 3.3 Combined Score and Selection
@@ -150,7 +150,7 @@ $$
 The bill selection criterion combines uncertainty reduction and controversy:
 
 $$
-\boxed{Q(j) = S_{\text{unc}}(j) \cdot \left(1 + \sqrt{\operatorname{Var}(j)}\right)}
+\boxed{Q(j) = S_{\text{unc}}(j) \cdot \left(1 + \sqrt{\text{Var}(j)}\right)}
 $$
 
 The algorithm selects $j^* = \arg\max_{j \notin \mathcal{A}} Q(j)$, where $\mathcal{A}$ is the set of already-answered bills.
@@ -198,11 +198,11 @@ As the user answers more questions, $F_{kk}$ grows and $u_k$ shrinks toward zero
 After each answer update, the cosine similarity between the user and each member $i$ is:
 
 $$
-\operatorname{sim}(\hat{\mathbf{z}}_{\text{user}},\, \mathbf{z}_i) = \frac{\hat{\mathbf{z}}_{\text{user}} \cdot \mathbf{z}_i}{\|\hat{\mathbf{z}}_{\text{user}}\| \; \|\mathbf{z}_i\|}
+\text{sim}(\hat{\mathbf{z}}_{\text{user}},\, \mathbf{z}_i) = \frac{\hat{\mathbf{z}}_{\text{user}} \cdot \mathbf{z}_i}{\|\hat{\mathbf{z}}_{\text{user}}\| \; \|\mathbf{z}_i\|}
 = \frac{\displaystyle\sum_{k=1}^{d} \hat{z}_{\text{user},k} \, z_{ik}}{\sqrt{\displaystyle\sum_{k=1}^{d} \hat{z}_{\text{user},k}^2} \;\; \sqrt{\displaystyle\sum_{k=1}^{d} z_{ik}^2}}
 $$
 
-Results are sorted by $\operatorname{sim} \in [-1, +1]$, where $+1$ indicates identical orientation in latent space and $-1$ indicates diametrically opposed positions.
+Results are sorted by $\text{sim} \in [-1, +1]$, where $+1$ indicates identical orientation in latent space and $-1$ indicates diametrically opposed positions.
 
 ## Persistence & Snapshots
 
@@ -245,7 +245,7 @@ After matching, party-level similarity scores are calculated via `calculateParty
 For party $P$, let $\mathcal{M}_P^{(c)}$ be the set of members currently affiliated with $P$ who appear in cluster $c$. The per-cluster party score is the arithmetic mean of member similarities:
 
 $$
-\bar{s}_P^{(c)} = \frac{1}{|\mathcal{M}_P^{(c)}|} \sum_{i \in \mathcal{M}_P^{(c)}} \operatorname{sim}_c(i)
+\bar{s}_P^{(c)} = \frac{1}{|\mathcal{M}_P^{(c)}|} \sum_{i \in \mathcal{M}_P^{(c)}} \text{sim}_c(i)
 $$
 
 The global party score aggregates across clusters weighted by importance:
@@ -267,7 +267,7 @@ where $\text{tenure}(i, P) = [\text{start}_P, \text{end}_P]$ is member $i$'s mem
 The overlap-weighted cluster score is:
 
 $$
-\bar{s}_P^{(c)} = \frac{\sum_{i \in \mathcal{M}_P^{(c)}} \alpha_{iP}^{(c)} \cdot \operatorname{sim}_c(i)}{\sum_{i \in \mathcal{M}_P^{(c)}} \alpha_{iP}^{(c)}}
+\bar{s}_P^{(c)} = \frac{\sum_{i \in \mathcal{M}_P^{(c)}} \alpha_{iP}^{(c)} \cdot \text{sim}_c(i)}{\sum_{i \in \mathcal{M}_P^{(c)}} \alpha_{iP}^{(c)}}
 $$
 
 And the global historical party score follows the same importance-weighted aggregation:
@@ -600,9 +600,9 @@ The matching interface supports six phases (defined as `MatchingPhase` type):
 
 6. **Global Results Phase** (`'global-results'`)
    - Aggregated scores across all clusters using importance weights
-   - For $C$ clusters with user-assigned importance weights $\omega_c$ and per-cluster cosine similarities $\operatorname{sim}_c(i)$, the global score for member $i$ is:
+   - For $C$ clusters with user-assigned importance weights $\omega_c$ and per-cluster cosine similarities $\text{sim}_c(i)$, the global score for member $i$ is:
      $$
-     G(i) = \sum_{c=1}^{C} \frac{\omega_c}{\sum_{c'} \omega_{c'}} \cdot \operatorname{sim}_c(i)
+     G(i) = \sum_{c=1}^{C} \frac{\omega_c}{\sum_{c'} \omega_{c'}} \cdot \text{sim}_c(i)
      $$
    - Party-level scores (current roster and historical)
    - Option to save a snapshot
