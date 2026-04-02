@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { PageHero, LoadingSpinner } from '$lib/components/index.js';
+	import { PageHero } from '$lib/components/index.js';
 	import { FlaskConical, Play, BookOpen, Target, Lightbulb, BarChart3 } from '@lucide/svelte';
 	import type { PageData } from './$types.js';
 
@@ -85,11 +85,6 @@
 			label: '最大分散',
 			color: '#f59e0b',
 			description: '議員間の投票分散が最大の法案を選択'
-		},
-		'round-robin': {
-			label: 'ラウンドロビン',
-			color: '#10b981',
-			description: '潜在次元を順に巡回し、各次元の負荷量が最大の法案を選択'
 		}
 	};
 
@@ -179,8 +174,8 @@
 
 	// SVG chart dimensions
 	const chartWidth = 700;
-	const chartHeight = 350;
-	const padding = { top: 20, right: 30, bottom: 40, left: 60 };
+	const chartHeight = 370;
+	const padding = { top: 20, right: 30, bottom: 60, left: 60 };
 	const plotWidth = chartWidth - padding.left - padding.right;
 	const plotHeight = chartHeight - padding.top - padding.bottom;
 
@@ -294,7 +289,7 @@
 
 				<div class="explanation-details">
 					<div class="detail-card">
-						<h4><FlaskConical size={16} class="inline-icon" /> 4つの戦略</h4>
+						<h4><FlaskConical size={16} class="inline-icon" /> 3つの戦略</h4>
 						<div class="strategy-list">
 							{#each Object.entries(strategyConfig) as [stratKey, config] (stratKey)}
 								<div class="strategy-item">
@@ -341,56 +336,66 @@
 
 	<!-- Configuration -->
 	<section class="config-section">
-		<div class="config-card">
+		<div class="section-header">
 			<h2>評価設定</h2>
-			<div class="config-grid">
-				<div class="config-field">
-					<label for="vector-select">ベクトルデータ</label>
-					<select id="vector-select" bind:value={selectedVectorId}>
-						<option value={null}>保存済みベクトルを選択...</option>
-						{#each savedVectors as vec (vec.id)}
-							<option value={vec.id}>
-								{vec.name} — ラベル {vec.clusterLabel}（{vec.memberCount}人, {vec.billCount}法案, {vec.dimensions}次元）
-								{vec.isDefault ? ' ★' : ''}
-							</option>
-						{/each}
-					</select>
-				</div>
-				<div class="config-field">
-					<label for="max-q">最大質問数</label>
-					<input id="max-q" type="number" bind:value={maxQuestions} min={5} max={50} />
-				</div>
-				<div class="config-field">
-					<label for="sample-size">サンプル議員数</label>
-					<input id="sample-size" type="number" bind:value={sampleSize} min={3} max={50} />
-				</div>
-				<div class="config-field">
-					<label for="threshold">収束閾値</label>
-					<input
-						id="threshold"
-						type="number"
-						bind:value={convergeThreshold}
-						min={0.05}
-						max={1}
-						step={0.05}
-					/>
-				</div>
-			</div>
-
-			<button class="run-btn" onclick={runEvaluation} disabled={isRunning || !selectedVectorId}>
-				{#if isRunning}
-					<LoadingSpinner />
-					評価を実行中...
-				{:else}
-					<Play size={18} class="inline-icon" />
-					評価を実行
-				{/if}
-			</button>
-
-			{#if error}
-				<p class="error-msg">{error}</p>
-			{/if}
 		</div>
+
+		<div class="form-group">
+			<label for="vector-select">ベクトルデータ</label>
+			<select id="vector-select" class="select" bind:value={selectedVectorId}>
+				<option value={null}>保存済みベクトルを選択...</option>
+				{#each savedVectors as vec (vec.id)}
+					<option value={vec.id}>
+						{vec.name} — ラベル {vec.clusterLabel}（{vec.memberCount}人, {vec.billCount}法案, {vec.dimensions}次元）
+						{vec.isDefault ? ' ★' : ''}
+					</option>
+				{/each}
+			</select>
+		</div>
+
+		<div class="form-row">
+			<div class="form-group">
+				<label for="max-q">最大質問数</label>
+				<input id="max-q" class="input" type="number" bind:value={maxQuestions} min={5} max={50} />
+			</div>
+			<div class="form-group">
+				<label for="sample-size">サンプル議員数</label>
+				<input
+					id="sample-size"
+					class="input"
+					type="number"
+					bind:value={sampleSize}
+					min={3}
+					max={50}
+				/>
+			</div>
+			<div class="form-group">
+				<label for="threshold">収束閾値</label>
+				<input
+					id="threshold"
+					class="input"
+					type="number"
+					bind:value={convergeThreshold}
+					min={0.05}
+					max={1}
+					step={0.05}
+				/>
+			</div>
+		</div>
+
+		<button class="btn-primary" onclick={runEvaluation} disabled={isRunning || !selectedVectorId}>
+			{#if isRunning}
+				<span class="btn-spinner"></span>
+				評価を実行中...
+			{:else}
+				<Play size={18} class="inline-icon" />
+				評価を実行
+			{/if}
+		</button>
+
+		{#if error}
+			<p class="error-msg">{error}</p>
+		{/if}
 	</section>
 
 	<!-- Results -->
@@ -498,7 +503,7 @@
 							{@const q = Math.ceil(((i + 1) / 10) * maxQuestions)}
 							<text
 								x={xScale(q, maxQuestions)}
-								y={chartHeight - 8}
+								y={padding.top + plotHeight + 20}
 								text-anchor="middle"
 								font-size="11"
 								fill="#6b7280"
@@ -510,7 +515,7 @@
 						<!-- Axis labels -->
 						<text
 							x={padding.left + plotWidth / 2}
-							y={chartHeight - 0}
+							y={padding.top + plotHeight + 45}
 							text-anchor="middle"
 							font-size="12"
 							fill="#374151"
@@ -981,73 +986,100 @@
 		padding: 2rem;
 	}
 
-	.config-card {
-		background: white;
-		border: 1px solid #e5e7eb;
-		border-radius: 12px;
-		padding: 1.5rem 2rem;
+	.section-header {
+		margin-bottom: 1.5rem;
 	}
 
-	.config-card h2 {
-		font-size: 1.2rem;
+	.section-header h2 {
+		font-size: 1.25rem;
 		font-weight: 700;
-		color: #1f2937;
-		margin: 0 0 1rem;
+		color: #1a1a2e;
+		margin: 0;
 	}
 
-	.config-grid {
-		display: grid;
-		grid-template-columns: 2fr 1fr 1fr 1fr;
-		gap: 1rem;
+	.form-group {
 		margin-bottom: 1.25rem;
 	}
 
+	.form-group label {
+		display: block;
+		margin-bottom: 0.5rem;
+		font-weight: 600;
+		color: #374151;
+		font-size: 0.9rem;
+	}
+
+	.input,
+	.select {
+		width: 100%;
+		padding: 0.7rem 1rem;
+		border: 1px solid #e5e7eb;
+		border-radius: 8px;
+		font-size: 0.95rem;
+		transition: border-color 0.2s;
+		background: white;
+	}
+
+	.input:focus,
+	.select:focus {
+		outline: none;
+		border-color: #6366f1;
+		box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+	}
+
+	.form-row {
+		display: grid;
+		grid-template-columns: repeat(3, 1fr);
+		gap: 1rem;
+	}
+
 	@media (max-width: 768px) {
-		.config-grid {
+		.form-row {
 			grid-template-columns: 1fr;
 		}
 	}
 
-	.config-field label {
-		display: block;
-		font-size: 0.85rem;
-		font-weight: 600;
-		color: #374151;
-		margin-bottom: 0.35rem;
-	}
-
-	.config-field select,
-	.config-field input {
-		width: 100%;
-		padding: 0.5rem 0.75rem;
-		border: 1px solid #d1d5db;
-		border-radius: 8px;
-		font-size: 0.9rem;
-		background: white;
-	}
-
-	.run-btn {
+	.btn-primary {
 		display: inline-flex;
 		align-items: center;
 		gap: 0.5rem;
-		padding: 0.65rem 1.5rem;
-		background: #4f46e5;
+		background: #6366f1;
 		color: white;
+		padding: 0.7rem 1.5rem;
 		border: none;
 		border-radius: 8px;
 		font-size: 0.95rem;
 		font-weight: 600;
 		cursor: pointer;
-		transition: background 0.2s;
+		transition:
+			background 0.2s,
+			transform 0.2s;
 	}
 
-	.run-btn:hover:not(:disabled) {
-		background: #4338ca;
+	.btn-primary:hover:not(:disabled) {
+		background: #4f46e5;
+		transform: translateY(-1px);
 	}
 
-	.run-btn:disabled {
-		opacity: 0.5;
+	.btn-primary:disabled {
+		opacity: 0.6;
 		cursor: not-allowed;
+	}
+
+	.btn-spinner {
+		display: inline-block;
+		width: 16px;
+		height: 16px;
+		border: 2px solid rgba(255, 255, 255, 0.3);
+		border-top-color: white;
+		border-radius: 50%;
+		animation: spin 0.6s linear infinite;
+	}
+
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
 	}
 
 	.error-msg {

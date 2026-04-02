@@ -8,7 +8,6 @@
  * 1. CAT (current) — uncertainty × controversy scoring
  * 2. Random — uniformly random unanswered bill
  * 3. Most-controversial — highest member vote variance
- * 4. Round-robin — cycle through dimensions, pick strongest loading
  */
 
 import {
@@ -29,7 +28,7 @@ import {
 // Types
 // ============================================================================
 
-export type StrategyName = 'cat' | 'random' | 'controversial' | 'round-robin';
+export type StrategyName = 'cat' | 'random' | 'controversial';
 
 export interface EvaluationStep {
 	questionNumber: number;
@@ -141,34 +140,6 @@ function selectControversialQuestion(
 }
 
 /**
- * Strategy: Round-robin — cycle through dimensions, pick bill with highest loading on target dim
- */
-function selectRoundRobinQuestion(
-	state: MatchingState,
-	clusterData: ClusterVectorData
-): { billId: number; billIndex: number } | null {
-	const answeredBillIds = new Set(state.answeredBills.map((a) => a.billId));
-	const targetDim = state.questionCount % state.dimensions;
-
-	let best: { billId: number; billIndex: number; loading: number } | null = null;
-
-	for (let idx = 0; idx < clusterData.billIds.length; idx++) {
-		const billId = clusterData.billIds[idx];
-		if (answeredBillIds.has(billId)) continue;
-
-		const loading = clusterData.billLoadings[idx];
-		if (!loading) continue;
-
-		const absLoading = Math.abs(loading[targetDim]);
-		if (!best || absLoading > best.loading) {
-			best = { billId, billIndex: idx, loading: absLoading };
-		}
-	}
-
-	return best ? { billId: best.billId, billIndex: best.billIndex } : null;
-}
-
-/**
  * Select next bill for a given strategy
  */
 function selectNextBillForStrategy(
@@ -188,10 +159,6 @@ function selectNextBillForStrategy(
 		}
 		case 'controversial': {
 			const q = selectControversialQuestion(state, clusterData);
-			return q ? q.billId : null;
-		}
-		case 'round-robin': {
-			const q = selectRoundRobinQuestion(state, clusterData);
 			return q ? q.billId : null;
 		}
 	}
@@ -214,22 +181,33 @@ function simulateMemberAnswers(
 	const memberVector = clusterData.memberVectors[String(memberId)];
 	if (!memberVector) return new Map();
 
-	const answers = new Map<number, number>();
+	// First pass: compute all projections to determine an adaptive threshold
+	const projections: { billId: number; projected: number }[] = [];
 	for (let idx = 0; idx < clusterData.billIds.length; idx++) {
 		const billId = clusterData.billIds[idx];
 		const loading = clusterData.billLoadings[idx];
 		if (!loading) continue;
 
-		// Project member vector onto bill loading direction
 		let projected = 0;
 		for (let d = 0; d < memberVector.length; d++) {
 			projected += memberVector[d] * loading[d];
 		}
+		projections.push({ billId, projected });
+	}
 
-		// Quantize to -1/0/+1 with thresholds
+	// Use the 25th percentile of absolute projections as threshold.
+	// This ensures ~75% of answers are non-zero, giving the estimator
+	// enough signal to resolve the member's position.
+	const absProjections = projections.map((p) => Math.abs(p.projected)).sort((a, b) => a - b);
+	const p25Index = Math.floor(absProjections.length * 0.25);
+	const threshold = absProjections[p25Index] ?? 0;
+
+	// Second pass: quantize to -1/0/+1 using the adaptive threshold
+	const answers = new Map<number, number>();
+	for (const { billId, projected } of projections) {
 		let answer: number;
-		if (projected > 0.3) answer = 1;
-		else if (projected < -0.3) answer = -1;
+		if (projected > threshold) answer = 1;
+		else if (projected < -threshold) answer = -1;
 		else answer = 0;
 
 		answers.set(billId, answer);
@@ -436,12 +414,7 @@ export async function runEvaluation(
 	const maxQuestions = Math.min(options.maxQuestions ?? 20, clusterData.billCount);
 	const sampleSize = options.sampleSize ?? 10;
 	const convergeThreshold = options.convergeThreshold ?? 0.2;
-	const strategies: StrategyName[] = options.strategies ?? [
-		'cat',
-		'random',
-		'controversial',
-		'round-robin'
-	];
+	const strategies: StrategyName[] = options.strategies ?? ['cat', 'random', 'controversial'];
 
 	// Load bill info for CAT strategy (needs BillInfo objects)
 	const dbBillInfo = await loadBillInfo(clusterData.billIds);

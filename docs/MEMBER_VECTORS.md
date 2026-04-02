@@ -16,12 +16,6 @@ The Member Vectors system generates vector representations of each parliamentary
 - **Default Vector Configuration**: Mark a vector group as the default for the `/match` endpoint
 - **Admin-only Calculation**: Only admin users can run vector analysis
 
-## Access
-
-Page URL: `/member-vectors` (http://localhost:5173/member-vectors)
-
----
-
 ## Cluster-based Latent Vector Analysis
 
 ### Algorithm Overview
@@ -140,7 +134,6 @@ An interactive canvas plots members in 2D latent space:
   - **Similar Members Search**: Top 20 by cosine similarity
   - **Comparison**: Side-by-side table vs. another member with similarity score
 
----
 
 ## Saving Vector Results
 
@@ -191,7 +184,6 @@ This skips the 10-30 second calculation time.
 
 When a matching result is saved as a snapshot, the `result_snapshot` table stores a `vector_group_key` column (format: `"vectorName|clusterId"`). This allows the system to reconstruct full visualization data (user vectors, member vectors, explained variance) when reviewing saved results later.
 
----
 
 ## API Reference
 
@@ -357,7 +349,6 @@ The match API includes vector configuration actions:
 }
 ```
 
----
 
 ## Command Line Usage
 
@@ -384,9 +375,8 @@ python scripts/calculate_cluster_vectors.py --cluster-id 1 --legislation-scores 
 | `--output` | No | stdout | Output JSON file path |
 | `--legislation-scores` | No | `static/data/legislation_scores.json` | Path to legislation scores JSON |
 
----
 
-## File Structure
+## Files
 
 | File | Description |
 |------|-------------|
@@ -398,7 +388,6 @@ python scripts/calculate_cluster_vectors.py --cluster-id 1 --legislation-scores 
 | `/src/lib/server/party-matching.ts` | Party matching integration (uses `vectorGroupKey`) |
 | `/docs/MEMBER_VECTORS.md` | This documentation |
 
----
 
 ## Technical Specifications
 
@@ -421,7 +410,6 @@ $$
 
 Results range from 0 (unrelated) to 1 (identical).
 
----
 
 ## Performance
 
@@ -431,19 +419,4 @@ Results range from 0 (unrelated) to 1 (identical).
 | Max Dimensions | 5 (configurable) |
 | Similarity Search | Instant (client-side) |
 
----
 
-## Related Documentation
-
-- [Bill Clustering](/docs/BILL_CLUSTERING.md)
-- [Legislation Scores](/docs/LEGISLATION_SCORES.md)
-- [Party Matching](/docs/PARTY_MATCHING.md)
-- [Adaptive Matching](/docs/ADAPTIVE_MATCHING.md)
-
----
-
-## Future Enhancements
-
-- 3D visualization (t-SNE/UMAP)
-- Time-series analysis (changes across sessions)
-- Data export functionality

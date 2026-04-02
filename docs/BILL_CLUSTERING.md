@@ -14,40 +14,6 @@ This system analyzes bills submitted to the National Diet using the following ap
 6. **Cluster Vector Calculation**: Calculate member latent vectors per cluster using weighted PCA/SVD on voting matrices
 7. **Visualization**: Explore clusters through an interactive Web UI with enrichment data, debate records, and vote results
 
-## Setup
-
-### 1. Install Python Packages
-
-```bash
-pip install -r requirements.txt
-```
-
-Required packages:
-- `sentence-transformers`: Multilingual sentence embedding models
-- `PyPDF2`: PDF parsing
-- `scikit-learn`: Clustering algorithms and PCA
-- `numpy`: Numerical operations
-- `hdbscan`: Density-based clustering (optional)
-- `psycopg2-binary`: PostgreSQL client
-- `requests`: HTTP requests for downloading PDFs
-- `beautifulsoup4`: HTML parsing for scraping PDF URLs
-- `python-dotenv`: Environment variable management
-- `openai`: For LLM-based cluster naming
-
-### 2. Update Database Schema
-
-```bash
-pnpm db:generate
-pnpm db:push
-```
-
-This creates the following tables:
-- `bill_embeddings`: Bill embedding vectors, PDF URLs, and extracted text
-- `bill_clusters`: Clustering result metadata
-- `bill_cluster_assignments`: Each bill's cluster assignment with 2D visualization coordinates
-- `bill_cluster_label_names`: Human-readable names for cluster labels
-- `cluster_vector_results`: Pre-calculated member latent vectors for matching
-
 ## Usage
 
 ### Step 1: Generate Bill Embeddings
@@ -312,40 +278,7 @@ CREATE TABLE cluster_vector_results (
 );
 ```
 
-## Customization
-
-### Using a Different Embedding Model
-
-Edit `scripts/generate_bill_embeddings.py`:
-
-```python
-# Example: Japanese-specialized model
-generator = BillEmbeddingGenerator(
-    database_url,
-    model_name='sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'
-)
-```
-
-Available models: https://www.sbert.net/docs/pretrained_models.html
-
-### Adjusting PDF URL Pattern
-
-If the bill PDF URL structure changes, modify the `scrape_pdf_url()` method.
-
-### Optimizing Clustering Parameters
-
-- **K-Means**: Experiment with different `n_clusters` values (recommended: 5-15)
-- **HDBSCAN**: 
-  - `min_cluster_size`: Smaller = finer clusters, larger = bigger clusters (recommended: 5-20)
-  - `min_samples`: Smaller = less noise, larger = more noise (recommended: 1-5)
-
-### Customizing Cluster Names
-
-The LLM prompt in `name_clusters.py` can be modified to generate different styles of names:
-- Current style: Short names (≤8 characters) with descriptions
-- Can be adjusted for longer names, different languages, or specific terminology
-
-## Scripts Reference
+## Files
 
 | Script | npm Command | Description |
 |--------|-------------|-------------|
@@ -396,7 +329,7 @@ export DATABASE_URL="postgresql://user:password@localhost:5432/dbname"
 
 Or set in `.env` file.
 
-## API Endpoints
+## API Reference
 
 ### GET /api/bill-embeddings
 
@@ -611,15 +544,4 @@ Get enriched bill content (summaries, key points, impact tags, pros/cons, debate
 }
 ```
 
-## Future Improvements
-
-1. **t-SNE/UMAP Visualization**: Alternative dimensionality reduction methods for better cluster separation (t-SNE is available in `cluster_bills.py` but not yet exposed in the UI)
-2. **Time Series Analysis**: Track cluster distribution changes over time
-3. **Party Analysis**: Which parties submit bills in which clusters
-4. **Fine-tuning**: Optimize embedding model on Japanese bill data
-5. **Real-time Updates**: Automatically generate embeddings when new bills are added
-
-## License
-
-Follows the project's license.
 

@@ -20,32 +20,99 @@ Key features:
 
 ### 1. Latent Space Construction
 
-The system first constructs a latent political space using **Weighted SVD (Singular Value Decomposition)** on the member-bill voting matrix. This is performed by `calculate_cluster_vectors.py`:
+The system constructs a latent political space using **Weighted SVD (Singular Value Decomposition)** on the member-bill voting matrix. This is performed by `calculate_cluster_vectors.py`.
 
-1. Collect all voting records for bills in a cluster (from `legislation_scores.json`)
-2. Apply weights based on bill outcome:
-   - Passed bills (可決): 1.0 (highest confidence)
-   - In-progress bills (null result): 0.8 (moderate confidence)
-   - Expired bills (未了): 0.2 (low confidence)
-   - Rejected bills (否決): 0.6 (lower confidence)
-   - Withdrawn bills (撤回): 0.3 (lowest confidence)
-3. Impute missing values using column mean (average vote for that bill)
-4. Perform SVD to extract principal components
-5. Project each member into the latent space
+#### 1.1 Voting Matrix
+
+For a cluster $k$ containing $n$ bills and $M$ members, we construct the raw voting matrix $\mathbf{R} \in \mathbb{R}^{M \times n}$ from legislation scores. Each entry $r_{ij}$ is the normalized score of member $i$ on bill $j$:
+
+$$
+r_{ij} = \begin{cases}
+\dfrac{s_{ij}}{\max_i s_{ij}} & \text{if } s_{ij} > 0 \\[6pt]
+\dfrac{s_{ij}}{|\min_i s_{ij}|} & \text{if } s_{ij} < 0 \\[6pt]
+0 & \text{otherwise}
+\end{cases}
+$$
+
+where $s_{ij}$ is the raw legislation score for member $i$ on bill $j$, and the normalization uses per-bill extrema so that $r_{ij} \in [-1, 1]$.
+
+#### 1.2 Missing Value Imputation
+
+Missing entries (members who did not participate in a vote) are imputed with the column mean:
+
+$$
+r_{ij} \leftarrow \bar{r}_{\cdot j} = \frac{1}{|\{i : r_{ij} \neq \text{NaN}\}|} \sum_{i:\, r_{ij} \neq \text{NaN}} r_{ij}
+$$
+
+#### 1.3 Bill Outcome Weighting
+
+Each bill $j$ is assigned a confidence weight $w_j$ based on its legislative outcome:
+
+| Result | $w_j$ |
+|--------|-------|
+| 可決 (passed) | 1.0 |
+| null (in deliberation) | 0.8 |
+| 否決 (rejected) | 0.6 |
+| 撤回 (withdrawn) | 0.3 |
+| 未了 (expired) | 0.2 |
+
+The weight matrix is $\mathbf{W} = \operatorname{diag}(w_1, w_2, \ldots, w_n) \in \mathbb{R}^{n \times n}$, and the weighted voting matrix is:
+
+$$
+\tilde{\mathbf{R}} = \mathbf{R} \mathbf{W}
+$$
+
+#### 1.4 Centering and SVD
+
+The weighted matrix is row-centered:
+
+$$
+\mathbf{C} = \tilde{\mathbf{R}} - \bar{\tilde{\mathbf{r}}}_i \mathbf{1}^T, \qquad \bar{\tilde{r}}_i = \frac{1}{n}\sum_{j=1}^{n} \tilde{r}_{ij}
+$$
+
+We then compute the truncated SVD with $d$ components ($d \leq \min(M, n)$):
+
+$$
+\mathbf{C} \approx \mathbf{U}_d \, \boldsymbol{\Sigma}_d \, \mathbf{V}_d^T
+$$
+
+where $\mathbf{U}_d \in \mathbb{R}^{M \times d}$, $\boldsymbol{\Sigma}_d = \operatorname{diag}(\sigma_1, \ldots, \sigma_d)$, and $\mathbf{V}_d \in \mathbb{R}^{n \times d}$.
+
+#### 1.5 Member Latent Vectors and Bill Loadings
+
+Each member $i$'s position in the $d$-dimensional latent space is:
+
+$$
+\mathbf{z}_i = (\mathbf{U}_d \boldsymbol{\Sigma}_d)_{i,:} \in \mathbb{R}^d
+$$
+
+The bill loading matrix is $\mathbf{V}_d \in \mathbb{R}^{n \times d}$, where row $\mathbf{v}_j$ gives bill $j$'s projection onto each latent dimension.
+
+The explained variance ratio for component $k$ is:
+
+$$
+\text{EVR}_k = \frac{\sigma_k^2}{\sum_{l=1}^{\min(M,n)} \sigma_l^2}
+$$
 
 ### 2. User State Initialization
 
-When a user starts a matching session:
+When a user starts a matching session, the state vector is initialized at the origin of the latent space with maximum uncertainty:
+
+$$
+\mathbf{z}_{\text{user}}^{(0)} = \mathbf{0} \in \mathbb{R}^d, \qquad \mathbf{u}^{(0)} = \mathbf{1} \in \mathbb{R}^d
+$$
+
+where $\mathbf{u}^{(t)}$ is the per-dimension uncertainty vector at step $t$.
 
 ```typescript
 MatchingState = {
   clusterId: number,                        // Cluster being analyzed
   clusterLabel: number,                     // Specific label within cluster  
-  dimensions: number,                       // Number of latent dimensions (1-5)
+  dimensions: number,                       // d (1-5)
   answeredBills: UserAnswer[],              // List of {billId, score} pairs
-  userVector: number[],                     // Position in latent space (starts at origin)
-  uncertainty: number[],                    // Uncertainty per dimension (starts at 1.0)
-  questionCount: number,                    // Number of questions answered
+  userVector: number[],                     // z_user
+  uncertainty: number[],                    // u
+  questionCount: number,                    // t
   pendingDelegationBillIds?: Set<number>    // Bills with pending delegations (excluded from vector estimation)
 }
 ```
@@ -54,47 +121,88 @@ If the user is logged in, existing answers from `user_bill_answer` and resolved 
 
 ### 3. Question Selection (Adaptive Algorithm)
 
-The next question is selected to maximize **information gain**. The algorithm (in `matching.ts`):
+At step $t$, the algorithm selects the next bill to maximize expected **information gain**. For each unanswered bill $j$:
 
-1. Find dimensions with highest uncertainty
-2. For each unanswered bill:
-   - Calculate how much its loading aligns with uncertain dimensions (`uncertaintyScore`)
-   - Calculate variance in member votes (higher variance = more controversial)
-   - Combine scores: `uncertaintyScore × (1 + sqrt(variance))`
-3. Select the bill with the highest combined score
+#### 3.1 Uncertainty Score
 
-```typescript
-// Combined score calculation
-const combinedScore = uncertaintyScore * (1 + Math.sqrt(variance));
-```
+The uncertainty score measures how much bill $j$'s loading aligns with uncertain dimensions:
+
+$$
+S_{\text{unc}}(j) = \sum_{k=1}^{d} |v_{jk}| \cdot u_k^{(t)}
+$$
+
+where $v_{jk}$ is the $k$-th component of bill $j$'s loading and $u_k^{(t)}$ is the current uncertainty on dimension $k$.
+
+#### 3.2 Member Variance
+
+The controversy of bill $j$ is measured by projecting all member vectors onto the bill loading direction and computing the variance:
+
+$$
+p_i^{(j)} = \mathbf{z}_i \cdot \mathbf{v}_j = \sum_{k=1}^{d} z_{ik} \, v_{jk}
+$$
+
+$$
+\operatorname{Var}(j) = \frac{1}{M} \sum_{i=1}^{M} \left( p_i^{(j)} - \bar{p}^{(j)} \right)^2, \qquad \bar{p}^{(j)} = \frac{1}{M}\sum_{i=1}^{M} p_i^{(j)}
+$$
+
+#### 3.3 Combined Score and Selection
+
+The bill selection criterion combines uncertainty reduction and controversy:
+
+$$
+\boxed{Q(j) = S_{\text{unc}}(j) \cdot \left(1 + \sqrt{\operatorname{Var}(j)}\right)}
+$$
+
+The algorithm selects $j^* = \arg\max_{j \notin \mathcal{A}} Q(j)$, where $\mathcal{A}$ is the set of already-answered bills.
 
 ### 4. User State Update
 
-When the user answers a question (score: -1, 0, or 1):
+When the user answers bill $j$ with score $a_j \in \{-1, 0, +1\}$:
 
-1. Record the answer:
-   ```typescript
-   state.answeredBills.push({ billId, score });
-   ```
+#### 4.1 Ridge Regression Estimate
 
-2. Update user vector using weighted least squares estimation:
-   - Build design matrix V from bill loadings
-   - Solve: `z_user = (V^T V + λI)^-1 V^T scores` (with regularization λ=0.01)
-   - Use Gaussian elimination for the linear system
+Let $\mathcal{A} = \{(j_1, a_{j_1}), \ldots, (j_t, a_{j_t})\}$ be the set of $t$ answered bills. Construct the design matrix $\mathbf{V}_{\mathcal{A}} \in \mathbb{R}^{t \times d}$ where row $l$ is the loading vector $\mathbf{v}_{j_l}$, and the response vector $\mathbf{a} = (a_{j_1}, \ldots, a_{j_t})^T$.
 
-3. Update uncertainty:
-   - Uncertainty is inversely related to information: `uncertainty[i] = 1 / max(V^T V[i][i], 0.1)`
-   - Normalize to [0, 1] range
+The user vector is estimated by minimizing the regularized squared error:
+
+$$
+\hat{\mathbf{z}}_{\text{user}} = \arg\min_{\mathbf{z}} \left\| \mathbf{a} - \mathbf{V}_{\mathcal{A}} \mathbf{z} \right\|_2^2 + \lambda \|\mathbf{z}\|_2^2
+$$
+
+The closed-form solution is:
+
+$$
+\boxed{\hat{\mathbf{z}}_{\text{user}} = \left(\mathbf{V}_{\mathcal{A}}^T \mathbf{V}_{\mathcal{A}} + \lambda \mathbf{I}\right)^{-1} \mathbf{V}_{\mathcal{A}}^T \mathbf{a}}
+$$
+
+where $\lambda = 0.01$ is the regularization parameter (Tikhonov / ridge). The system is solved via Gaussian elimination with partial pivoting.
+
+#### 4.2 Uncertainty Update
+
+The Fisher information matrix for this linear model is $\mathbf{F} = \mathbf{V}_{\mathcal{A}}^T \mathbf{V}_{\mathcal{A}} + \lambda \mathbf{I}$. The per-dimension uncertainty is derived from its diagonal:
+
+$$
+\tilde{u}_k = \frac{1}{\max(F_{kk},\; 0.1)}
+$$
+
+Normalized to $[0, 1]$:
+
+$$
+u_k^{(t)} = \frac{\tilde{u}_k}{\max_{k'} \tilde{u}_{k'}}
+$$
+
+As the user answers more questions, $F_{kk}$ grows and $u_k$ shrinks toward zero. The session terminates when $\max_k u_k^{(t)} < \tau$ (default $\tau = 0.2$) or $t \geq T_{\max}$ (default $T_{\max} = 20$).
 
 ### 5. Member Matching
 
-After each answer, calculate cosine similarity between user and all members:
+After each answer update, the cosine similarity between the user and each member $i$ is:
 
-```typescript
-similarity(user, member) = dot(user, member) / (|user| × |member|)
-```
+$$
+\operatorname{sim}(\hat{\mathbf{z}}_{\text{user}},\, \mathbf{z}_i) = \frac{\hat{\mathbf{z}}_{\text{user}} \cdot \mathbf{z}_i}{\|\hat{\mathbf{z}}_{\text{user}}\| \; \|\mathbf{z}_i\|}
+= \frac{\displaystyle\sum_{k=1}^{d} \hat{z}_{\text{user},k} \, z_{ik}}{\sqrt{\displaystyle\sum_{k=1}^{d} \hat{z}_{\text{user},k}^2} \;\; \sqrt{\displaystyle\sum_{k=1}^{d} z_{ik}^2}}
+$$
 
-Results are sorted by similarity, with values ranging from -1 (opposite) to +1 (identical).
+Results are sorted by $\operatorname{sim} \in [-1, +1]$, where $+1$ indicates identical orientation in latent space and $-1$ indicates diametrically opposed positions.
 
 ## Persistence & Snapshots
 
@@ -130,10 +238,45 @@ When a snapshot has a `vectorGroupKey`, the system can reconstruct full visualiz
 
 ### Party Matching
 
-After matching, party-level similarity scores are calculated via `calculatePartyScores()` in `party-matching.ts`:
-- **Current roster mode**: Average similarity across currently affiliated members of each party
-- **Historical mode**: Weighted average based on temporal overlap of member tenure and bill dates
-- Returns `PartyScores { current: GlobalPartyScore[], historical: GlobalPartyScore[] }`
+After matching, party-level similarity scores are calculated via `calculatePartyScores()` in `party-matching.ts`.
+
+#### Current Roster Mode
+
+For party $P$, let $\mathcal{M}_P^{(c)}$ be the set of members currently affiliated with $P$ who appear in cluster $c$. The per-cluster party score is the arithmetic mean of member similarities:
+
+$$
+\bar{s}_P^{(c)} = \frac{1}{|\mathcal{M}_P^{(c)}|} \sum_{i \in \mathcal{M}_P^{(c)}} \operatorname{sim}_c(i)
+$$
+
+The global party score aggregates across clusters weighted by importance:
+
+$$
+G_P = \sum_{c=1}^{C} \frac{\omega_c}{\sum_{c'} \omega_{c'}} \cdot \bar{s}_P^{(c)}
+$$
+
+#### Historical Mode
+
+In historical mode, a member $i$'s contribution is weighted by the **temporal overlap** between their party tenure and the bills' active periods. For member $i$ in party $P$ during cluster $c$:
+
+$$
+\alpha_{iP}^{(c)} = \frac{|\{j \in \text{bills}(c) : \text{tenure}(i, P) \cap \text{period}(j) \neq \varnothing\}|}{|\text{bills}(c)|}
+$$
+
+where $\text{tenure}(i, P) = [\text{start}_P, \text{end}_P]$ is member $i$'s membership period in party $P$, and $\text{period}(j) = [\text{submitted}_j, \text{result}_j]$ is bill $j$'s active period.
+
+The overlap-weighted cluster score is:
+
+$$
+\bar{s}_P^{(c)} = \frac{\sum_{i \in \mathcal{M}_P^{(c)}} \alpha_{iP}^{(c)} \cdot \operatorname{sim}_c(i)}{\sum_{i \in \mathcal{M}_P^{(c)}} \alpha_{iP}^{(c)}}
+$$
+
+And the global historical party score follows the same importance-weighted aggregation:
+
+$$
+G_P^{\text{hist}} = \sum_{c=1}^{C} \frac{\omega_c}{\sum_{c'} \omega_{c'}} \cdot \bar{s}_P^{(c)}
+$$
+
+Returns `PartyScores { current: GlobalPartyScore[], historical: GlobalPartyScore[] }`.
 
 ## API Reference
 
@@ -457,11 +600,14 @@ The matching interface supports six phases (defined as `MatchingPhase` type):
 
 6. **Global Results Phase** (`'global-results'`)
    - Aggregated scores across all clusters using importance weights
-   - Formula: `globalScore = Σ (importance[i] / totalImportance) × similarity[i]`
+   - For $C$ clusters with user-assigned importance weights $\omega_c$ and per-cluster cosine similarities $\operatorname{sim}_c(i)$, the global score for member $i$ is:
+     $$
+     G(i) = \sum_{c=1}^{C} \frac{\omega_c}{\sum_{c'} \omega_{c'}} \cdot \operatorname{sim}_c(i)
+     $$
    - Party-level scores (current roster and historical)
    - Option to save a snapshot
 
-## Implementation Files
+## Architecture
 
 | File | Description |
 |------|-------------|

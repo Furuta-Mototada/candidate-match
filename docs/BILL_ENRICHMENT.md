@@ -84,6 +84,12 @@ pnpm scrape:debates --limit 5 --verbose
 
 # Dry run (no database writes)
 pnpm scrape:debates --dry-run
+
+# Resume from last processed bill
+pnpm scrape:debates --resume
+
+# Parallel browser pages (default: 3)
+pnpm scrape:debates --concurrency 5
 ```
 
 ### Output
@@ -93,7 +99,6 @@ Data is stored in the `bill_debates` table with:
 - Full speech content
 - Speech URL linking to original source
 
----
 
 ## 2. Debate Summarization (`summarize_debates.py`)
 
@@ -102,7 +107,7 @@ Processes raw debate speeches into structured summaries using LLM, extracting ke
 
 ### Data Source
 - **Input**: `bill_debates` table (raw speeches)
-- **API**: OpenAI GPT-5.2 (400K context window)
+- **API**: OpenAI gpt-5.4-nano (400K context window, cheapest GPT-5.4-class model)
 - **Output**: `bill_debate_summary` table
 
 ### What It Generates
@@ -117,10 +122,12 @@ Processes raw debate speeches into structured summaries using LLM, extracting ke
 
 ### Algorithm
 
-For bills with many speeches (100+), uses **hierarchical summarization**:
-1. Split speeches into chunks of ~100 speeches
+For bills where total speech text exceeds 180K characters, uses **hierarchical summarization**:
+1. Split speeches into chunks that fit within the 180K character context limit
 2. Summarize each chunk separately
-3. Merge chunk summaries into final summary
+3. Merge chunk summaries into final summary (deduplicating and prioritizing key points)
+
+For smaller debates, processes all speeches in a single LLM call.
 
 ### Usage
 
@@ -134,13 +141,27 @@ pnpm summarize:debates --bill-id 1427
 # Force regenerate even if summary exists
 pnpm summarize:debates --bill-id 1427 --force
 
-# Process in parallel (3 workers)
+# Process in parallel (default: 3 workers)
 pnpm summarize:debates --limit 50 --concurrency 3
 ```
 
----
+### Batch API Mode
 
-## 3. Bill Enrichment (`enrich_bills.py`)
+Both Python scripts support the OpenAI Batch API for 50% cost savings (results within 24 hours):
+
+```bash
+# Submit batch job
+pnpm summarize:debates --batch --limit 100
+
+# Check batch status
+pnpm summarize:debates --batch-status <BATCH_ID>
+
+# Retrieve and save results
+pnpm summarize:debates --batch-results <BATCH_ID>
+```
+
+> **Note:** Batch mode only supports bills that fit in a single context window. Bills requiring hierarchical summarization are skipped and must be processed synchronously.
+
 
 ## 3. Bill Enrichment (`enrich_bills.py`)
 
@@ -150,7 +171,7 @@ Generates LLM-powered summaries and analysis for each bill to help users underst
 ### Data Sources
 - **Bill text**: From `bill_embeddings.text_content` (PDF extracted text)
 - **Debate summary**: From `bill_debate_summary` table
-- **API**: OpenAI GPT-5.2 (400K context, 128K output)
+- **API**: OpenAI gpt-5.4-nano (400K context, 128K output)
 
 ### What It Generates
 
@@ -175,22 +196,37 @@ pnpm enrich:bills --bill-id 1427
 # Force regenerate even if enrichment exists
 pnpm enrich:bills --bill-id 1427 --force
 
-# Process in parallel (3 workers)
+# Process in parallel (default: 3 workers)
 pnpm enrich:bills --limit 50 --concurrency 3
+```
+
+### Batch API Mode
+
+```bash
+# Submit batch job (50% cheaper, results within 24h)
+pnpm enrich:bills --batch --limit 100
+
+# Check batch status
+pnpm enrich:bills --batch-status <BATCH_ID>
+
+# Retrieve and save results
+pnpm enrich:bills --batch-results <BATCH_ID>
 ```
 
 ### How It Works
 
 1. Prioritizes bills with more debate data and PDF text
-2. Loads debate summary (pro/con arguments, key questions)
-3. Constructs prompt with bill title, PDF text (up to 100K chars), and debate summary
-4. Generates neutral, factual enrichment content
-5. Stores with source hash for change detection
+2. Skips bills with neither PDF text nor debate records
+3. Loads debate summary (pro/con arguments, key questions, government explanations)
+4. Constructs prompt with bill title, PDF text (up to 100K chars), and debate summary
+5. Generates neutral, factual enrichment content
+6. Stores with source hash for change detection
+7. Uses thread-based concurrency with per-thread DB connections and OpenAI clients
 
 ### Requirements
 - `OPENAI_API_KEY` environment variable
+- `DATABASE_URL` environment variable
 
----
 
 ## Database Schema
 
@@ -198,73 +234,72 @@ pnpm enrich:bills --limit 50 --concurrency 3
 ```sql
 CREATE TABLE bill_debates (
   id SERIAL PRIMARY KEY,
-  bill_id INTEGER REFERENCES bill(id),
+  bill_id INTEGER NOT NULL REFERENCES bill(id),
   meeting_id TEXT NOT NULL,           -- Kokkai API meeting ID
   speech_id TEXT UNIQUE NOT NULL,     -- Kokkai API speech ID
-  session INTEGER NOT NULL,           -- Diet session number
+  session INTEGER NOT NULL,           -- Diet session number (references congress_session)
   house TEXT NOT NULL,                -- 参議院/衆議院
   meeting_name TEXT NOT NULL,         -- e.g., "環境委員会"
   issue_number TEXT,                  -- Meeting issue number
-  meeting_date TEXT,                  -- YYYY-MM-DD
+  meeting_date DATE,                  -- YYYY-MM-DD
   speaker_name TEXT NOT NULL,
   speaker_group TEXT,                 -- Political party
   speaker_position TEXT,              -- e.g., "環境大臣"
   speaker_role TEXT,                  -- 証人/参考人/公述人
-  speech_order INTEGER NOT NULL,
+  speech_order INTEGER,               -- Speech order (nullable)
   speech_content TEXT NOT NULL,       -- Full speech text
   speech_url TEXT,
-  speech_type TEXT,                   -- government/question/pro/con/etc.
-  created_at TIMESTAMP DEFAULT NOW()
+  speech_type TEXT,                   -- pro/con/neutral/explanation/question
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 ```
 
 ### `bill_debate_summary` Table
 ```sql
 CREATE TABLE bill_debate_summary (
-  id SERIAL PRIMARY KEY,
-  bill_id INTEGER UNIQUE REFERENCES bill(id),
-  status TEXT DEFAULT 'pending',      -- pending/processing/completed/failed
+  bill_id INTEGER PRIMARY KEY REFERENCES bill(id),
   pro_arguments_summary TEXT,         -- JSON array of pro arguments
   con_arguments_summary TEXT,         -- JSON array of con arguments
   key_questions TEXT,                 -- JSON array of key questions
   government_explanations TEXT,       -- JSON array of gov explanations
-  debate_count INTEGER,               -- Number of speeches processed
+  debate_count INTEGER NOT NULL DEFAULT 0,
+  status enrichment_status NOT NULL DEFAULT 'pending',  -- pending/processing/completed/failed
   llm_model TEXT,
   error_message TEXT,
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 ```
 
 ### `bill_enrichment` Table
 ```sql
 CREATE TABLE bill_enrichment (
-  id SERIAL PRIMARY KEY,
-  bill_id INTEGER UNIQUE REFERENCES bill(id),
-  status TEXT DEFAULT 'pending',      -- pending/processing/completed/failed
+  bill_id INTEGER PRIMARY KEY REFERENCES bill(id),
   summary_short TEXT,
   summary_detailed TEXT,
-  key_points JSONB,                   -- [{who, what, when}, ...]
-  impact_tags JSONB,                  -- ["#tag1", "#tag2"]
-  pros_and_cons JSONB,                -- {pros: [...], cons: [...]}
+  key_points TEXT,                    -- JSON: [{who, what, when}, ...]
+  impact_tags TEXT,                   -- JSON: ["#tag1", "#tag2"]
+  pros_and_cons TEXT,                 -- JSON: {pros: [...], cons: [...]}
   example_scenario TEXT,
-  source_text_hash TEXT,              -- MD5 hash for change detection
+  status enrichment_status NOT NULL DEFAULT 'pending',  -- pending/processing/completed/failed
   llm_model TEXT,
+  source_text_hash TEXT,              -- MD5 hash for change detection
   error_message TEXT,
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 ```
 
----
+> **Note:** `enrichment_status` is a PostgreSQL enum with values: `'pending'`, `'processing'`, `'completed'`, `'failed'`. JSON fields are stored as `TEXT` columns and parsed at the application layer.
 
-## API Endpoints
+
+## API Reference
 
 ### GET `/api/bill-enrichment?billId=123`
-Returns enriched data for a single bill.
+Returns full enriched data for a single bill, including LLM-generated summaries, debate records (limited to 5 most recent), and vote results by party.
 
 ### POST `/api/bill-enrichment`
-Batch fetch enriched data for multiple bills.
+Batch fetch enrichment data for multiple bills (max 50).
 
 **Request:**
 ```json
@@ -274,27 +309,41 @@ Batch fetch enriched data for multiple bills.
 **Response:**
 ```json
 {
-  "123": {
-    "enrichment": { ... },
-    "debates": [ ... ],
-    "voteResults": [ ... ]
+  "enrichments": {
+    "123": {
+      "summaryShort": "...",
+      "summaryDetailed": "...",
+      "keyPoints": [...],
+      "impactTags": [...],
+      "prosAndCons": { "pros": [...], "cons": [...] },
+      "exampleScenario": "...",
+      "enrichmentStatus": "completed"
+    }
   }
 }
 ```
 
----
+> **Note:** The POST endpoint returns only enrichment data. For debates and vote results, use the GET endpoint per bill.
 
-## UI Component
 
-The `EnrichedBillCard` component displays enrichment data with 3 progressive detail levels:
+## UI Components
+
+Bill enrichment data is displayed across two components with 3 progressive detail levels:
+
+### `EnrichedBillCard.svelte` — Level 1 (Basic)
+
+| Content |
+|---------|
+| Short summary (or description fallback) + impact tags |
+| "詳しく見る" button to expand detail |
+
+### `BillDetailPanel.svelte` — Levels 2-3 (Expanded/Full)
 
 | Level | Content |
 |-------|---------|
-| 1 (Basic) | Short summary + impact tags |
-| 2 (Expanded) | + Detailed summary, key points, pros/cons, example |
-| 3 (Full) | + Vote results by party, debate excerpts, PDF link |
+| 2 (Expanded) | Detailed summary, key points (who/what/when), pros/cons, example scenario |
+| 3 (Full) | + Vote results by party, debate excerpts (5 most recent), PDF link |
 
----
 
 ## Complete Enrichment Pipeline
 
@@ -311,17 +360,18 @@ pnpm summarize:debates --limit 100 --concurrency 3
 pnpm enrich:bills --limit 100 --concurrency 3
 ```
 
----
+For large-scale processing, use Batch API mode for steps 2 and 3 to save 50% on API costs.
+
 
 ## Rate Limits & Considerations
 
 | API | Rate Limit | Notes |
 |-----|------------|-------|
-| Kokkai NDL | 2s between requests | Conservative rate limiting |
-| hourei.ndl.go.jp | Playwright browser | Sequential page loads |
-| OpenAI | Token-based | ~$0.01-0.05 per bill for enrichment |
+| Kokkai NDL | 2s between requests | Conservative rate limiting in scrape_debates.ts |
+| hourei.ndl.go.jp | Playwright browser | Parallel pages (default 3, configurable via `--concurrency`) |
+| OpenAI (sync) | 0.5s between requests | Rate limiting in Python scripts |
+| OpenAI (batch) | 24h turnaround | 50% cheaper, no rate limit concerns |
 
----
 
 ## Troubleshooting
 
@@ -333,8 +383,11 @@ pnpm enrich:bills --limit 100 --concurrency 3
 ### Debate summarization producing poor results
 - Check that bill has sufficient debates (`debate_count > 0`)
 - Very short debates may produce minimal summaries
+- Bills exceeding 180K chars of debate text use hierarchical summarization which may lose some nuance
 
 ### LLM enrichment failing
 - Check `OPENAI_API_KEY` is set
+- Check `DATABASE_URL` is set
 - Check rate limits
 - Bills without PDF text or description may produce lower quality results
+- Bills with neither PDF text nor debate records are automatically skipped

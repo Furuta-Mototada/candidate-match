@@ -1,6 +1,6 @@
 # Algorithm Evaluation
 
-This module provides a benchmark for the adaptive question selection algorithm used in the matching system, comparing it against 3 baseline strategies.
+This module provides a benchmark for the adaptive question selection algorithm used in the matching system, comparing it against 2 baseline strategies.
 
 ## Overview
 
@@ -39,16 +39,6 @@ For each unanswered bill:
 1. Project all member vectors onto the bill's loading direction
 2. Compute the variance of projected scores
 3. Select the bill with highest variance
-
-### 4. Round-Robin — `round-robin`
-
-Cycles through latent dimensions in order (dimension 0, 1, 2, ..., then back to 0), picking the bill with the strongest loading on the target dimension each round.
-
-```
-targetDim = questionCount % dimensions
-```
-
-This ensures coverage of all dimensions but doesn't adapt to the user's specific uncertainty profile.
 
 ## Simulation Method
 
@@ -115,8 +105,7 @@ CAT should demonstrate:
 The typical ordering from best to worst:
 1. **CAT** — Best overall (adapts to user's specific uncertainty)
 2. **Most Controversial** — Good at gathering information but doesn't target weak spots
-3. **Round-Robin** — Ensures dimension coverage but not adaptive
-4. **Random** — Worst (no intelligence in selection)
+3. **Random** — Worst (no intelligence in selection)
 
 ## Configuration Parameters
 
@@ -126,7 +115,7 @@ The typical ordering from best to worst:
 | `maxQuestions` | 20 | 5–50 | Maximum questions per simulation |
 | `sampleSize` | 10 | 3–50 | Number of members to simulate |
 | `convergeThreshold` | 0.2 | 0.05–1.0 | Cosine error threshold for "converged" |
-| `strategies` | All 4 | — | Which strategies to include |
+| `strategies` | All 3 | — | Which strategies to include |
 
 ## Architecture
 
@@ -202,7 +191,7 @@ Run the evaluation benchmark.
   "maxQuestions": 20,
   "sampleSize": 10,
   "convergeThreshold": 0.2,
-  "strategies": ["cat", "random", "controversial", "round-robin"]
+  "strategies": ["cat", "random", "controversial"]
 }
 ```
 
@@ -262,7 +251,7 @@ This evaluation module reuses the core matching infrastructure:
 - **`cosineSimilarity()`** — Same similarity metric
 - **`findMatchingMembers()`** — Same ranking function
 
-The only additions are the 3 baseline strategies and the simulation/aggregation harness. This ensures the evaluation accurately reflects real-world performance.
+The only additions are the 2 baseline strategies and the simulation/aggregation harness. This ensures the evaluation accurately reflects real-world performance.
 
 ## Web Interface
 
@@ -273,6 +262,6 @@ The interactive page provides:
 1. **Collapsible explanation** — Overview of what the evaluation does, strategies compared, and metrics explained
 2. **Configuration panel** — Select vector data, set max questions, sample size, and convergence threshold
 3. **Summary cards** — One per strategy showing key final metrics (convergence speed, final error, top-5 rate, rank)
-4. **Tabbed line charts** — SVG charts showing metric learning curves over question count, with all 4 strategies overlaid
+4. **Tabbed line charts** — SVG charts showing metric learning curves over question count, with all 3 strategies overlaid
 5. **Per-member drill-down** — Select individual sampled members to see step-by-step tables per strategy
 6. **Convergence comparison table** — Side-by-side comparison of all strategies including early-stage (Q5) metrics

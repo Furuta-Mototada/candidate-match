@@ -145,7 +145,7 @@ This ensures members are correctly attributed to groups even when:
 - Party names change slightly between sessions
 - Official records have incomplete date ranges
 
-## Files
+## Architecture
 
 | File | Description |
 |------|-------------|
@@ -157,7 +157,7 @@ This ensures members are correctly attributed to groups even when:
 | `/src/lib/server/legislation-score-index.ts` | Normalized score index for matching |
 | `/src/routes/api/member-detail/+server.ts` | Member detail API (uses normalized scores) |
 
-## API Endpoint
+## API Reference
 
 ### POST `/api/calculate`
 
@@ -180,7 +180,7 @@ On error:
 data: {"done": true, "success": false, "error": "Process exited with code 1"}
 ```
 
-## Performance Optimizations
+## Performance
 
 The calculation script pre-loads all data from the database to minimize queries:
 
@@ -194,22 +194,7 @@ The calculation script pre-loads all data from the database to minimize queries:
 
 This allows processing hundreds of bills efficiently with O(1) lookups per member/group.
 
-## Development
-
-### Adding New Features
-
-1. **Modify calculation logic**: Edit `/scripts/calculate_legislation_scores.ts`
-2. **Update UI**: Edit `/src/routes/legislation-scores/+page.svelte`
-3. **Add filters/sorting**: Update the `sortedBills` derived state
-
-### Testing
-
-1. Start dev server: `pnpm dev`
-2. Navigate to `http://localhost:5173/legislation-scores`
-3. Test search, sorting, filtering (type/session/result), and modal functionality
-4. As admin, click "再計算" to test calculation trigger with SSE progress
-
-## Related Tables
+## Database Schema
 
 The calculation uses data from these database tables:
 
@@ -259,7 +244,7 @@ Sign preservation is also critical: a member who scored +2 (mildly supportive) s
 | `src/routes/api/member-detail/+server.ts` | Including normalized scores in member detail API |
 | `src/routes/legislation-scores/+page.svelte` | Normalized score distribution chart in modal |
 
-## Performance Considerations
+### Additional Considerations
 
 - The JSON file can be large (several MB) for many bills
 - Members with zero score and no involvement are excluded from the JSON output, reducing file size
@@ -269,11 +254,3 @@ Sign preservation is also critical: a member who scored +2 (mildly supportive) s
 - Calculation script processes all bills and members efficiently with pre-loaded O(1) lookups
 - Charts are dynamically created when modal opens and destroyed on close
 
-## Future Enhancements
-
-- [ ] Export functionality (CSV, PDF)
-- [ ] Filter by date range
-- [ ] Zoom/pan controls for chart
-- [ ] Member comparison across multiple bills
-- [ ] Time-series analysis
-- [ ] Download chart as image

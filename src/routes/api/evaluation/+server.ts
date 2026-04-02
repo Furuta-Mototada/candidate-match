@@ -44,7 +44,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		};
 
 		// Validate strategies if provided
-		const validStrategies: StrategyName[] = ['cat', 'random', 'controversial', 'round-robin'];
+		const validStrategies: StrategyName[] = ['cat', 'random', 'controversial'];
 		if (strategies) {
 			for (const s of strategies) {
 				if (!validStrategies.includes(s)) {
