@@ -402,10 +402,9 @@ async function batchFetchMemberProfiles(
 
 /**
  * Batch get or create members (local version)
- * Matches by BOTH name AND nameReading together.
- * - Same name + same reading = same person
- * - Same name + different reading = different people
- * - Same reading + different name = different people
+ * Matching priority:
+ * 1. sourceUrl (profile URL) — definitive: same profile page = same person
+ * 2. name + nameReading — same name + same reading = same person
  * Only fetches profile page to get additional names when creating a NEW member.
  * Returns a Map of "primaryName|reading" to member ID
  */
@@ -433,12 +432,33 @@ async function batchGetOrCreateMembersLocal(
 	// A member can have multiple names, so we create entries for each name
 	const existingByNameAndReading = new Map<
 		string,
-		{ id: number; names: string[]; nameReading: string | null }
+		{ id: number; names: string[]; nameReading: string | null; sourceUrl: string | null }
 	>();
 	existing.forEach((m) => {
 		for (const name of m.names) {
 			const key = `${name}|${m.nameReading || ''}`;
-			existingByNameAndReading.set(key, { id: m.id, names: m.names, nameReading: m.nameReading });
+			existingByNameAndReading.set(key, {
+				id: m.id,
+				names: m.names,
+				nameReading: m.nameReading,
+				sourceUrl: m.sourceUrl
+			});
+		}
+	});
+
+	// Build map of sourceUrl -> member for existing members (for profile URL dedup)
+	const existingBySourceUrl = new Map<
+		string,
+		{ id: number; names: string[]; nameReading: string | null; sourceUrl: string | null }
+	>();
+	existing.forEach((m) => {
+		if (m.sourceUrl) {
+			existingBySourceUrl.set(m.sourceUrl, {
+				id: m.id,
+				names: m.names,
+				nameReading: m.nameReading,
+				sourceUrl: m.sourceUrl
+			});
 		}
 	});
 
@@ -448,14 +468,34 @@ async function batchGetOrCreateMembersLocal(
 	// Members that need to be inserted
 	const newMembers: Array<{ names: string[]; nameReading: string; profileUrl: string }> = [];
 
+	// Track members that matched by sourceUrl but need sourceUrl backfill
+	const sourceUrlUpdates: Array<{ memberId: number; sourceUrl: string }> = [];
+
 	for (const [key, m] of uniqueMembers) {
-		// Try to find existing member by name + reading
+		// 1. Try to match by sourceUrl (profile URL) — strongest signal
+		if (m.profileUrl) {
+			const existingByUrl = existingBySourceUrl.get(m.profileUrl);
+			if (existingByUrl) {
+				memberMap.set(key, existingByUrl.id);
+				console.log(
+					`  Matched by sourceUrl: ${m.names[0]} (${m.nameReading}) → existing ID ${existingByUrl.id} (${existingByUrl.names[0]}, ${existingByUrl.nameReading})`
+				);
+				continue;
+			}
+		}
+
+		// 2. Try to match by name + reading (current behavior)
 		const lookupKey = `${m.names[0]}|${m.nameReading}`;
 		const existingMember = existingByNameAndReading.get(lookupKey);
 
 		if (existingMember) {
-			// Member exists - add to result map
 			memberMap.set(key, existingMember.id);
+			// Backfill sourceUrl if the existing member doesn't have one yet
+			if (m.profileUrl && !existingMember.sourceUrl) {
+				sourceUrlUpdates.push({ memberId: existingMember.id, sourceUrl: m.profileUrl });
+				// Update in-memory map so subsequent lookups also match by sourceUrl
+				existingBySourceUrl.set(m.profileUrl, existingMember);
+			}
 		} else if (m.names[0]) {
 			// New member - will fetch profile page later
 			newMembers.push({
@@ -463,6 +503,17 @@ async function batchGetOrCreateMembersLocal(
 				nameReading: m.nameReading,
 				profileUrl: m.profileUrl
 			});
+		}
+	}
+
+	// Backfill sourceUrl for existing members that were matched by name+reading
+	if (sourceUrlUpdates.length > 0) {
+		console.log(`  Backfilling sourceUrl for ${sourceUrlUpdates.length} existing members...`);
+		for (const update of sourceUrlUpdates) {
+			await db
+				.update(schema.member)
+				.set({ sourceUrl: update.sourceUrl })
+				.where(eq(schema.member.id, update.memberId));
 		}
 	}
 
@@ -474,13 +525,58 @@ async function batchGetOrCreateMembersLocal(
 	console.log(`  Fetching ${newMembers.length} member profiles in parallel...`);
 	const profileNamesMap = await batchFetchMemberProfiles(newMembers);
 
+	// Before inserting, re-check profile names against existing members.
+	// A "new" member's profile page may reveal they match an existing member
+	// (e.g., same person listed with different reading in a different term).
+	const trulyNewMembers: typeof newMembers = [];
+	for (const m of newMembers) {
+		const mKey = `${m.names[0]}|${m.nameReading}`;
+		const profileNames = profileNamesMap.get(mKey) || m.names;
+
+		// Check if any name from the profile matches an existing member (regardless of reading)
+		let matched = false;
+		for (const name of profileNames) {
+			// Search all existing members for this name
+			for (const [lookupKey, existingMember] of existingByNameAndReading) {
+				const [existingName] = lookupKey.split('|');
+				if (existingName === name) {
+					// Found a name match - this is the same person with a different reading
+					memberMap.set(mKey, existingMember.id);
+					console.log(
+						`  Matched by profile name: ${m.names[0]} (${m.nameReading}) → existing ID ${existingMember.id} (${existingMember.names[0]}, ${existingMember.nameReading})`
+					);
+					// Backfill sourceUrl
+					if (m.profileUrl && !existingMember.sourceUrl) {
+						await db
+							.update(schema.member)
+							.set({ sourceUrl: m.profileUrl })
+							.where(eq(schema.member.id, existingMember.id));
+						existingBySourceUrl.set(m.profileUrl, existingMember);
+					}
+					matched = true;
+					break;
+				}
+			}
+			if (matched) break;
+		}
+
+		if (!matched) {
+			trulyNewMembers.push(m);
+		}
+	}
+
+	if (trulyNewMembers.length === 0) {
+		return memberMap;
+	}
+
 	// Prepare batch insert values
-	const insertValues = newMembers.map((m) => {
+	const insertValues = trulyNewMembers.map((m) => {
 		const key = `${m.names[0]}|${m.nameReading}`;
 		const names = profileNamesMap.get(key) || m.names;
 		return {
 			names,
-			nameReading: m.nameReading || null
+			nameReading: m.nameReading || null,
+			sourceUrl: m.profileUrl || null
 		};
 	});
 
@@ -492,7 +588,7 @@ async function batchGetOrCreateMembersLocal(
 	// Update maps with inserted members
 	for (let i = 0; i < inserted.length; i++) {
 		const member = inserted[i];
-		const originalMember = newMembers[i];
+		const originalMember = trulyNewMembers[i];
 		const key = `${originalMember.names[0]}|${originalMember.nameReading}`;
 
 		memberMap.set(key, member.id);
@@ -503,7 +599,18 @@ async function batchGetOrCreateMembersLocal(
 			existingByNameAndReading.set(lookupKey, {
 				id: member.id,
 				names: member.names,
-				nameReading: member.nameReading
+				nameReading: member.nameReading,
+				sourceUrl: member.sourceUrl
+			});
+		}
+
+		// Also add to existingBySourceUrl
+		if (member.sourceUrl) {
+			existingBySourceUrl.set(member.sourceUrl, {
+				id: member.id,
+				names: member.names,
+				nameReading: member.nameReading,
+				sourceUrl: member.sourceUrl
 			});
 		}
 	}

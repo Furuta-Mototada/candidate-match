@@ -1,0 +1,1 @@
+ALTER TABLE "member" ADD COLUMN "source_url" text;

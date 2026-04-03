@@ -108,7 +108,8 @@ export type NewCommitteeBill = typeof committeeBill.$inferInsert;
 export const member = pgTable('member', {
 	id: serial('id').primaryKey(),
 	names: text('names').array().notNull(), // 議員名（複数の表記を含む場合あり、例：["赤間二郎", "あかま二郎"]）
-	nameReading: text('name_reading') // 読み（例：あかまじろう）
+	nameReading: text('name_reading'), // 読み（例：あかまじろう）
+	sourceUrl: text('source_url') // Source profile URL for deduplication (e.g., kokkai.sugawarataku.net profile URL)
 });
 
 export type Member = typeof member.$inferSelect;
