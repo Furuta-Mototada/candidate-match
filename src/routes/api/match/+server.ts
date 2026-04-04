@@ -39,27 +39,26 @@ import { resolveDelegatedVotes } from '$lib/server/delegation-helpers.js';
 
 const execAsync = promisify(exec);
 
-// In-memory session store (in production, use Redis or database)
-const sessions = new Map<
-	string,
-	{
-		state: MatchingState;
-		clusterData: ClusterVectorData;
-		billInfoMap: Map<
-			number,
-			{
-				billId: number;
-				title: string;
-				description: string | null;
-				passed: boolean;
-				result: string | null;
-				loading: number[];
-				memberVariance: number;
-			}
-		>;
-		createdAt: Date;
-	}
->();
+type SessionData = {
+	state: MatchingState;
+	clusterData: ClusterVectorData;
+	billInfoMap: Map<
+		number,
+		{
+			billId: number;
+			title: string;
+			description: string | null;
+			passed: boolean;
+			result: string | null;
+			loading: number[];
+			memberVariance: number;
+		}
+	>;
+	createdAt: Date;
+};
+
+// In-memory session store (used as cache; sessions are reconstructed from DB on miss)
+const sessions = new Map<string, SessionData>();
 
 // Clean up old sessions (older than 1 hour)
 function cleanupSessions() {
@@ -73,6 +72,103 @@ function cleanupSessions() {
 
 // Run cleanup every 10 minutes
 setInterval(cleanupSessions, 10 * 60 * 1000);
+
+/**
+ * Reconstruct a session from saved vector data + client-provided state.
+ * This is the fallback for serverless environments where in-memory sessions are lost.
+ */
+async function reconstructSession(
+	savedVectorId: number,
+	clientUserVector: number[],
+	clientAnsweredBills: { billId: number; score: number }[]
+): Promise<SessionData | null> {
+	const [savedResult] = await db
+		.select()
+		.from(clusterVectorResults)
+		.where(eq(clusterVectorResults.id, savedVectorId));
+
+	if (!savedResult) return null;
+
+	const clusterData: ClusterVectorData = {
+		memberVectors: JSON.parse(savedResult.memberVectors),
+		memberNames: JSON.parse(savedResult.memberNames),
+		billLoadings: JSON.parse(savedResult.billLoadings),
+		billIds: JSON.parse(savedResult.billIds),
+		explainedVariance: JSON.parse(savedResult.explainedVariance),
+		dimensions: savedResult.dimensions,
+		memberCount: savedResult.memberCount,
+		billCount: savedResult.billCount
+	};
+
+	const dbBillInfo = await loadBillInfo(clusterData.billIds);
+	const billInfoMap = buildBillInfoMap(clusterData, dbBillInfo);
+
+	// Reconstruct matching state from client-provided data
+	const answeredBills: UserAnswer[] = clientAnsweredBills.map((b) => ({
+		billId: b.billId,
+		score: b.score
+	}));
+
+	const state: MatchingState = {
+		clusterId: savedResult.clusterId,
+		clusterLabel: savedResult.clusterLabel,
+		dimensions: clusterData.dimensions,
+		userVector:
+			clientUserVector.length === clusterData.dimensions
+				? clientUserVector
+				: new Array(clusterData.dimensions).fill(0),
+		answeredBills,
+		questionCount: answeredBills.length,
+		uncertainty: new Array(clusterData.dimensions).fill(
+			Math.max(0.1, 1.0 - answeredBills.length * 0.05)
+		)
+	};
+
+	const session: SessionData = {
+		state,
+		clusterData,
+		billInfoMap,
+		createdAt: new Date()
+	};
+
+	return session;
+}
+
+/**
+ * Get session from memory or reconstruct from DB.
+ * Returns the session if found/reconstructed, or null.
+ */
+async function getOrReconstructSession(
+	sessionId: string | null,
+	savedVectorId?: number,
+	clientUserVector?: number[],
+	clientAnsweredBills?: { billId: number; score: number }[]
+): Promise<SessionData | null> {
+	// Try in-memory first
+	if (sessionId) {
+		const session = sessions.get(sessionId);
+		if (session) return session;
+	}
+
+	// Fallback: reconstruct from DB
+	if (savedVectorId && clientUserVector) {
+		console.log(
+			`[session] Reconstructing session from savedVectorId=${savedVectorId} (in-memory miss)`
+		);
+		const session = await reconstructSession(
+			savedVectorId,
+			clientUserVector,
+			clientAnsweredBills || []
+		);
+		if (session && sessionId) {
+			// Cache for subsequent requests in the same invocation
+			sessions.set(sessionId, session);
+		}
+		return session;
+	}
+
+	return null;
+}
 
 /**
  * POST /api/match
@@ -101,6 +197,9 @@ export const POST: RequestHandler = async ({ request, locals }): Promise<Respons
 
 		const userId = locals.user?.id || null;
 
+		const clientUserVector = body.userVector;
+		const clientAnsweredBills: { billId: number; score: number }[] | undefined = body.answeredBills;
+
 		switch (action) {
 			case 'start':
 				return await handleStart(clusterId, clusterLabel, nComponents, savedVectorId, userId);
@@ -109,13 +208,28 @@ export const POST: RequestHandler = async ({ request, locals }): Promise<Respons
 				return await handleResume(savedVectorId, existingUserVector, answeredBillIds, userId);
 
 			case 'answer':
-				return await handleAnswer(sessionId, billId, score, userId);
+				return await handleAnswer(
+					sessionId,
+					billId,
+					score,
+					userId,
+					savedVectorId,
+					clientUserVector,
+					clientAnsweredBills
+				);
 
 			case 'skip':
-				return await handleSkip(sessionId, billId, userId);
+				return await handleSkip(
+					sessionId,
+					billId,
+					userId,
+					savedVectorId,
+					clientUserVector,
+					clientAnsweredBills
+				);
 
 			case 'results':
-				return await handleResults(sessionId);
+				return await handleResults(sessionId, savedVectorId, clientUserVector, clientAnsweredBills);
 
 			case 'retract-answer':
 				return await handleRetractAnswer(billId, userId);
@@ -762,13 +876,21 @@ async function handleAnswer(
 	sessionId: string,
 	billId: number,
 	score: number,
-	userId: string | null = null
+	userId: string | null = null,
+	savedVectorId?: number,
+	clientUserVector?: number[],
+	clientAnsweredBills?: { billId: number; score: number }[]
 ) {
 	if (!sessionId) {
 		return json({ error: 'sessionId is required' }, { status: 400 });
 	}
 
-	const session = sessions.get(sessionId);
+	const session = await getOrReconstructSession(
+		sessionId,
+		savedVectorId,
+		clientUserVector,
+		clientAnsweredBills
+	);
 	if (!session) {
 		return json({ error: 'Session not found or expired' }, { status: 404 });
 	}
@@ -978,12 +1100,24 @@ async function handleAnswer(
 /**
  * Skip a question and get next
  */
-async function handleSkip(sessionId: string, billId: number, userId: string | null = null) {
+async function handleSkip(
+	sessionId: string,
+	billId: number,
+	userId: string | null = null,
+	savedVectorId?: number,
+	clientUserVector?: number[],
+	clientAnsweredBills?: { billId: number; score: number }[]
+) {
 	if (!sessionId) {
 		return json({ error: 'sessionId is required' }, { status: 400 });
 	}
 
-	const session = sessions.get(sessionId);
+	const session = await getOrReconstructSession(
+		sessionId,
+		savedVectorId,
+		clientUserVector,
+		clientAnsweredBills
+	);
 	if (!session) {
 		return json({ error: 'Session not found or expired' }, { status: 404 });
 	}
@@ -1055,6 +1189,7 @@ async function handleSkip(sessionId: string, billId: number, userId: string | nu
 				}
 			: null,
 		uncertainty: newState.uncertainty,
+		userVector: newState.userVector,
 		isComplete: nextQuestion === null
 	});
 }
@@ -1165,12 +1300,22 @@ async function handleDirectVote(billId: number, score: number, userId: string | 
 /**
  * Get full matching results
  */
-async function handleResults(sessionId: string) {
+async function handleResults(
+	sessionId: string,
+	savedVectorId?: number,
+	clientUserVector?: number[],
+	clientAnsweredBills?: { billId: number; score: number }[]
+) {
 	if (!sessionId) {
 		return json({ error: 'sessionId is required' }, { status: 400 });
 	}
 
-	const session = sessions.get(sessionId);
+	const session = await getOrReconstructSession(
+		sessionId,
+		savedVectorId,
+		clientUserVector,
+		clientAnsweredBills
+	);
 	if (!session) {
 		return json({ error: 'Session not found or expired' }, { status: 404 });
 	}

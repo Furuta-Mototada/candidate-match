@@ -56,12 +56,14 @@
 		const promise = data.savedVectors;
 		if (promise && typeof promise.then === 'function') {
 			savedVectorsLoading = true;
-			promise.then((resolved: SavedVectorInfo[]) => {
-				savedVectors = resolved || [];
-				savedVectorsLoading = false;
-			}).catch(() => {
-				savedVectorsLoading = false;
-			});
+			promise
+				.then((resolved: SavedVectorInfo[]) => {
+					savedVectors = resolved || [];
+					savedVectorsLoading = false;
+				})
+				.catch(() => {
+					savedVectorsLoading = false;
+				});
 		} else if (Array.isArray(promise)) {
 			savedVectors = promise as SavedVectorInfo[];
 			savedVectorsLoading = false;
@@ -91,6 +93,7 @@
 
 	// Current cluster session
 	let sessionId: string | null = $state(null);
+	let currentSavedVectorId: number | null = $state(null);
 	let currentQuestion: NextQuestion | null = $state(null);
 	let answeredCount: number = $state(0);
 	let currentClusterBillCount: number = $state(0); // Total bills in current cluster
@@ -391,6 +394,7 @@
 			}
 
 			sessionId = result.sessionId;
+			currentSavedVectorId = clusterVectorInfo.id;
 			currentQuestion = result.nextQuestion;
 			answeredCount = result.preExistingAnswerCount || existingResult?.answeredCount || 0;
 			currentClusterBillCount = clusterVectorInfo.billCount;
@@ -455,7 +459,16 @@
 								headers: { 'Content-Type': 'application/json' },
 								body: JSON.stringify({
 									action: 'results',
-									sessionId: result.sessionId
+									sessionId: result.sessionId,
+									savedVectorId: vectorInfo.id,
+									userVector: result.userVector,
+									answeredBills:
+										result.preExistingAnsweredBills?.map(
+											(b: { billId: number; answer: number }) => ({
+												billId: b.billId,
+												score: b.answer
+											})
+										) || []
 								})
 							});
 							const resultsData = await resultsResponse.json();
@@ -520,6 +533,7 @@
 						currentClusterIndex = i;
 
 						sessionId = result.sessionId;
+						currentSavedVectorId = vectorInfo.id;
 						currentQuestion = result.nextQuestion;
 						answeredCount = result.preExistingAnswerCount || existingResult?.answeredCount || 0;
 						currentClusterBillCount = vectorInfo.billCount;
@@ -626,6 +640,7 @@
 			}
 
 			sessionId = result.sessionId;
+			currentSavedVectorId = savedVector.id;
 			currentQuestion = result.nextQuestion;
 			answeredCount = result.preExistingAnswerCount || 0;
 			currentClusterBillCount = savedVector.billCount; // Set the bill count for current cluster
@@ -680,7 +695,13 @@
 					action: 'answer',
 					sessionId: sessionId,
 					billId: currentQuestion.billId,
-					score: score
+					score: score,
+					savedVectorId: currentSavedVectorId,
+					userVector: userVector,
+					answeredBills: currentClusterAnsweredBills.map((b) => ({
+						billId: b.billId,
+						score: b.answer
+					}))
 				})
 			});
 
@@ -810,7 +831,13 @@
 					body: JSON.stringify({
 						action: 'skip',
 						sessionId: sessionId,
-						billId
+						billId,
+						savedVectorId: currentSavedVectorId,
+						userVector: userVector,
+						answeredBills: currentClusterAnsweredBills.map((b) => ({
+							billId: b.billId,
+							score: b.answer
+						}))
 					})
 				});
 
@@ -885,7 +912,13 @@
 						headers: { 'Content-Type': 'application/json' },
 						body: JSON.stringify({
 							action: 'results',
-							sessionId: sessionId
+							sessionId: sessionId,
+							savedVectorId: currentSavedVectorId,
+							userVector: userVector,
+							answeredBills: currentClusterAnsweredBills.map((b) => ({
+								billId: b.billId,
+								score: b.answer
+							}))
 						})
 					});
 					const result = await response.json();
@@ -960,6 +993,7 @@
 
 				currentClusterIndex = targetIndex;
 				sessionId = result.sessionId;
+				currentSavedVectorId = vectorInfo.id;
 				currentQuestion = result.nextQuestion;
 				answeredCount = existingResult.answeredCount;
 				currentClusterBillCount = vectorInfo.billCount;
@@ -993,6 +1027,7 @@
 
 				currentClusterIndex = targetIndex;
 				sessionId = result.sessionId;
+				currentSavedVectorId = vectorInfo.id;
 				currentQuestion = result.nextQuestion;
 				answeredCount = result.preExistingAnswerCount || 0;
 				currentClusterBillCount = vectorInfo.billCount;
@@ -1036,7 +1071,13 @@
 						headers: { 'Content-Type': 'application/json' },
 						body: JSON.stringify({
 							action: 'results',
-							sessionId: sessionId
+							sessionId: sessionId,
+							savedVectorId: currentSavedVectorId,
+							userVector: userVector,
+							answeredBills: currentClusterAnsweredBills.map((b) => ({
+								billId: b.billId,
+								score: b.answer
+							}))
 						})
 					});
 					const result = await response.json();
@@ -1168,7 +1209,16 @@
 					const resultsRes = await fetch('/api/match', {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({ action: 'results', sessionId })
+						body: JSON.stringify({
+							action: 'results',
+							sessionId,
+							savedVectorId: currentSavedVectorId,
+							userVector: userVector,
+							answeredBills: currentClusterAnsweredBills.map((b) => ({
+								billId: b.billId,
+								score: b.answer
+							}))
+						})
 					});
 					if (resultsRes.ok) {
 						const resultsData = await resultsRes.json();
