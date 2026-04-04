@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Executive Summary — Pattern 4: Visual Abstract</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    @page { size: letter; margin: 0.4in; }
+
+    body {
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      font-size: 9.5pt;
+      line-height: 1.4;
+      color: #222;
+      max-width: 7.7in;
+      margin: 0 auto;
+      padding: 0.4in;
+      background: #fff;
+    }
+
+    /* ── Title Bar ──────────────────────────────────── */
+    .title-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #1e3a5f;
+      color: #fff;
+      border-radius: 8px;
+      padding: 8pt 14pt;
+      margin-bottom: 8pt;
+    }
+    .title-bar h1 {
+      font-size: 16pt;
+      font-weight: 800;
+    }
+    .title-bar .info {
+      text-align: right;
+      font-size: 8pt;
+      opacity: 0.85;
+    }
+
+    /* ── Grid Layout ────────────────────────────────── */
+    .poster-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      grid-template-rows: auto auto auto;
+      gap: 8pt;
+    }
+
+    .cell {
+      border-radius: 8px;
+      padding: 8pt 10pt;
+      border: 1.5px solid #e0e4ea;
+    }
+    .cell h2 {
+      font-size: 9.5pt;
+      font-weight: 700;
+      margin-bottom: 4pt;
+      display: flex;
+      align-items: center;
+      gap: 4pt;
+    }
+    .cell p { font-size: 8.5pt; line-height: 1.35; }
+    .cell ul { margin: 3pt 0 0 14pt; font-size: 8.5pt; }
+    .cell li { margin-bottom: 2pt; }
+    .cell strong { color: #1e3a5f; }
+
+    /* Cell spans */
+    .span-2 { grid-column: span 2; }
+    .span-3 { grid-column: span 3; }
+
+    /* Cell colors */
+    .cell-red    { background: #fff5f5; border-color: #f8c4c4; }
+    .cell-red h2 { color: #c62828; }
+    .cell-green    { background: #f0faf0; border-color: #b8dab8; }
+    .cell-green h2 { color: #2d6a2e; }
+    .cell-blue    { background: #f0f5ff; border-color: #b8cfe8; }
+    .cell-blue h2 { color: #1e3a5f; }
+    .cell-orange    { background: #fffaf0; border-color: #f5deb3; }
+    .cell-orange h2 { color: #c77f00; }
+    .cell-purple    { background: #f8f0ff; border-color: #d8c0f0; }
+    .cell-purple h2 { color: #6b2fa0; }
+    .cell-white   { background: #fafbfc; }
+    .cell-white h2 { color: #1e3a5f; }
+
+    /* ── SVG Diagram ────────────────────────────────── */
+    .cell svg { display: block; margin: 0 auto; }
+    .cell .caption {
+      text-align: center;
+      font-size: 7pt;
+      color: #888;
+      margin-top: 2pt;
+      font-style: italic;
+    }
+
+    /* ── Number Highlight ───────────────────────────── */
+    .num-row {
+      display: flex;
+      justify-content: space-around;
+      margin-top: 4pt;
+    }
+    .num-item { text-align: center; }
+    .num-item .num { font-size: 18pt; font-weight: 800; }
+    .num-item .nlabel { font-size: 7pt; color: #555; }
+
+    /* ── Footer ─────────────────────────────────────── */
+    .footer {
+      text-align: center;
+      font-size: 7pt;
+      color: #aaa;
+      margin-top: 6pt;
+    }
+
+    @media print {
+      body { padding: 0; max-width: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════ TITLE BAR ═══════ -->
+<div class="title-bar">
+  <h1>🗳️ Candidate Match</h1>
+  <div class="info">
+    <strong>Mototada Furuta</strong><br/>
+    Minerva University Capstone · 2025
+  </div>
+</div>
+
+<!-- ═══════ POSTER GRID ═══════ -->
+<div class="poster-grid">
+
+  <!-- Row 1 ────────────────────────────────────────── -->
+  <div class="cell cell-red">
+    <h2>❌ Problem</h2>
+    <p>Most Japanese voters don't know how their representatives vote. Media focuses on party labels, not legislative behavior. There is a <strong>transparency gap</strong> between citizens and their parliament.</p>
+    <!-- Problem illustration -->
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 60" style="width:100%;margin-top:4pt;" role="img" aria-label="Illustration of information gap between citizens and parliament">
+      <text x="30" y="20" text-anchor="middle" font-size="22">👥</text>
+      <text x="30" y="38" text-anchor="middle" font-size="6" fill="#c62828" font-weight="bold">Citizens</text>
+      <text x="90" y="26" text-anchor="middle" font-size="20">❓</text>
+      <text x="90" y="44" text-anchor="middle" font-size="6" fill="#888">Information Gap</text>
+      <line x1="50" y1="22" x2="72" y2="22" stroke="#ddd" stroke-width="1.5" stroke-dasharray="3,3"/>
+      <line x1="108" y1="22" x2="130" y2="22" stroke="#ddd" stroke-width="1.5" stroke-dasharray="3,3"/>
+      <text x="150" y="20" text-anchor="middle" font-size="22">🏛️</text>
+      <text x="150" y="38" text-anchor="middle" font-size="6" fill="#c62828" font-weight="bold">Parliament</text>
+    </svg>
+  </div>
+
+  <div class="cell cell-green">
+    <h2>✅ Solution</h2>
+    <p><strong>Candidate Match</strong> bridges this gap using AI. Users answer questions about real bills and get matched with Diet members who vote like them.</p>
+    <!-- Solution illustration -->
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 60" style="width:100%;margin-top:4pt;" role="img" aria-label="Citizens connected to parliament through Candidate Match">
+      <text x="30" y="20" text-anchor="middle" font-size="22">👥</text>
+      <text x="30" y="38" text-anchor="middle" font-size="6" fill="#2d6a2e" font-weight="bold">Citizens</text>
+      <rect x="60" y="8" width="60" height="30" rx="6" fill="#d4e8d4" stroke="#2d6a2e" stroke-width="1"/>
+      <text x="90" y="20" text-anchor="middle" font-size="6" font-weight="bold" fill="#2d6a2e">Candidate</text>
+      <text x="90" y="30" text-anchor="middle" font-size="6" font-weight="bold" fill="#2d6a2e">Match 🗳️</text>
+      <line x1="48" y1="18" x2="58" y2="18" stroke="#2d6a2e" stroke-width="1.5"/>
+      <line x1="122" y1="18" x2="132" y2="18" stroke="#2d6a2e" stroke-width="1.5"/>
+      <text x="150" y="20" text-anchor="middle" font-size="22">🏛️</text>
+      <text x="150" y="38" text-anchor="middle" font-size="6" fill="#2d6a2e" font-weight="bold">Parliament</text>
+      <text x="90" y="52" text-anchor="middle" font-size="6" fill="#2d6a2e">✨ Transparency restored</text>
+    </svg>
+  </div>
+
+  <div class="cell cell-blue">
+    <h2>📊 By the Numbers</h2>
+    <div class="num-row">
+      <div class="num-item"><div class="num" style="color:#1e3a5f;">700+</div><div class="nlabel">Bills</div></div>
+      <div class="num-item"><div class="num" style="color:#2d6a2e;">700+</div><div class="nlabel">Members</div></div>
+      <div class="num-item"><div class="num" style="color:#c77f00;">2</div><div class="nlabel">Languages</div></div>
+    </div>
+    <div class="num-row" style="margin-top:4pt;">
+      <div class="num-item"><div class="num" style="color:#6b2fa0;">3</div><div class="nlabel">ML Models</div></div>
+      <div class="num-item"><div class="num" style="color:#c62828;">5</div><div class="nlabel">Core Features</div></div>
+      <div class="num-item"><div class="num" style="color:#1e3a5f;">∞</div><div class="nlabel">Civic Value</div></div>
+    </div>
+  </div>
+
+  <!-- Row 2 ────────────────────────────────────────── -->
+  <div class="cell cell-white span-3">
+    <h2>⚙️ How It Works — End-to-End Pipeline</h2>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 660 85" style="width:100%;" role="img" aria-label="Full system pipeline diagram">
+      <defs>
+        <marker id="a4" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+          <polygon points="0 0, 7 2.5, 0 5" fill="#1e3a5f"/>
+        </marker>
+      </defs>
+      <!-- Step 1 -->
+      <rect x="2" y="10" width="90" height="55" rx="7" fill="#e8f0fe" stroke="#1e3a5f" stroke-width="1.2"/>
+      <text x="47" y="30" text-anchor="middle" font-size="16">🏛️</text>
+      <text x="47" y="44" text-anchor="middle" font-size="7" font-weight="bold" fill="#1e3a5f">Scrape Diet Data</text>
+      <text x="47" y="55" text-anchor="middle" font-size="6" fill="#555">Bills, Votes, Members</text>
+      <line x1="95" y1="38" x2="116" y2="38" stroke="#1e3a5f" stroke-width="1.2" marker-end="url(#a4)"/>
+
+      <!-- Step 2 -->
+      <rect x="120" y="10" width="90" height="55" rx="7" fill="#e8f0fe" stroke="#1e3a5f" stroke-width="1.2"/>
+      <text x="165" y="30" text-anchor="middle" font-size="16">💾</text>
+      <text x="165" y="44" text-anchor="middle" font-size="7" font-weight="bold" fill="#1e3a5f">Store in Database</text>
+      <text x="165" y="55" text-anchor="middle" font-size="6" fill="#555">PostgreSQL + Drizzle</text>
+      <line x1="213" y1="38" x2="234" y2="38" stroke="#1e3a5f" stroke-width="1.2" marker-end="url(#a4)"/>
+
+      <!-- Step 3 -->
+      <rect x="238" y="10" width="90" height="55" rx="7" fill="#d4e8d4" stroke="#2d6a2e" stroke-width="1.2"/>
+      <text x="283" y="30" text-anchor="middle" font-size="16">🧠</text>
+      <text x="283" y="44" text-anchor="middle" font-size="7" font-weight="bold" fill="#2d6a2e">ML Processing</text>
+      <text x="283" y="55" text-anchor="middle" font-size="6" fill="#555">Embeddings, SVD, Clustering</text>
+      <line x1="331" y1="38" x2="352" y2="38" stroke="#1e3a5f" stroke-width="1.2" marker-end="url(#a4)"/>
+
+      <!-- Step 4 -->
+      <rect x="356" y="10" width="90" height="55" rx="7" fill="#fef3e0" stroke="#c77f00" stroke-width="1.2"/>
+      <text x="401" y="30" text-anchor="middle" font-size="16">🗳️</text>
+      <text x="401" y="44" text-anchor="middle" font-size="7" font-weight="bold" fill="#c77f00">User Answers Bills</text>
+      <text x="401" y="55" text-anchor="middle" font-size="6" fill="#555">Adaptive Testing (CAT)</text>
+      <line x1="449" y1="38" x2="470" y2="38" stroke="#1e3a5f" stroke-width="1.2" marker-end="url(#a4)"/>
+
+      <!-- Step 5 -->
+      <rect x="474" y="10" width="90" height="55" rx="7" fill="#f3e8fe" stroke="#6b2fa0" stroke-width="1.2"/>
+      <text x="519" y="30" text-anchor="middle" font-size="16">🎯</text>
+      <text x="519" y="44" text-anchor="middle" font-size="7" font-weight="bold" fill="#6b2fa0">Match Results</text>
+      <text x="519" y="55" text-anchor="middle" font-size="6" fill="#555">Ranked Members + Parties</text>
+      <line x1="567" y1="38" x2="588" y2="38" stroke="#1e3a5f" stroke-width="1.2" marker-end="url(#a4)"/>
+
+      <!-- Step 6 -->
+      <rect x="592" y="10" width="64" height="55" rx="7" fill="#e0f7e0" stroke="#2d6a2e" stroke-width="1.2"/>
+      <text x="624" y="30" text-anchor="middle" font-size="16">🌱</text>
+      <text x="624" y="44" text-anchor="middle" font-size="7" font-weight="bold" fill="#2d6a2e">Civic</text>
+      <text x="624" y="55" text-anchor="middle" font-size="6" fill="#555">Informed Voters</text>
+
+      <text x="330" y="80" text-anchor="middle" font-size="7" fill="#888" font-style="italic">Figure 1 — From raw government data to personalized political insights</text>
+    </svg>
+  </div>
+
+  <!-- Row 3 ────────────────────────────────────────── -->
+  <div class="cell cell-orange span-2">
+    <h2>✨ Key Features</h2>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 90" style="width:100%;" role="img" aria-label="Five key features illustrated with icons">
+      <!-- Feature 1 -->
+      <rect x="2" y="4" width="74" height="80" rx="6" fill="#fff" stroke="#c77f00" stroke-width="0.8"/>
+      <text x="39" y="26" text-anchor="middle" font-size="18">🎯</text>
+      <text x="39" y="40" text-anchor="middle" font-size="6.5" font-weight="bold" fill="#c77f00">Adaptive</text>
+      <text x="39" y="49" text-anchor="middle" font-size="6.5" font-weight="bold" fill="#c77f00">Matching</text>
+      <text x="39" y="61" text-anchor="middle" font-size="5.5" fill="#555">Asks the most</text>
+      <text x="39" y="69" text-anchor="middle" font-size="5.5" fill="#555">informative bills</text>
+      <text x="39" y="77" text-anchor="middle" font-size="5.5" fill="#555">first</text>
+
+      <!-- Feature 2 -->
+      <rect x="82" y="4" width="74" height="80" rx="6" fill="#fff" stroke="#c77f00" stroke-width="0.8"/>
+      <text x="119" y="26" text-anchor="middle" font-size="18">📊</text>
+      <text x="119" y="40" text-anchor="middle" font-size="6.5" font-weight="bold" fill="#c77f00">Legislation</text>
+      <text x="119" y="49" text-anchor="middle" font-size="6.5" font-weight="bold" fill="#c77f00">Scores</text>
+      <text x="119" y="61" text-anchor="middle" font-size="5.5" fill="#555">Every member's</text>
+      <text x="119" y="69" text-anchor="middle" font-size="5.5" fill="#555">vote on every</text>
+      <text x="119" y="77" text-anchor="middle" font-size="5.5" fill="#555">bill</text>
+
+      <!-- Feature 3 -->
+      <rect x="162" y="4" width="74" height="80" rx="6" fill="#fff" stroke="#c77f00" stroke-width="0.8"/>
+      <text x="199" y="26" text-anchor="middle" font-size="18">🧩</text>
+      <text x="199" y="40" text-anchor="middle" font-size="6.5" font-weight="bold" fill="#c77f00">Bill</text>
+      <text x="199" y="49" text-anchor="middle" font-size="6.5" font-weight="bold" fill="#c77f00">Clustering</text>
+      <text x="199" y="61" text-anchor="middle" font-size="5.5" fill="#555">ML groups bills</text>
+      <text x="199" y="69" text-anchor="middle" font-size="5.5" fill="#555">into policy</text>
+      <text x="199" y="77" text-anchor="middle" font-size="5.5" fill="#555">topics</text>
+
+      <!-- Feature 4 -->
+      <rect x="242" y="4" width="74" height="80" rx="6" fill="#fff" stroke="#c77f00" stroke-width="0.8"/>
+      <text x="279" y="26" text-anchor="middle" font-size="18">🗺️</text>
+      <text x="279" y="40" text-anchor="middle" font-size="6.5" font-weight="bold" fill="#c77f00">Member</text>
+      <text x="279" y="49" text-anchor="middle" font-size="6.5" font-weight="bold" fill="#c77f00">Map</text>
+      <text x="279" y="61" text-anchor="middle" font-size="5.5" fill="#555">Interactive</text>
+      <text x="279" y="69" text-anchor="middle" font-size="5.5" fill="#555">latent-space</text>
+      <text x="279" y="77" text-anchor="middle" font-size="5.5" fill="#555">visualization</text>
+
+      <!-- Feature 5 -->
+      <rect x="322" y="4" width="74" height="80" rx="6" fill="#fff" stroke="#c77f00" stroke-width="0.8"/>
+      <text x="359" y="26" text-anchor="middle" font-size="18">🤝</text>
+      <text x="359" y="40" text-anchor="middle" font-size="6.5" font-weight="bold" fill="#c77f00">Vote</text>
+      <text x="359" y="49" text-anchor="middle" font-size="6.5" font-weight="bold" fill="#c77f00">Delegation</text>
+      <text x="359" y="61" text-anchor="middle" font-size="5.5" fill="#555">Delegate votes</text>
+      <text x="359" y="69" text-anchor="middle" font-size="5.5" fill="#555">to friends and</text>
+      <text x="359" y="77" text-anchor="middle" font-size="5.5" fill="#555">compare</text>
+    </svg>
+  </div>
+
+  <div class="cell cell-purple">
+    <h2>🚀 Impact &amp; Vision</h2>
+    <ul>
+      <li>Help voters choose by <strong>policy</strong>, not party label</li>
+      <li>Expand to <strong>local assemblies</strong> across Japan</li>
+      <li>Support <strong>civic education</strong> for young voters</li>
+      <li>Promote government <strong>transparency</strong></li>
+    </ul>
+    <!-- Vision icon -->
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 45" style="width:100%;margin-top:4pt;" role="img" aria-label="Vision: from national to local expansion">
+      <rect x="4" y="4" width="45" height="35" rx="6" fill="#f3e8fe" stroke="#6b2fa0" stroke-width="0.8"/>
+      <text x="26" y="22" text-anchor="middle" font-size="14">🏛️</text>
+      <text x="26" y="34" text-anchor="middle" font-size="5" fill="#6b2fa0" font-weight="bold">National</text>
+      <text x="62" y="22" text-anchor="middle" font-size="10" fill="#6b2fa0">→</text>
+      <rect x="72" y="4" width="45" height="35" rx="6" fill="#f3e8fe" stroke="#6b2fa0" stroke-width="0.8"/>
+      <text x="94" y="22" text-anchor="middle" font-size="14">🏢</text>
+      <text x="94" y="34" text-anchor="middle" font-size="5" fill="#6b2fa0" font-weight="bold">Local</text>
+      <text x="130" y="22" text-anchor="middle" font-size="10" fill="#6b2fa0">→</text>
+      <text x="150" y="22" text-anchor="middle" font-size="18">🌍</text>
+    </svg>
+  </div>
+
+</div>
+
+<!-- ═══════ FOOTER ═══════ -->
+<p class="footer">
+  Candidate Match · Mototada Furuta · Minerva University Capstone · 2025
+  &ensp;|&ensp; github.com/Furuta-Mototada/candidate-match
+</p>
+
+</body>
+</html>

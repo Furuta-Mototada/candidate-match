@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Executive Summary — Pattern 3: Magazine</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    @page { size: letter; margin: 0.45in 0.55in; }
+
+    body {
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 10pt;
+      line-height: 1.45;
+      color: #222;
+      max-width: 7.4in;
+      margin: 0 auto;
+      padding: 0.45in 0.55in;
+      background: #fff;
+    }
+
+    /* ── Hero Banner ────────────────────────────────── */
+    .hero {
+      position: relative;
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 10pt;
+    }
+    .hero svg { display: block; width: 100%; }
+    .hero-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      color: #fff;
+    }
+    .hero-overlay h1 {
+      font-family: "Segoe UI", Arial, sans-serif;
+      font-size: 22pt;
+      font-weight: 800;
+      text-shadow: 0 2px 8px rgba(0,0,0,0.4);
+      margin-bottom: 2pt;
+    }
+    .hero-overlay .tagline {
+      font-size: 10pt;
+      font-weight: 400;
+      text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+      opacity: 0.95;
+    }
+    .hero-overlay .author {
+      font-size: 8pt;
+      margin-top: 4pt;
+      opacity: 0.8;
+      font-style: italic;
+    }
+
+    /* ── Pull Quote ─────────────────────────────────── */
+    .pull-quote {
+      text-align: center;
+      padding: 6pt 20pt;
+      margin-bottom: 8pt;
+      font-style: italic;
+      font-size: 11pt;
+      color: #1e3a5f;
+      border-top: 2px solid #1e3a5f;
+      border-bottom: 2px solid #1e3a5f;
+    }
+
+    /* ── Magazine Grid ──────────────────────────────── */
+    .mag-grid {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 12pt;
+      margin-bottom: 8pt;
+    }
+
+    /* ── Sidebar ────────────────────────────────────── */
+    .sidebar {
+      background: #f5f7fa;
+      border-radius: 8px;
+      padding: 8pt 10pt;
+    }
+    .sidebar h2 {
+      font-family: "Segoe UI", Arial, sans-serif;
+      font-size: 10pt;
+      font-weight: 700;
+      color: #1e3a5f;
+      border-bottom: 1.5px solid #c5d5e8;
+      padding-bottom: 2pt;
+      margin-bottom: 4pt;
+    }
+
+    /* ── Article Text ───────────────────────────────── */
+    .article h2 {
+      font-family: "Segoe UI", Arial, sans-serif;
+      font-size: 12pt;
+      font-weight: 700;
+      color: #1e3a5f;
+      margin-bottom: 3pt;
+      margin-top: 6pt;
+    }
+    .article h2:first-child { margin-top: 0; }
+    .article p { margin-bottom: 5pt; font-size: 9.5pt; }
+    .article strong { color: #1e3a5f; }
+
+    .drop-cap::first-letter {
+      float: left;
+      font-size: 28pt;
+      line-height: 1;
+      font-weight: 700;
+      color: #1e3a5f;
+      margin-right: 3pt;
+      margin-top: 2pt;
+    }
+
+    /* ── User Journey ───────────────────────────────── */
+    .journey-container {
+      margin: 6pt 0;
+      text-align: center;
+    }
+    .journey-container svg { width: 100%; max-width: 320pt; }
+    .caption {
+      font-size: 7.5pt;
+      color: #888;
+      text-align: center;
+      margin-top: 2pt;
+      font-style: italic;
+    }
+
+    /* ── Feature List ───────────────────────────────── */
+    .feature-list { list-style: none; margin: 4pt 0; padding: 0; }
+    .feature-list li {
+      display: flex;
+      align-items: flex-start;
+      gap: 6pt;
+      margin-bottom: 4pt;
+      font-size: 8.5pt;
+    }
+    .feature-list .fi { font-size: 14pt; flex-shrink: 0; line-height: 1; }
+    .feature-list strong { color: #1e3a5f; display: block; font-size: 8.5pt; }
+    .feature-list .fdesc { color: #555; font-size: 7.5pt; }
+
+    /* ── Tech Pills ─────────────────────────────────── */
+    .tech-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 3pt;
+      margin-top: 4pt;
+    }
+    .pill {
+      display: inline-block;
+      padding: 2pt 6pt;
+      border-radius: 10pt;
+      font-size: 7pt;
+      font-weight: 600;
+      font-family: "Segoe UI", Arial, sans-serif;
+    }
+    .pill-blue   { background: #d5e5f7; color: #1e3a5f; }
+    .pill-green  { background: #d4e8d4; color: #2d6a2e; }
+    .pill-orange { background: #fef3e0; color: #c77f00; }
+    .pill-purple { background: #f3e8fe; color: #6b2fa0; }
+
+    /* ── Footer ─────────────────────────────────────── */
+    .footer {
+      text-align: center;
+      font-size: 7.5pt;
+      font-family: "Segoe UI", Arial, sans-serif;
+      color: #999;
+      border-top: 1px solid #ddd;
+      padding-top: 3pt;
+      margin-top: 6pt;
+    }
+
+    @media print {
+      body { padding: 0; max-width: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════ HERO BANNER ═══════ -->
+<div class="hero">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 120" preserveAspectRatio="xMidYMid slice">
+    <defs>
+      <linearGradient id="hg" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#0d1b2a"/>
+        <stop offset="50%" stop-color="#1b3a5c"/>
+        <stop offset="100%" stop-color="#2d6a9f"/>
+      </linearGradient>
+    </defs>
+    <rect width="700" height="120" fill="url(#hg)"/>
+    <!-- Decorative dots representing data points -->
+    <circle cx="50" cy="30" r="3" fill="#fff" opacity="0.15"/>
+    <circle cx="120" cy="60" r="4" fill="#fff" opacity="0.12"/>
+    <circle cx="200" cy="20" r="2.5" fill="#fff" opacity="0.18"/>
+    <circle cx="280" cy="90" r="3.5" fill="#fff" opacity="0.1"/>
+    <circle cx="380" cy="40" r="2" fill="#fff" opacity="0.2"/>
+    <circle cx="450" cy="70" r="4" fill="#fff" opacity="0.08"/>
+    <circle cx="530" cy="25" r="3" fill="#fff" opacity="0.15"/>
+    <circle cx="600" cy="85" r="2.5" fill="#fff" opacity="0.12"/>
+    <circle cx="650" cy="50" r="3.5" fill="#fff" opacity="0.1"/>
+    <!-- Connecting lines (network/constellation) -->
+    <line x1="50" y1="30" x2="120" y2="60" stroke="#fff" stroke-width="0.5" opacity="0.08"/>
+    <line x1="120" y1="60" x2="200" y2="20" stroke="#fff" stroke-width="0.5" opacity="0.08"/>
+    <line x1="200" y1="20" x2="280" y2="90" stroke="#fff" stroke-width="0.5" opacity="0.06"/>
+    <line x1="280" y1="90" x2="380" y2="40" stroke="#fff" stroke-width="0.5" opacity="0.08"/>
+    <line x1="380" y1="40" x2="450" y2="70" stroke="#fff" stroke-width="0.5" opacity="0.06"/>
+    <line x1="450" y1="70" x2="530" y2="25" stroke="#fff" stroke-width="0.5" opacity="0.08"/>
+    <line x1="530" y1="25" x2="600" y2="85" stroke="#fff" stroke-width="0.5" opacity="0.06"/>
+    <line x1="600" y1="85" x2="650" y2="50" stroke="#fff" stroke-width="0.5" opacity="0.08"/>
+  </svg>
+  <div class="hero-overlay">
+    <h1>🗳️ Candidate Match</h1>
+    <div class="tagline">AI-Powered Political Matching for the Japanese National Diet</div>
+    <div class="author">Mototada Furuta · Minerva University Capstone</div>
+  </div>
+</div>
+
+<!-- ═══════ PULL QUOTE ═══════ -->
+<div class="pull-quote">
+  "What if finding the politician who best represents you was as easy as answering a few questions?"
+</div>
+
+<!-- ═══════ MAGAZINE LAYOUT ═══════ -->
+<div class="mag-grid">
+
+  <!-- LEFT: Article body -->
+  <div class="article">
+    <h2>The Problem</h2>
+    <p class="drop-cap">Japan's National Diet passes hundreds of bills each session, yet most voters have little insight into how their representatives actually vote. Traditional media focuses on party labels and personalities rather than legislative behavior — leaving citizens unable to determine which politicians truly share their views.</p>
+
+    <h2>The Solution</h2>
+    <p><strong>Candidate Match</strong> is a web application that uses <em>Computerized Adaptive Testing</em> (CAT) to help anyone find their closest match in parliament. Users answer a short series of questions about real bills — "Do you support or oppose this legislation?" — and the system uses machine learning to find Diet members whose voting records are most similar.</p>
+
+    <!-- User Journey Diagram -->
+    <div class="journey-container">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 100" role="img" aria-label="User journey: 4 steps from start to results">
+        <defs>
+          <marker id="a3" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+            <polygon points="0 0, 7 2.5, 0 5" fill="#1e3a5f"/>
+          </marker>
+        </defs>
+        <text x="200" y="12" text-anchor="middle" font-size="8" font-weight="bold" fill="#1e3a5f" font-family="Segoe UI, Arial">Your Journey</text>
+
+        <!-- Step 1 -->
+        <circle cx="50" cy="50" r="24" fill="#e8f0fe" stroke="#1e3a5f" stroke-width="1.2"/>
+        <text x="50" y="48" text-anchor="middle" font-size="18">📝</text>
+        <text x="50" y="62" text-anchor="middle" font-size="6" fill="#1e3a5f" font-family="Segoe UI, Arial">Sign Up</text>
+        <text x="50" y="88" text-anchor="middle" font-size="6.5" fill="#555" font-family="Segoe UI, Arial">Create account</text>
+
+        <line x1="76" y1="50" x2="110" y2="50" stroke="#1e3a5f" stroke-width="1" marker-end="url(#a3)"/>
+
+        <!-- Step 2 -->
+        <circle cx="140" cy="50" r="24" fill="#d4e8d4" stroke="#2d6a2e" stroke-width="1.2"/>
+        <text x="140" y="48" text-anchor="middle" font-size="18">🗳️</text>
+        <text x="140" y="62" text-anchor="middle" font-size="6" fill="#2d6a2e" font-family="Segoe UI, Arial">Answer</text>
+        <text x="140" y="88" text-anchor="middle" font-size="6.5" fill="#555" font-family="Segoe UI, Arial">Vote on bills</text>
+
+        <line x1="166" y1="50" x2="200" y2="50" stroke="#1e3a5f" stroke-width="1" marker-end="url(#a3)"/>
+
+        <!-- Step 3 -->
+        <circle cx="230" cy="50" r="24" fill="#fef3e0" stroke="#c77f00" stroke-width="1.2"/>
+        <text x="230" y="48" text-anchor="middle" font-size="18">🧠</text>
+        <text x="230" y="62" text-anchor="middle" font-size="6" fill="#c77f00" font-family="Segoe UI, Arial">AI Matches</text>
+        <text x="230" y="88" text-anchor="middle" font-size="6.5" fill="#555" font-family="Segoe UI, Arial">ML processing</text>
+
+        <line x1="256" y1="50" x2="290" y2="50" stroke="#1e3a5f" stroke-width="1" marker-end="url(#a3)"/>
+
+        <!-- Step 4 -->
+        <circle cx="320" cy="50" r="24" fill="#f3e8fe" stroke="#6b2fa0" stroke-width="1.2"/>
+        <text x="320" y="48" text-anchor="middle" font-size="18">🎉</text>
+        <text x="320" y="62" text-anchor="middle" font-size="6" fill="#6b2fa0" font-family="Segoe UI, Arial">Results!</text>
+        <text x="320" y="88" text-anchor="middle" font-size="6.5" fill="#555" font-family="Segoe UI, Arial">Your top matches</text>
+      </svg>
+      <p class="caption">Figure 1 — The user journey: from sign-up to personalized match results.</p>
+    </div>
+
+    <h2>Impact</h2>
+    <p>By making legislative data accessible and personal, Candidate Match aims to strengthen democratic participation in Japan — helping voters engage with politics based on <em>policy</em>, not just party affiliation. The long-term vision includes expanding to local assemblies and supporting civic-education programs for young voters.</p>
+  </div>
+
+  <!-- RIGHT: Sidebar -->
+  <div class="sidebar">
+    <h2>Key Features</h2>
+    <ul class="feature-list">
+      <li><span class="fi">🎯</span><div><strong>Adaptive Matching</strong><span class="fdesc">Asks the most informative bills first for fast, accurate results</span></div></li>
+      <li><span class="fi">📊</span><div><strong>Legislation Scores</strong><span class="fdesc">Searchable database of every member's vote on every bill</span></div></li>
+      <li><span class="fi">🧩</span><div><strong>Bill Clustering</strong><span class="fdesc">ML-powered grouping of similar legislation into topics</span></div></li>
+      <li><span class="fi">🗺️</span><div><strong>Member Visualization</strong><span class="fdesc">Interactive latent-space map of political positions</span></div></li>
+      <li><span class="fi">🤝</span><div><strong>Vote Delegation</strong><span class="fdesc">Delegate votes to friends and compare together</span></div></li>
+    </ul>
+
+    <h2 style="margin-top: 8pt;">Technology Stack</h2>
+    <div class="tech-pills">
+      <span class="pill pill-blue">SvelteKit</span>
+      <span class="pill pill-blue">TypeScript</span>
+      <span class="pill pill-green">PostgreSQL</span>
+      <span class="pill pill-green">Drizzle ORM</span>
+      <span class="pill pill-orange">Python</span>
+      <span class="pill pill-orange">scikit-learn</span>
+      <span class="pill pill-purple">OpenAI API</span>
+      <span class="pill pill-purple">sentence-transformers</span>
+      <span class="pill pill-blue">Tailwind CSS</span>
+      <span class="pill pill-green">Paraglide.js</span>
+    </div>
+
+    <!-- Mini Architecture Diagram -->
+    <h2 style="margin-top: 8pt;">Architecture</h2>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 130" role="img" aria-label="Simplified architecture diagram" style="width:100%;">
+      <defs>
+        <marker id="a3s" markerWidth="6" markerHeight="4" refX="6" refY="2" orient="auto">
+          <polygon points="0 0, 6 2, 0 4" fill="#1e3a5f"/>
+        </marker>
+      </defs>
+      <!-- User -->
+      <rect x="4" y="4" width="65" height="35" rx="6" fill="#f3e8fe" stroke="#6b2fa0" stroke-width="1"/>
+      <text x="36" y="18" text-anchor="middle" font-size="12">👤</text>
+      <text x="36" y="32" text-anchor="middle" font-size="6.5" font-weight="bold" fill="#6b2fa0" font-family="Segoe UI, Arial">User</text>
+
+      <line x1="36" y1="41" x2="36" y2="52" stroke="#1e3a5f" stroke-width="1" marker-end="url(#a3s)"/>
+
+      <!-- SvelteKit -->
+      <rect x="4" y="55" width="65" height="30" rx="6" fill="#e8f0fe" stroke="#1e3a5f" stroke-width="1"/>
+      <text x="36" y="75" text-anchor="middle" font-size="6.5" font-weight="bold" fill="#1e3a5f" font-family="Segoe UI, Arial">SvelteKit App</text>
+
+      <line x1="71" y1="70" x2="85" y2="70" stroke="#1e3a5f" stroke-width="1" marker-end="url(#a3s)"/>
+
+      <!-- API/Server -->
+      <rect x="88" y="55" width="65" height="30" rx="6" fill="#d4e8d4" stroke="#2d6a2e" stroke-width="1"/>
+      <text x="120" y="75" text-anchor="middle" font-size="6.5" font-weight="bold" fill="#2d6a2e" font-family="Segoe UI, Arial">API + ML Engine</text>
+
+      <line x1="155" y1="70" x2="169" y2="70" stroke="#1e3a5f" stroke-width="1" marker-end="url(#a3s)"/>
+
+      <!-- Database -->
+      <rect x="172" y="55" width="65" height="30" rx="6" fill="#fef3e0" stroke="#c77f00" stroke-width="1"/>
+      <text x="204" y="75" text-anchor="middle" font-size="6.5" font-weight="bold" fill="#c77f00" font-family="Segoe UI, Arial">PostgreSQL</text>
+
+      <!-- Python scraper -->
+      <rect x="88" y="95" width="149" height="28" rx="6" fill="#f8f0ff" stroke="#6b2fa0" stroke-width="1"/>
+      <text x="162" y="113" text-anchor="middle" font-size="6.5" font-weight="bold" fill="#6b2fa0" font-family="Segoe UI, Arial">Python Data Pipeline (Scraping → Embeddings → Clustering)</text>
+
+      <line x1="120" y1="87" x2="120" y2="93" stroke="#6b2fa0" stroke-width="1" marker-end="url(#a3s)"/>
+      <line x1="204" y1="87" x2="204" y2="93" stroke="#6b2fa0" stroke-width="1" marker-end="url(#a3s)"/>
+    </svg>
+    <p class="caption">Figure 2 — System architecture overview.</p>
+  </div>
+</div>
+
+<!-- ═══════ FOOTER ═══════ -->
+<p class="footer">
+  Candidate Match · Mototada Furuta · Minerva University Capstone · 2025
+  &ensp;|&ensp; github.com/Furuta-Mototada/candidate-match
+</p>
+
+</body>
+</html>
