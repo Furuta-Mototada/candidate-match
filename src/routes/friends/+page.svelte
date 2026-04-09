@@ -3,6 +3,7 @@
 	import { Users, Mailbox, Search } from '@lucide/svelte';
 	import { LoadingSpinner } from '$lib/components/index.js';
 	import Avatar from '$lib/components/Avatar.svelte';
+	import Toast from '$lib/components/Toast.svelte';
 	import type { PageData } from './$types.js';
 
 	let { data }: { data: PageData } = $props();
@@ -224,9 +225,7 @@
 		{#if pageDataLoading}
 			<LoadingSpinner message="データを読み込み中..." size="large" />
 		{:else}
-			{#if message}
-				<div class="toast toast-{message.type}">{message.text}</div>
-			{/if}
+			<Toast {message} />
 
 			<!-- Tabs -->
 			<div class="tabs">
@@ -450,39 +449,6 @@
 		font-weight: 700;
 		color: #1e293b;
 		margin-bottom: 1.5rem;
-	}
-
-	/* Toast */
-	.toast {
-		padding: 0.625rem 1rem;
-		border-radius: 0.5rem;
-		font-size: 0.8125rem;
-		font-weight: 500;
-		margin-bottom: 1rem;
-		animation: slideIn 0.2s ease;
-	}
-
-	.toast-success {
-		background: #f0fdf4;
-		color: #16a34a;
-		border: 1px solid #bbf7d0;
-	}
-
-	.toast-error {
-		background: #fef2f2;
-		color: #dc2626;
-		border: 1px solid #fecaca;
-	}
-
-	@keyframes slideIn {
-		from {
-			opacity: 0;
-			transform: translateY(-0.5rem);
-		}
-		to {
-			opacity: 1;
-			transform: translateY(0);
-		}
 	}
 
 	/* Tabs */

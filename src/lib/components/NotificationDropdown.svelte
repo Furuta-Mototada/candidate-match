@@ -12,7 +12,22 @@
 		RefreshCw,
 		Ban
 	} from '@lucide/svelte';
+	import type { Component } from 'svelte';
 	import Avatar from '$lib/components/Avatar.svelte';
+
+	const NOTIFICATION_ICONS: Record<string, Component<{ size: number }>> = {
+		friend_request_received: Bell,
+		friend_request_accepted: Handshake,
+		friend_request_rejected: Frown,
+		delegation_received: MailOpen,
+		delegation_rejected: CircleX,
+		delegation_redelegated: ArrowUpRight,
+		delegation_voted: Vote,
+		delegation_retracted: Undo2,
+		delegation_vote_changed: RefreshCw,
+		delegation_overridden: Ban,
+		welcome: PartyPopper
+	};
 
 	interface Notification {
 		id: number;
@@ -129,30 +144,9 @@
 {#snippet notifIcon(type: string, actorUsername: string | null, actorAvatarUrl: string | null)}
 	{#if actorUsername}
 		<Avatar username={actorUsername} avatarUrl={actorAvatarUrl} size="sm" />
-	{:else if type === 'friend_request_received'}
-		<Bell size={16} />
-	{:else if type === 'friend_request_accepted'}
-		<Handshake size={16} />
-	{:else if type === 'friend_request_rejected'}
-		<Frown size={16} />
-	{:else if type === 'delegation_received'}
-		<MailOpen size={16} />
-	{:else if type === 'delegation_rejected'}
-		<CircleX size={16} />
-	{:else if type === 'delegation_redelegated'}
-		<ArrowUpRight size={16} />
-	{:else if type === 'delegation_voted'}
-		<Vote size={16} />
-	{:else if type === 'delegation_retracted'}
-		<Undo2 size={16} />
-	{:else if type === 'delegation_vote_changed'}
-		<RefreshCw size={16} />
-	{:else if type === 'delegation_overridden'}
-		<Ban size={16} />
-	{:else if type === 'welcome'}
-		<PartyPopper size={16} />
 	{:else}
-		<Bell size={16} />
+		{@const IconComponent = NOTIFICATION_ICONS[type] ?? Bell}
+		<IconComponent size={16} />
 	{/if}
 {/snippet}
 
