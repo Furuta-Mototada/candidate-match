@@ -70,7 +70,7 @@
 		"@xyflow/svelte": "^1.5.2",
 		"cheerio": "^1.1.2",
 		"dotenv": "^16.6.1",
-		"imagekit": "^6.0.0",
+		"@imagekit/nodejs": "^7.4.0",
 		"postgres": "^3.4.7",
 		"undici": "^5.29.0"
 	},
@@ -117,7 +117,8 @@
 	"pnpm": {
 		"onlyBuiltDependencies": [
 			"esbuild",
-			"@tailwindcss/oxide"
+			"@tailwindcss/oxide",
+			"@node-rs/argon2"
 		]
 	}
 }

@@ -1,4 +1,4 @@
-import ImageKit from 'imagekit';
+import ImageKit from '@imagekit/nodejs';
 import { env } from '$env/dynamic/private';
 
 let _imagekit: ImageKit | null = null;
@@ -14,7 +14,7 @@ function getImageKit(): ImageKit | null {
 		);
 		return null;
 	}
-	_imagekit = new ImageKit({ publicKey, privateKey, urlEndpoint });
+	_imagekit = new ImageKit({ privateKey });
 	return _imagekit;
 }
 

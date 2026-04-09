@@ -13,7 +13,7 @@ export const GET: RequestHandler = async ({ locals }) => {
 	}
 
 	try {
-		const authParams = ik.getAuthenticationParameters();
+		const authParams = ik.helper.getAuthenticationParameters();
 		return json({
 			success: true,
 			...authParams,
