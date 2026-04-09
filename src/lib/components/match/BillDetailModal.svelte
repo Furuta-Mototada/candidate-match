@@ -69,10 +69,12 @@
 	// getAnswerLabel and getAnswerClass imported from $lib/utils/vote-helpers.js
 
 	$effect(() => {
-		loadEnrichment();
+		const controller = new AbortController();
+		loadEnrichment(controller.signal);
+		return () => controller.abort();
 	});
 
-	async function loadEnrichment() {
+	async function loadEnrichment(signal?: AbortSignal) {
 		const cached = enrichmentCache.get(billId);
 		if (cached) {
 			enrichmentData = cached;
@@ -82,16 +84,16 @@
 		isLoading = true;
 		loadError = null;
 		try {
-			const res = await fetch(`/api/bill-enrichment?billId=${billId}`);
+			const res = await fetch(`/api/bill-enrichment?billId=${billId}`, { signal });
 			if (!res.ok) throw new Error('データの取得に失敗しました');
 			const data: EnrichedBillData = await res.json();
 			enrichmentData = data;
 			enrichmentCache.set(billId, data);
 		} catch (e) {
+			if (e instanceof DOMException && e.name === 'AbortError') return;
 			loadError = e instanceof Error ? e.message : '不明なエラー';
-		} finally {
-			isLoading = false;
 		}
+		isLoading = false;
 	}
 
 	async function handleVote(score: number) {
@@ -171,7 +173,7 @@
 			{:else if loadError}
 				<div class="error-state">
 					<p><TriangleAlert size={14} class="inline-icon" color="#f59e0b" /> {loadError}</p>
-					<button class="retry-btn" onclick={loadEnrichment}>再読み込み</button>
+					<button class="retry-btn" onclick={() => loadEnrichment()}>再読み込み</button>
 				</div>
 			{:else if enrichmentData}
 				<BillContent {enrichmentData} />

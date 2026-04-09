@@ -118,28 +118,30 @@
 		currentQuestion ? enrichmentLoading[currentQuestion.billId] || false : false
 	);
 
-	async function loadEnrichment(billId: number) {
+	async function loadEnrichment(billId: number, signal?: AbortSignal) {
 		if (enrichmentCache[billId] || enrichmentLoading[billId]) return;
 
 		enrichmentLoading[billId] = true;
 
 		try {
-			const response = await fetch(`/api/bill-enrichment?billId=${billId}`);
+			const response = await fetch(`/api/bill-enrichment?billId=${billId}`, { signal });
 			if (response.ok) {
 				const data = await response.json();
 				enrichmentCache[billId] = data;
 			}
 		} catch (error) {
+			if (error instanceof DOMException && error.name === 'AbortError') return;
 			console.error('Failed to load enrichment:', error);
-		} finally {
-			enrichmentLoading[billId] = false;
 		}
+		enrichmentLoading[billId] = false;
 	}
 
 	// Auto-load enrichment when question changes
 	$effect(() => {
 		if (currentQuestion && !enrichmentCache[currentQuestion.billId]) {
-			loadEnrichment(currentQuestion.billId);
+			const controller = new AbortController();
+			loadEnrichment(currentQuestion.billId, controller.signal);
+			return () => controller.abort();
 		}
 	});
 

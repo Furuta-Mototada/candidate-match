@@ -78,6 +78,7 @@
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let hoveredMember: MemberPoint | null = $state(null);
+	let focusedMemberIndex = $state(-1);
 	let isExpanded = $state(!collapsible);
 	let rafId: number | null = null;
 	let lastMouseEvent: MouseEvent | null = null;
@@ -432,6 +433,32 @@
 		}
 	}
 
+	function handleCanvasKeydown(event: KeyboardEvent) {
+		if (!members.length) return;
+
+		if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+			event.preventDefault();
+			focusedMemberIndex = (focusedMemberIndex + 1) % members.length;
+			hoveredMember = members[focusedMemberIndex];
+		} else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+			event.preventDefault();
+			focusedMemberIndex = (focusedMemberIndex - 1 + members.length) % members.length;
+			hoveredMember = members[focusedMemberIndex];
+		} else if (event.key === 'Enter' || event.key === ' ') {
+			event.preventDefault();
+			if (hoveredMember && onMemberClick) {
+				onMemberClick({
+					memberId: hoveredMember.memberId,
+					name: hoveredMember.name,
+					group: hoveredMember.group
+				});
+			}
+		} else if (event.key === 'Escape') {
+			focusedMemberIndex = -1;
+			hoveredMember = null;
+		}
+	}
+
 	function handleCanvasClick(event: MouseEvent) {
 		if (!canvasElement || !members.length || !onMemberClick) return;
 
@@ -579,15 +606,22 @@
 				</div>
 			{/if}
 
-			<div class="canvas-container">
+			<div
+				class="canvas-container"
+				role="group"
+				aria-label="議員分布の2D可視化。矢印キーで議員を選択、Enterで詳細を表示。"
+			>
 				<canvas
 					bind:this={canvasElement}
 					class="viz-canvas"
 					class:clickable={!!onMemberClick}
 					style="width: 100%; max-width: {width}px; height: auto; aspect-ratio: {width} / {height};"
+					tabindex="0"
+					aria-label="議員分布の散布図"
 					onmousemove={handleCanvasMouseMove}
 					onmouseleave={handleCanvasMouseLeave}
 					onclick={handleCanvasClick}
+					onkeydown={handleCanvasKeydown}
 				></canvas>
 			</div>
 

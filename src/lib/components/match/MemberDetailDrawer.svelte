@@ -2,7 +2,7 @@
 	import { fetchMemberDetail } from '$lib/utils/member-detail-loader.js';
 	import type { BaseClusterResult, GlobalMemberScore, MemberDetail } from '$lib/types/index.js';
 	import { formatBillRef } from '$lib/types/index.js';
-	import { ChevronLeft, X, User, Hourglass, Info } from '@lucide/svelte';
+	import { ChevronLeft, X, User, Info } from '@lucide/svelte';
 
 	interface Props {
 		selectedMember: { memberId: number; name: string; group: string | null };
@@ -38,16 +38,20 @@
 			if (cr.answeredBills) billIds.push(...cr.answeredBills.map((b) => b.billId));
 		}
 
-		fetchMemberDetail(selectedMember.memberId, billIds)
+		const controller = new AbortController();
+
+		fetchMemberDetail(selectedMember.memberId, billIds, controller.signal)
 			.then((detail) => {
 				memberDetail = detail;
+				memberDetailLoading = false;
 			})
 			.catch((err) => {
+				if (err instanceof DOMException && err.name === 'AbortError') return;
 				console.error('Failed to load member detail:', err);
-			})
-			.finally(() => {
 				memberDetailLoading = false;
 			});
+
+		return () => controller.abort();
 	});
 
 	function formatSimilarity(sim: number): string {
@@ -134,8 +138,35 @@
 			{/if}
 
 			{#if memberDetailLoading}
-				<div class="drawer-loading">
-					<Hourglass size={18} /> 読み込み中...
+				<div class="skeleton-section">
+					<div class="skeleton-heading"></div>
+					<div class="skeleton-tags">
+						<div class="skeleton-tag"></div>
+						<div class="skeleton-tag skeleton-tag-short"></div>
+					</div>
+				</div>
+				<div class="skeleton-section">
+					<div class="skeleton-heading"></div>
+					<div class="skeleton-timeline-entry">
+						<div class="skeleton-dot"></div>
+						<div class="skeleton-timeline-lines">
+							<div class="skeleton-line"></div>
+							<div class="skeleton-line skeleton-line-short"></div>
+						</div>
+					</div>
+					<div class="skeleton-timeline-entry">
+						<div class="skeleton-dot"></div>
+						<div class="skeleton-timeline-lines">
+							<div class="skeleton-line"></div>
+							<div class="skeleton-line skeleton-line-short"></div>
+						</div>
+					</div>
+				</div>
+				<div class="skeleton-section">
+					<div class="skeleton-heading"></div>
+					<div class="skeleton-bill-row"></div>
+					<div class="skeleton-bill-row"></div>
+					<div class="skeleton-bill-row"></div>
 				</div>
 			{:else if memberDetail}
 				<!-- Name variants -->
@@ -743,5 +774,92 @@
 	}
 	.negative {
 		color: #991b1b;
+	}
+
+	/* Skeleton loading styles */
+	@keyframes skeleton-pulse {
+		0%,
+		100% {
+			opacity: 0.4;
+		}
+		50% {
+			opacity: 1;
+		}
+	}
+
+	.skeleton-section {
+		padding: 0.75rem 0;
+		border-bottom: 1px solid #f3f4f6;
+	}
+
+	.skeleton-heading {
+		width: 30%;
+		height: 0.875rem;
+		background: #e5e7eb;
+		border-radius: 4px;
+		margin-bottom: 0.75rem;
+		animation: skeleton-pulse 1.5s ease-in-out infinite;
+	}
+
+	.skeleton-tags {
+		display: flex;
+		gap: 0.375rem;
+	}
+
+	.skeleton-tag {
+		width: 4.5rem;
+		height: 1.5rem;
+		background: #e5e7eb;
+		border-radius: 6px;
+		animation: skeleton-pulse 1.5s ease-in-out infinite;
+	}
+
+	.skeleton-tag-short {
+		width: 3rem;
+	}
+
+	.skeleton-timeline-entry {
+		display: flex;
+		align-items: flex-start;
+		gap: 0.75rem;
+		margin-bottom: 0.75rem;
+	}
+
+	.skeleton-dot {
+		width: 10px;
+		height: 10px;
+		border-radius: 50%;
+		background: #e5e7eb;
+		margin-top: 4px;
+		flex-shrink: 0;
+		animation: skeleton-pulse 1.5s ease-in-out infinite;
+	}
+
+	.skeleton-timeline-lines {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		gap: 0.375rem;
+	}
+
+	.skeleton-line {
+		width: 60%;
+		height: 0.75rem;
+		background: #e5e7eb;
+		border-radius: 4px;
+		animation: skeleton-pulse 1.5s ease-in-out infinite;
+	}
+
+	.skeleton-line-short {
+		width: 40%;
+	}
+
+	.skeleton-bill-row {
+		width: 100%;
+		height: 2.5rem;
+		background: #e5e7eb;
+		border-radius: 6px;
+		margin-bottom: 0.5rem;
+		animation: skeleton-pulse 1.5s ease-in-out infinite;
 	}
 </style>

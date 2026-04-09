@@ -164,17 +164,21 @@
 			: null
 	);
 
+	let memberDetailAbort: AbortController | null = null;
+
 	async function loadMemberDetail(memberId: number) {
+		memberDetailAbort?.abort();
+		memberDetailAbort = new AbortController();
 		memberDetailLoading = true;
 		memberDetail = null;
 		try {
 			const billIds = currentClusterAnsweredBills.map((b) => b.billId);
-			memberDetail = await fetchMemberDetail(memberId, billIds);
+			memberDetail = await fetchMemberDetail(memberId, billIds, memberDetailAbort.signal);
 		} catch (err) {
+			if (err instanceof DOMException && err.name === 'AbortError') return;
 			console.error('Failed to load member detail:', err);
-		} finally {
-			memberDetailLoading = false;
 		}
+		memberDetailLoading = false;
 	}
 
 	function handleMemberClick(m: { memberId: number; name: string; group: string | null }) {

@@ -8,6 +8,7 @@
 	let stats = $state({ totalBills: 0, totalMembers: 0, totalVotes: 0, sessionsAnalyzed: 0 });
 
 	let mounted = $state(false);
+	let statsAnimated = false;
 
 	// Animated counter effect
 	function animateValue(
@@ -36,10 +37,17 @@
 	});
 
 	function animateStats(resolvedStats: typeof stats) {
+		if (statsAnimated) return;
 		if (resolvedStats.totalBills || resolvedStats.totalMembers || resolvedStats.totalVotes) {
+			statsAnimated = true;
 			setTimeout(() => {
 				animateValue(0, resolvedStats.totalBills, 1500, (val) => (displayStats.totalBills = val));
-				animateValue(0, resolvedStats.totalMembers, 1500, (val) => (displayStats.totalMembers = val));
+				animateValue(
+					0,
+					resolvedStats.totalMembers,
+					1500,
+					(val) => (displayStats.totalMembers = val)
+				);
 				animateValue(0, resolvedStats.totalVotes, 2000, (val) => (displayStats.totalVotes = val));
 			}, 300);
 		}

@@ -49,6 +49,7 @@
 				<div class="user-dropdown-wrapper">
 					<button
 						class="user-chip"
+						id="user-menu-button"
 						onclick={toggleDropdown}
 						aria-expanded={dropdownOpen}
 						aria-haspopup="true"
@@ -67,7 +68,7 @@
 					</button>
 
 					{#if dropdownOpen}
-						<div class="dropdown-menu" role="menu">
+						<div class="dropdown-menu" role="menu" aria-labelledby="user-menu-button">
 							<a href="/friends" class="dropdown-item" role="menuitem" onclick={closeDropdown}>
 								<Users size={16} />
 								<span>フレンド</span>
