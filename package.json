@@ -82,7 +82,7 @@
 		"@oslojs/crypto": "^1.0.1",
 		"@oslojs/encoding": "^1.1.0",
 		"@playwright/test": "^1.56.1",
-		"@sveltejs/adapter-auto": "^7.0.0",
+		"@sveltejs/adapter-vercel": "^6.3.3",
 		"@sveltejs/kit": "^2.48.4",
 		"@sveltejs/package": "^2.5.4",
 		"@sveltejs/vite-plugin-svelte": "^6.2.1",
@@ -119,6 +119,10 @@
 			"esbuild",
 			"@tailwindcss/oxide",
 			"@node-rs/argon2"
-		]
+		],
+		"allowedDeprecatedVersions": {
+			"@esbuild-kit/core-utils": "3",
+			"@esbuild-kit/esm-loader": "2"
+		}
 	}
 }
