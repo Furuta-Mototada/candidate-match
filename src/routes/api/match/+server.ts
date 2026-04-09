@@ -152,14 +152,14 @@ async function getOrReconstructSession(
 		if (session) return session;
 	}
 
-	// Fallback: reconstruct from DB
-	if (savedVectorId && clientUserVector) {
+	// Fallback: reconstruct from DB (essential for serverless environments like Vercel)
+	if (savedVectorId) {
 		console.log(
-			`[session] Reconstructing session from savedVectorId=${savedVectorId} (in-memory miss)`
+			`[session] Reconstructing session from savedVectorId=${savedVectorId} (in-memory miss, ${clientAnsweredBills?.length ?? 0} answered bills from client)`
 		);
 		const session = await reconstructSession(
 			savedVectorId,
-			clientUserVector,
+			clientUserVector || [],
 			clientAnsweredBills || []
 		);
 		if (session && sessionId) {
@@ -1080,7 +1080,24 @@ async function handleAnswer(
 	session.state = newState;
 
 	// Get next question
-	const nextQuestion = selectNextQuestion(newState, session.clusterData, session.billInfoMap);
+	let nextQuestion = selectNextQuestion(newState, session.clusterData, session.billInfoMap);
+
+	// Server-side safety check: ensure nextQuestion is not already in answeredBills
+	// This guards against any edge case where reconstruction + selectNextQuestion desyncs
+	const answeredBillIdSet = new Set(newState.answeredBills.map((a) => a.billId));
+	if (nextQuestion && answeredBillIdSet.has(nextQuestion.bill.billId)) {
+		console.warn(
+			`[handleAnswer] selectNextQuestion returned already-answered bill ${nextQuestion.bill.billId}, skipping`
+		);
+		// Force-skip by adding it as answered and re-selecting
+		const skipAnswer: UserAnswer = {
+			billId: nextQuestion.bill.billId,
+			score: newState.answeredBills.find((a) => a.billId === nextQuestion!.bill.billId)?.score ?? 0
+		};
+		const fixedState = updateMatchingState(newState, skipAnswer, billLoadingsMap);
+		session.state = fixedState;
+		nextQuestion = selectNextQuestion(fixedState, session.clusterData, session.billInfoMap);
+	}
 
 	// Get current top matches
 	const matches = findMatchingMembers(newState.userVector, session.clusterData, 10);
@@ -1195,7 +1212,22 @@ async function handleSkip(
 	session.state = newState;
 
 	// Get next question
-	const nextQuestion = selectNextQuestion(newState, session.clusterData, session.billInfoMap);
+	let nextQuestion = selectNextQuestion(newState, session.clusterData, session.billInfoMap);
+
+	// Server-side safety check: ensure nextQuestion is not already answered
+	const skipAnsweredBillIdSet = new Set(newState.answeredBills.map((a) => a.billId));
+	if (nextQuestion && skipAnsweredBillIdSet.has(nextQuestion.bill.billId)) {
+		console.warn(
+			`[handleSkip] selectNextQuestion returned already-answered bill ${nextQuestion.bill.billId}, skipping`
+		);
+		const skipAnswer2: UserAnswer = {
+			billId: nextQuestion.bill.billId,
+			score: newState.answeredBills.find((a) => a.billId === nextQuestion!.bill.billId)?.score ?? 0
+		};
+		const fixedState = updateMatchingState(newState, skipAnswer2, billLoadingsMap);
+		session.state = fixedState;
+		nextQuestion = selectNextQuestion(fixedState, session.clusterData, session.billInfoMap);
+	}
 
 	return json({
 		success: true,
