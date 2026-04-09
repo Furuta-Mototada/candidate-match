@@ -788,6 +788,7 @@
 			if (isEditingAnswer) {
 				// After editing, go back to showing new questions (or null if cluster is complete)
 				isEditingAnswer = false;
+				previousQuestion = null;
 				currentQuestion = result.nextQuestion;
 			} else {
 				currentQuestion = result.nextQuestion;
@@ -930,6 +931,7 @@
 
 				if (isEditingAnswer) {
 					isEditingAnswer = false;
+					previousQuestion = null;
 				}
 				currentQuestion = result.nextQuestion;
 			}
@@ -970,6 +972,12 @@
 		if (targetIndex === currentClusterIndex) return;
 		if (targetIndex < 0 || targetIndex >= clusterLabelsToProcess.length) return;
 		if (isLoading) return;
+
+		// Cancel any in-progress bill editing
+		if (isEditingAnswer) {
+			isEditingAnswer = false;
+			previousQuestion = null;
+		}
 
 		const targetLabel = clusterLabelsToProcess[targetIndex];
 
@@ -1116,6 +1124,12 @@
 	 * Save importance rating and move to next cluster or results
 	 */
 	async function saveImportanceAndContinue() {
+		// Cancel any in-progress bill editing
+		if (isEditingAnswer) {
+			isEditingAnswer = false;
+			previousQuestion = null;
+		}
+
 		isLoading = true;
 		error = null;
 
