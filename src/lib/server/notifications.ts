@@ -212,6 +212,9 @@ export async function notifyDelegationOverridden(
 /**
  * Notify all upstream delegators in a redelegation chain that their vote was resolved.
  * Walks up from the direct delegators through 'redelegated' status chains.
+ *
+ * Uses a single batch query to load all redelegated delegations for the bill,
+ * then traverses the graph in memory.
  */
 export async function notifyUpstreamDelegatorsVoted(
 	delegateId: string,
@@ -223,6 +226,31 @@ export async function notifyUpstreamDelegatorsVoted(
 	rationale?: string | null
 ) {
 	const MAX_DEPTH = 100;
+
+	// Batch: get ALL redelegated delegations for this bill in one query
+	const allRedelegated = await db
+		.select({
+			id: table.voteDelegation.id,
+			delegatorId: table.voteDelegation.delegatorId,
+			delegateId: table.voteDelegation.delegateId
+		})
+		.from(table.voteDelegation)
+		.where(
+			and(eq(table.voteDelegation.billId, billId), eq(table.voteDelegation.status, 'redelegated'))
+		);
+
+	// Build graph: delegateId -> list of { id, delegatorId }
+	const upstreamMap = new Map<string, Array<{ id: number; delegatorId: string }>>();
+	for (const d of allRedelegated) {
+		let list = upstreamMap.get(d.delegateId);
+		if (!list) {
+			list = [];
+			upstreamMap.set(d.delegateId, list);
+		}
+		list.push({ id: d.id, delegatorId: d.delegatorId });
+	}
+
+	// BFS in memory
 	const visited = new Set<string>();
 	const queue: string[] = [delegateId];
 
@@ -231,20 +259,7 @@ export async function notifyUpstreamDelegatorsVoted(
 		if (visited.has(currentDelegateId)) continue;
 		visited.add(currentDelegateId);
 
-		const redelegated = await db
-			.select({
-				id: table.voteDelegation.id,
-				delegatorId: table.voteDelegation.delegatorId
-			})
-			.from(table.voteDelegation)
-			.where(
-				and(
-					eq(table.voteDelegation.delegateId, currentDelegateId),
-					eq(table.voteDelegation.billId, billId),
-					eq(table.voteDelegation.status, 'redelegated')
-				)
-			);
-
+		const redelegated = upstreamMap.get(currentDelegateId) || [];
 		for (const d of redelegated) {
 			await notifyDelegationVoted(
 				d.delegatorId,
@@ -263,6 +278,9 @@ export async function notifyUpstreamDelegatorsVoted(
 
 /**
  * Notify all upstream delegators in a chain that the delegate's vote changed.
+ *
+ * Uses a single batch query to load all redelegated delegations for the bill,
+ * then traverses the graph in memory.
  */
 export async function notifyUpstreamDelegatorsVoteChanged(
 	delegateId: string,
@@ -273,6 +291,31 @@ export async function notifyUpstreamDelegatorsVoteChanged(
 	newScore: number
 ) {
 	const MAX_DEPTH = 100;
+
+	// Batch: get ALL redelegated delegations for this bill in one query
+	const allRedelegated = await db
+		.select({
+			id: table.voteDelegation.id,
+			delegatorId: table.voteDelegation.delegatorId,
+			delegateId: table.voteDelegation.delegateId
+		})
+		.from(table.voteDelegation)
+		.where(
+			and(eq(table.voteDelegation.billId, billId), eq(table.voteDelegation.status, 'redelegated'))
+		);
+
+	// Build graph: delegateId -> list of { id, delegatorId }
+	const upstreamMap = new Map<string, Array<{ id: number; delegatorId: string }>>();
+	for (const d of allRedelegated) {
+		let list = upstreamMap.get(d.delegateId);
+		if (!list) {
+			list = [];
+			upstreamMap.set(d.delegateId, list);
+		}
+		list.push({ id: d.id, delegatorId: d.delegatorId });
+	}
+
+	// BFS in memory
 	const visited = new Set<string>();
 	const queue: string[] = [delegateId];
 
@@ -281,20 +324,7 @@ export async function notifyUpstreamDelegatorsVoteChanged(
 		if (visited.has(currentDelegateId)) continue;
 		visited.add(currentDelegateId);
 
-		const redelegated = await db
-			.select({
-				id: table.voteDelegation.id,
-				delegatorId: table.voteDelegation.delegatorId
-			})
-			.from(table.voteDelegation)
-			.where(
-				and(
-					eq(table.voteDelegation.delegateId, currentDelegateId),
-					eq(table.voteDelegation.billId, billId),
-					eq(table.voteDelegation.status, 'redelegated')
-				)
-			);
-
+		const redelegated = upstreamMap.get(currentDelegateId) || [];
 		for (const d of redelegated) {
 			await notifyDelegationVoteChanged(
 				d.delegatorId,

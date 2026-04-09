@@ -79,6 +79,8 @@
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let hoveredMember: MemberPoint | null = $state(null);
 	let isExpanded = $state(!collapsible);
+	let rafId: number | null = null;
+	let lastMouseEvent: MouseEvent | null = null;
 
 	// Available dimensions based on vector length
 	let availableDimensions = $derived(
@@ -469,6 +471,15 @@
 	}
 
 	function handleCanvasMouseMove(event: MouseEvent) {
+		lastMouseEvent = event;
+		if (rafId !== null) return;
+		rafId = requestAnimationFrame(() => {
+			rafId = null;
+			if (lastMouseEvent) processMouseMove(lastMouseEvent);
+		});
+	}
+
+	function processMouseMove(event: MouseEvent) {
 		if (!canvasElement || !members.length) return;
 
 		const rect = canvasElement.getBoundingClientRect();
@@ -503,14 +514,17 @@
 
 		if (found !== hoveredMember) {
 			hoveredMember = found;
-			drawVisualization();
 		}
 	}
 
 	function handleCanvasMouseLeave() {
+		lastMouseEvent = null;
+		if (rafId !== null) {
+			cancelAnimationFrame(rafId);
+			rafId = null;
+		}
 		if (hoveredMember) {
 			hoveredMember = null;
-			drawVisualization();
 		}
 	}
 

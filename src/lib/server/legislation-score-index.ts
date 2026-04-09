@@ -19,16 +19,20 @@ function normalizeScore(score: number, billMin: number, billMax: number): number
 
 // Cached index: memberId → Map<billId, normalizedScore>
 let scoreIndex: Map<number, Map<number, number>> | null = null;
+let lastLoadedAt = 0;
+const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 function loadIndex(): Map<number, Map<number, number>> {
-	if (scoreIndex) return scoreIndex;
+	const now = Date.now();
+	if (scoreIndex && now - lastLoadedAt < CACHE_TTL_MS) return scoreIndex;
+	scoreIndex = null;
 
 	const filePath = join(process.cwd(), 'static', 'data', 'legislation_scores.json');
 	const raw = readFileSync(filePath, 'utf-8');
 	const data: Array<{ billId: number; memberScores: Array<{ memberId: number; score: number }> }> =
 		JSON.parse(raw);
 
-	scoreIndex = new Map();
+	const newIndex = new Map<number, Map<number, number>>();
 
 	for (const bill of data) {
 		const allScores = bill.memberScores.map((ms) => ms.score);
@@ -36,15 +40,17 @@ function loadIndex(): Map<number, Map<number, number>> {
 		const billMin = allScores.length > 0 ? Math.min(...allScores) : 0;
 
 		for (const ms of bill.memberScores) {
-			let memberMap = scoreIndex.get(ms.memberId);
+			let memberMap = newIndex.get(ms.memberId);
 			if (!memberMap) {
 				memberMap = new Map();
-				scoreIndex.set(ms.memberId, memberMap);
+				newIndex.set(ms.memberId, memberMap);
 			}
 			memberMap.set(bill.billId, normalizeScore(ms.score, billMin, billMax));
 		}
 	}
 
+	scoreIndex = newIndex;
+	lastLoadedAt = Date.now();
 	return scoreIndex;
 }
 

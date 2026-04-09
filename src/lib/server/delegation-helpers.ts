@@ -249,14 +249,16 @@ export async function detectDelegationCycle(
  * Optionally filter to specific billIds for efficiency.
  *
  * Returns a Map of billId -> resolved score (from the terminal voter).
+ *
+ * Uses batched queries (3 total) instead of N+1 per-chain queries.
  */
 export async function resolveDelegatedVotes(
 	userId: string,
 	filterBillIds?: number[]
 ): Promise<Map<number, number>> {
-	// Find all outgoing delegations for this user
 	if (filterBillIds && filterBillIds.length === 0) return new Map();
 
+	// Query 1: Get all outgoing delegations for this user
 	const outgoing = filterBillIds
 		? await db
 				.select({
@@ -282,54 +284,81 @@ export async function resolveDelegatedVotes(
 
 	if (outgoing.length === 0) return new Map();
 
-	const result = new Map<number, number>();
+	// Query 2: Get ALL delegations for relevant bills to build in-memory graph
+	const relevantBillIds = [...new Set(outgoing.map((d) => d.billId))];
+	const allDelegations = await db
+		.select({
+			delegatorId: table.voteDelegation.delegatorId,
+			delegateId: table.voteDelegation.delegateId,
+			billId: table.voteDelegation.billId,
+			status: table.voteDelegation.status
+		})
+		.from(table.voteDelegation)
+		.where(inArray(table.voteDelegation.billId, relevantBillIds));
 
+	// Build graph: billId -> delegatorId -> { delegateId, status }
+	type DelegationEdge = (typeof allDelegations)[number];
+	const graph = new Map<number, Map<string, DelegationEdge>>();
+	for (const d of allDelegations) {
+		let billGraph = graph.get(d.billId);
+		if (!billGraph) {
+			billGraph = new Map();
+			graph.set(d.billId, billGraph);
+		}
+		billGraph.set(d.delegatorId, d);
+	}
+
+	// Walk chains in memory to find terminal voters
+	const terminalVoters = new Map<number, string>(); // billId -> terminal voterId
 	for (const delegation of outgoing) {
+		const billGraph = graph.get(delegation.billId);
+		if (!billGraph) continue;
+
 		let currentDelegateId = delegation.delegateId;
 		let currentStatus = delegation.status;
 		const visited = new Set<string>();
 
-		// Walk the chain until we find a terminal state
 		while (
 			(currentStatus === 'redelegated' || currentStatus === 'pending') &&
 			!visited.has(currentDelegateId)
 		) {
 			visited.add(currentDelegateId);
-
-			const [next] = await db
-				.select({
-					delegateId: table.voteDelegation.delegateId,
-					status: table.voteDelegation.status
-				})
-				.from(table.voteDelegation)
-				.where(
-					and(
-						eq(table.voteDelegation.delegatorId, currentDelegateId),
-						eq(table.voteDelegation.billId, delegation.billId)
-					)
-				)
-				.limit(1);
-
+			const next = billGraph.get(currentDelegateId);
 			if (!next) break;
 			currentDelegateId = next.delegateId;
 			currentStatus = next.status;
 		}
 
-		// If the chain ended with a vote, look up the terminal voter's answer
 		if (currentStatus === 'voted') {
-			const [answer] = await db
-				.select({ answer: table.userBillAnswer.answer })
-				.from(table.userBillAnswer)
-				.where(
-					and(
-						eq(table.userBillAnswer.userId, currentDelegateId),
-						eq(table.userBillAnswer.billId, delegation.billId)
-					)
-				);
+			terminalVoters.set(delegation.billId, currentDelegateId);
+		}
+	}
 
-			if (answer && answer.answer !== 'delegated') {
-				result.set(delegation.billId, answerToScore(answer.answer));
-			}
+	if (terminalVoters.size === 0) return new Map();
+
+	// Query 3: Batch-fetch all terminal voters' answers
+	const terminalVoterIds = [...new Set(terminalVoters.values())];
+	const terminalBillIds = [...terminalVoters.keys()];
+
+	const answers = await db
+		.select({
+			userId: table.userBillAnswer.userId,
+			billId: table.userBillAnswer.billId,
+			answer: table.userBillAnswer.answer
+		})
+		.from(table.userBillAnswer)
+		.where(
+			and(
+				inArray(table.userBillAnswer.userId, terminalVoterIds),
+				inArray(table.userBillAnswer.billId, terminalBillIds)
+			)
+		);
+
+	// Filter to exact (billId, userId) pairs
+	const result = new Map<number, number>();
+	for (const answer of answers) {
+		if (terminalVoters.get(answer.billId) === answer.userId && answer.answer !== 'delegated') {
+			result.set(answer.billId, answerToScore(answer.answer));
 		}
 	}
 

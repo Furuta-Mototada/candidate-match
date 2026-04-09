@@ -11,14 +11,23 @@
 	let { globalScores, clusterResults, onMemberClick }: Props = $props();
 
 	let searchQuery = $state('');
+	let debouncedQuery = $state('');
 	let sortField = $state('score');
 	let sortDirection = $state('desc');
+
+	$effect(() => {
+		const query = searchQuery;
+		const timer = setTimeout(() => {
+			debouncedQuery = query;
+		}, 200);
+		return () => clearTimeout(timer);
+	});
 
 	let filteredMembers = $derived.by(() => {
 		let members = [...globalScores];
 
-		if (searchQuery) {
-			const q = searchQuery.toLowerCase();
+		if (debouncedQuery) {
+			const q = debouncedQuery.toLowerCase();
 			members = members.filter(
 				(m) => m.name.toLowerCase().includes(q) || (m.group && m.group.toLowerCase().includes(q))
 			);

@@ -1,5 +1,11 @@
-<script lang="ts">
+<script module lang="ts">
 	import type { EnrichedBillData } from '$lib/types/index.js';
+	// Module-level cache (non-reactive, shared across all instances)
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- intentionally non-reactive module-level cache
+	const enrichmentCache = new Map<number, EnrichedBillData>();
+</script>
+
+<script lang="ts">
 	import { getAnswerLabel, getAnswerClass } from '$lib/utils/vote-helpers.js';
 	import BillContent from '$lib/components/match/BillContent.svelte';
 	import {
@@ -67,12 +73,20 @@
 	});
 
 	async function loadEnrichment() {
+		const cached = enrichmentCache.get(billId);
+		if (cached) {
+			enrichmentData = cached;
+			isLoading = false;
+			return;
+		}
 		isLoading = true;
 		loadError = null;
 		try {
 			const res = await fetch(`/api/bill-enrichment?billId=${billId}`);
 			if (!res.ok) throw new Error('データの取得に失敗しました');
-			enrichmentData = await res.json();
+			const data: EnrichedBillData = await res.json();
+			enrichmentData = data;
+			enrichmentCache.set(billId, data);
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : '不明なエラー';
 		} finally {
