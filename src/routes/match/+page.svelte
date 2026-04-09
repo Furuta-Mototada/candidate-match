@@ -383,7 +383,11 @@
 					action: 'resume',
 					savedVectorId: clusterVectorInfo.id,
 					existingUserVector: existingResult?.userVector,
-					answeredBillIds: existingResult?.answeredBills?.map((b) => b.billId) || []
+					answeredBillIds: existingResult?.answeredBills?.map((b) => b.billId) || [],
+					answeredBills: existingResult?.answeredBills?.map((b) => ({
+						billId: b.billId,
+						score: b.answer
+					})) || []
 				})
 			});
 
@@ -522,7 +526,11 @@
 							action: 'resume',
 							savedVectorId: vectorInfo.id,
 							existingUserVector: existingResult?.userVector,
-							answeredBillIds: existingResult?.answeredBills?.map((b) => b.billId) || []
+							answeredBillIds: existingResult?.answeredBills?.map((b) => b.billId) || [],
+							answeredBills: existingResult?.answeredBills?.map((b) => ({
+								billId: b.billId,
+								score: b.answer
+							})) || []
 						})
 					});
 
@@ -688,7 +696,7 @@
 		error = null;
 
 		try {
-			const response = await fetch('/api/match', {
+			let response = await fetch('/api/match', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -705,7 +713,50 @@
 				})
 			});
 
-			const result = await response.json();
+			let result = await response.json();
+
+			// Auto-retry on session loss: reconstruct session via resume then retry the answer
+			if (response.status === 404 && currentSavedVectorId) {
+				console.log('[submitAnswer] Session lost, attempting recovery...');
+				const resumeResponse = await fetch('/api/match', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						action: 'resume',
+						savedVectorId: currentSavedVectorId,
+						existingUserVector: userVector,
+						answeredBillIds: currentClusterAnsweredBills.map((b) => b.billId),
+						answeredBills: currentClusterAnsweredBills.map((b) => ({
+							billId: b.billId,
+							score: b.answer
+						}))
+					})
+				});
+
+				const resumeResult = await resumeResponse.json();
+
+				if (resumeResponse.ok && resumeResult.success) {
+					sessionId = resumeResult.sessionId;
+					// Retry the answer with the new session
+					response = await fetch('/api/match', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							action: 'answer',
+							sessionId: sessionId,
+							billId: currentQuestion.billId,
+							score: score,
+							savedVectorId: currentSavedVectorId,
+							userVector: userVector,
+							answeredBills: currentClusterAnsweredBills.map((b) => ({
+								billId: b.billId,
+								score: b.answer
+							}))
+						})
+					});
+					result = await response.json();
+				}
+			}
 
 			if (!response.ok || !result.success) {
 				throw new Error(result.error || '回答の送信に失敗しました');
@@ -742,8 +793,43 @@
 				currentQuestion = result.nextQuestion;
 			} else {
 				currentQuestion = result.nextQuestion;
-				// Don't auto-advance when all questions are answered
-				// User can manually finish the cluster or navigate to other clusters
+			}
+
+			// Defensive check: if the next question was already answered, skip it
+			if (
+				currentQuestion &&
+				currentClusterAnsweredBills.some((b) => b.billId === currentQuestion!.billId)
+			) {
+				console.warn(
+					`[submitAnswer] Next question ${currentQuestion.billId} already answered, requesting skip`
+				);
+				// Auto-skip this duplicate by requesting another answer
+				const skipResponse = await fetch('/api/match', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						action: 'answer',
+						sessionId: sessionId,
+						billId: currentQuestion.billId,
+						score:
+							currentClusterAnsweredBills.find((b) => b.billId === currentQuestion!.billId)
+								?.answer ?? 0,
+						savedVectorId: currentSavedVectorId,
+						userVector: result.userVector || userVector,
+						answeredBills: currentClusterAnsweredBills.map((b) => ({
+							billId: b.billId,
+							score: b.answer
+						}))
+					})
+				});
+				const skipResult = await skipResponse.json();
+				if (skipResponse.ok && skipResult.success) {
+					currentQuestion = skipResult.nextQuestion;
+					uncertainty = skipResult.uncertainty || uncertainty;
+					userVector = skipResult.userVector || userVector;
+					topMatches = skipResult.topMatches || topMatches;
+					answeredCount = skipResult.answeredBills ?? answeredCount;
+				}
 			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : '不明なエラーが発生しました';
@@ -981,7 +1067,11 @@
 						action: 'resume',
 						savedVectorId: vectorInfo.id,
 						existingUserVector: existingResult.userVector,
-						answeredBillIds: existingResult.answeredBills?.map((b) => b.billId) || []
+						answeredBillIds: existingResult.answeredBills?.map((b) => b.billId) || [],
+						answeredBills: existingResult.answeredBills?.map((b) => ({
+							billId: b.billId,
+							score: b.answer
+						})) || []
 					})
 				});
 

@@ -205,7 +205,13 @@ export const POST: RequestHandler = async ({ request, locals }): Promise<Respons
 				return await handleStart(clusterId, clusterLabel, nComponents, savedVectorId, userId);
 
 			case 'resume':
-				return await handleResume(savedVectorId, existingUserVector, answeredBillIds, userId);
+				return await handleResume(
+					savedVectorId,
+					existingUserVector,
+					answeredBillIds,
+					userId,
+					clientAnsweredBills
+				);
 
 			case 'answer':
 				return await handleAnswer(
@@ -630,7 +636,8 @@ async function handleResume(
 	savedVectorId: number | null,
 	existingUserVector: number[] | null,
 	answeredBillIds: number[] = [],
-	userId: string | null = null
+	userId: string | null = null,
+	answeredBillsWithScores?: { billId: number; score: number }[]
 ) {
 	if (!savedVectorId) {
 		return json({ error: 'savedVectorId is required for resume' }, { status: 400 });
@@ -772,14 +779,31 @@ async function handleResume(
 			state.pendingDelegationBillIds = resumePendingDelegatedBillIds;
 		}
 	} else {
-		// Not logged in — use the provided existingUserVector and answeredBillIds
-		if (existingUserVector && existingUserVector.length === clusterData.dimensions) {
-			state.userVector = [...existingUserVector];
-		}
+		// Not logged in — use the provided answeredBills (with scores) or answeredBillIds
+		if (answeredBillsWithScores && answeredBillsWithScores.length > 0) {
+			// Use full answered bills with scores for proper vector estimation
+			const billLoadingsMap = new Map<number, number[]>();
+			for (let i = 0; i < clusterData.billIds.length; i++) {
+				billLoadingsMap.set(clusterData.billIds[i], clusterData.billLoadings[i]);
+			}
 
-		// Mark answered bills as answered in the state
-		for (const billId of answeredBillIds) {
-			state.answeredBills.push({ billId, score: 0 }); // Score doesn't matter for exclusion
+			for (const ab of answeredBillsWithScores) {
+				const userAnswer: UserAnswer = { billId: ab.billId, score: ab.score };
+				const newState = updateMatchingState(state, userAnswer, billLoadingsMap);
+				state.userVector = newState.userVector;
+				state.answeredBills = newState.answeredBills;
+				state.questionCount = newState.questionCount;
+				state.uncertainty = newState.uncertainty;
+			}
+		} else {
+			// Fallback: use IDs only (score 0) and provided user vector
+			if (existingUserVector && existingUserVector.length === clusterData.dimensions) {
+				state.userVector = [...existingUserVector];
+			}
+
+			for (const billId of answeredBillIds) {
+				state.answeredBills.push({ billId, score: 0 }); // Score doesn't matter for exclusion
+			}
 		}
 	}
 
