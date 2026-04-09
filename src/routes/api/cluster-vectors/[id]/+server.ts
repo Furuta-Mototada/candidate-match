@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types.js';
 import { db } from '$lib/server/db';
 import { clusterVectorResults } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
+import { requireIntParam, handleApiError } from '$lib/server/api-utils';
 
 /**
  * GET /api/cluster-vectors/[id]
@@ -10,11 +11,8 @@ import { eq } from 'drizzle-orm';
  */
 export const GET: RequestHandler = async ({ params }) => {
 	try {
-		const id = parseInt(params.id);
-
-		if (isNaN(id)) {
-			return json({ error: 'Invalid ID' }, { status: 400 });
-		}
+		const id = requireIntParam(params.id, 'id');
+		if (id instanceof Response) return id;
 
 		const [result] = await db
 			.select()
@@ -30,11 +28,7 @@ export const GET: RequestHandler = async ({ params }) => {
 			data: result
 		});
 	} catch (error) {
-		console.error('Error fetching saved vector:', error);
-		return json(
-			{ error: error instanceof Error ? error.message : 'Unknown error' },
-			{ status: 500 }
-		);
+		return handleApiError(error, 'Error fetching saved vector');
 	}
 };
 
@@ -44,11 +38,8 @@ export const GET: RequestHandler = async ({ params }) => {
  */
 export const DELETE: RequestHandler = async ({ params }) => {
 	try {
-		const id = parseInt(params.id);
-
-		if (isNaN(id)) {
-			return json({ error: 'Invalid ID' }, { status: 400 });
-		}
+		const id = requireIntParam(params.id, 'id');
+		if (id instanceof Response) return id;
 
 		await db.delete(clusterVectorResults).where(eq(clusterVectorResults.id, id));
 
@@ -57,10 +48,6 @@ export const DELETE: RequestHandler = async ({ params }) => {
 			message: 'Saved vector deleted successfully'
 		});
 	} catch (error) {
-		console.error('Error deleting saved vector:', error);
-		return json(
-			{ error: error instanceof Error ? error.message : 'Unknown error' },
-			{ status: 500 }
-		);
+		return handleApiError(error, 'Error deleting saved vector');
 	}
 };

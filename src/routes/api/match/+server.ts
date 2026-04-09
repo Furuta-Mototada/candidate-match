@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types.js';
-import { requireAdmin, isErrorResponse } from '$lib/server/api-utils.js';
+import { requireAdmin, isErrorResponse, handleApiError, ERROR } from '$lib/server/api-utils.js';
 import { getBillTitle } from '$lib/server/bill-queries.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -30,7 +30,8 @@ import {
 	type MatchingState,
 	type UserAnswer,
 	type ClusterVectorData,
-	type MatchResult
+	type MatchResult,
+	type BillInfo
 } from '$lib/server/matching.js';
 import {
 	notifyDelegationOverridden,
@@ -44,18 +45,7 @@ const execAsync = promisify(exec);
 type SessionData = {
 	state: MatchingState;
 	clusterData: ClusterVectorData;
-	billInfoMap: Map<
-		number,
-		{
-			billId: number;
-			title: string;
-			description: string | null;
-			passed: boolean;
-			result: string | null;
-			loading: number[];
-			memberVariance: number;
-		}
-	>;
+	billInfoMap: Map<number, BillInfo>;
 	createdAt: Date;
 };
 
@@ -72,24 +62,47 @@ function cleanupSessions() {
 	}
 }
 
-// Run cleanup every 10 minutes
-setInterval(cleanupSessions, 10 * 60 * 1000);
+// Run cleanup lazily: check on each request instead of setInterval
+// This avoids leaking intervals in serverless/HMR environments
+const CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
+let lastCleanupTime = Date.now();
+function cleanupIfNeeded() {
+	const now = Date.now();
+	if (now - lastCleanupTime > CLEANUP_INTERVAL_MS) {
+		lastCleanupTime = now;
+		cleanupSessions();
+	}
+}
 
 /**
- * Reconstruct a session from saved vector data + client-provided state.
- * This is the fallback for serverless environments where in-memory sessions are lost.
+ * Load saved vector data from the database and parse it into ClusterVectorData.
+ * Returns the parsed cluster data and cluster info, or a JSON error response.
  */
-async function reconstructSession(
-	savedVectorId: number,
-	clientUserVector: number[],
-	clientAnsweredBills: { billId: number; score: number }[]
-): Promise<SessionData | null> {
+async function loadSavedVectorData(savedVectorId: number): Promise<
+	| { error: Response }
+	| {
+			clusterData: ClusterVectorData;
+			clusterInfo: { id: number; name: string };
+			savedResult: { clusterId: number; clusterLabel: number; name: string };
+	  }
+> {
 	const [savedResult] = await db
 		.select()
 		.from(clusterVectorResults)
 		.where(eq(clusterVectorResults.id, savedVectorId));
 
-	if (!savedResult) return null;
+	if (!savedResult) {
+		return { error: json({ error: 'Saved vector result not found' }, { status: 404 }) };
+	}
+
+	const [cluster] = await db
+		.select()
+		.from(billClusters)
+		.where(eq(billClusters.id, savedResult.clusterId));
+
+	if (!cluster) {
+		return { error: json({ error: 'Cluster not found' }, { status: 404 }) };
+	}
 
 	const clusterData: ClusterVectorData = {
 		memberVectors: JSON.parse(savedResult.memberVectors),
@@ -101,6 +114,207 @@ async function reconstructSession(
 		memberCount: savedResult.memberCount,
 		billCount: savedResult.billCount
 	};
+
+	return { clusterData, clusterInfo: cluster, savedResult };
+}
+
+type SourceMaps = {
+	billSourceMap: Map<number, 'direct' | 'delegated'>;
+	delegationStatusMap: Map<number, 'pending' | 'voted'>;
+	delegateIdMap: Map<number, string>;
+};
+
+/**
+ * Load existing user answers + delegated votes for bills in the cluster,
+ * merge them, apply to matching state, and return source tracking maps.
+ */
+async function loadAndMergeUserAnswers(
+	userId: string,
+	clusterData: ClusterVectorData,
+	state: MatchingState
+): Promise<SourceMaps> {
+	const billSourceMap = new Map<number, 'direct' | 'delegated'>();
+	const delegationStatusMap = new Map<number, 'pending' | 'voted'>();
+	const delegateIdMap = new Map<number, string>();
+
+	const existingAnswers = await db
+		.select()
+		.from(userBillAnswer)
+		.where(
+			and(eq(userBillAnswer.userId, userId), inArray(userBillAnswer.billId, clusterData.billIds))
+		);
+
+	const delegatedVotes = await resolveDelegatedVotes(userId, clusterData.billIds);
+
+	const activeDelegations = await db
+		.select({ billId: voteDelegation.billId, delegateId: voteDelegation.delegateId })
+		.from(voteDelegation)
+		.where(
+			and(
+				eq(voteDelegation.delegatorId, userId),
+				inArray(voteDelegation.billId, clusterData.billIds),
+				sql`${voteDelegation.status} != 'rejected'`
+			)
+		);
+	const delegatedBillIds = new Set(activeDelegations.map((d) => d.billId));
+	for (const d of activeDelegations) {
+		delegateIdMap.set(d.billId, d.delegateId);
+	}
+
+	// Merge direct + delegated answers
+	const allAnswers: { billId: number; score: number; source: 'direct' | 'delegated' }[] =
+		existingAnswers
+			.filter((a) => a.answer !== 'delegated')
+			.map((a) => ({
+				billId: a.billId,
+				score: answerToScore(a.answer),
+				source: 'direct' as const
+			}));
+	for (const [billId, score] of delegatedVotes) {
+		if (!allAnswers.some((a) => a.billId === billId)) {
+			allAnswers.push({ billId, score, source: 'delegated' });
+		}
+	}
+	// Add pending delegated bills — mark as answered but don't include in vector estimation
+	const pendingDelegatedBillIds = new Set<number>();
+	for (const billId of delegatedBillIds) {
+		if (!allAnswers.some((a) => a.billId === billId)) {
+			allAnswers.push({ billId, score: 0, source: 'delegated' });
+			pendingDelegatedBillIds.add(billId);
+		}
+	}
+
+	// Populate source & delegation status maps
+	for (const a of allAnswers) {
+		billSourceMap.set(a.billId, a.source);
+	}
+	for (const billId of delegatedBillIds) {
+		billSourceMap.set(billId, 'delegated');
+		delegationStatusMap.set(billId, delegatedVotes.has(billId) ? 'voted' : 'pending');
+	}
+
+	if (allAnswers.length > 0) {
+		const billLoadingsMap = new Map<number, number[]>();
+		for (let i = 0; i < clusterData.billIds.length; i++) {
+			billLoadingsMap.set(clusterData.billIds[i], clusterData.billLoadings[i]);
+		}
+
+		for (const answer of allAnswers) {
+			if (pendingDelegatedBillIds.has(answer.billId)) {
+				state.answeredBills.push({ billId: answer.billId, score: 0 });
+				state.questionCount++;
+				continue;
+			}
+			const userAnswer: UserAnswer = { billId: answer.billId, score: answer.score };
+			const newState = updateMatchingState(state, userAnswer, billLoadingsMap);
+			state.userVector = newState.userVector;
+			state.answeredBills = newState.answeredBills;
+			state.questionCount = newState.questionCount;
+			state.uncertainty = newState.uncertainty;
+		}
+
+		state.pendingDelegationBillIds = pendingDelegatedBillIds;
+	}
+
+	return { billSourceMap, delegationStatusMap, delegateIdMap };
+}
+
+type BillInfoMap = SessionData['billInfoMap'];
+
+/**
+ * Build the common match response JSON (used by handleStart and handleResume).
+ */
+async function buildMatchResponse(
+	sessionId: string,
+	state: MatchingState,
+	clusterData: ClusterVectorData,
+	billInfoMap: BillInfoMap,
+	sourceMaps: SourceMaps,
+	meta: { clusterId: number; clusterLabel: number; clusterName: string }
+) {
+	const nextQuestion = selectNextQuestion(state, clusterData, billInfoMap);
+
+	const memberIds = Object.keys(clusterData.memberVectors).map((id) => parseInt(id));
+	const groupMap = await loadMemberGroups(memberIds);
+	const memberVectorsForViz = buildMemberVectorsForViz(clusterData, groupMap);
+
+	const matches = findMatchingMembers(state.userVector, clusterData, 10);
+	if (matches.length > 0) {
+		for (const match of matches) {
+			match.member.group = groupMap.get(match.member.memberId) || null;
+		}
+	}
+
+	return json({
+		success: true,
+		sessionId,
+		clusterId: meta.clusterId,
+		clusterLabel: meta.clusterLabel,
+		clusterName: meta.clusterName,
+		dimensions: clusterData.dimensions,
+		totalBills: clusterData.billCount,
+		totalMembers: clusterData.memberCount,
+		questionCount: state.answeredBills.length,
+		nextQuestion: nextQuestion
+			? {
+					billId: nextQuestion.bill.billId,
+					title: nextQuestion.bill.title,
+					description: nextQuestion.bill.description,
+					passed: nextQuestion.bill.passed,
+					result: nextQuestion.bill.result,
+					reason: nextQuestion.reason,
+					dimensionTarget: nextQuestion.dimensionTarget,
+					billType: nextQuestion.bill.billType,
+					submissionSession: nextQuestion.bill.submissionSession,
+					billNumber: nextQuestion.bill.billNumber
+				}
+			: null,
+		uncertainty: state.uncertainty,
+		userVector: state.userVector,
+		topMatches: matches.slice(0, 5).map((m: MatchResult) => ({
+			memberId: m.member.memberId,
+			name: m.member.name,
+			group: m.member.group,
+			similarity: m.similarity,
+			rank: m.rank,
+			latentVector: clusterData.memberVectors[String(m.member.memberId)]
+		})),
+		preExistingAnswerCount: state.answeredBills.length,
+		preExistingAnsweredBills: state.answeredBills.map((ab) => {
+			const info = billInfoMap.get(ab.billId);
+			const source = sourceMaps.billSourceMap.get(ab.billId) || 'direct';
+			return {
+				billId: ab.billId,
+				title: info?.title || `法案 #${ab.billId}`,
+				answer: ab.score,
+				source,
+				billType: info?.billType,
+				submissionSession: info?.submissionSession,
+				billNumber: info?.billNumber,
+				...(source === 'delegated' && {
+					delegationStatus: sourceMaps.delegationStatusMap.get(ab.billId) || 'pending',
+					delegateId: sourceMaps.delegateIdMap.get(ab.billId)
+				})
+			};
+		}),
+		memberVectors: memberVectorsForViz,
+		explainedVariance: clusterData.explainedVariance
+	});
+}
+
+/**
+ * Reconstruct a session from saved vector data + client-provided state.
+ * This is the fallback for serverless environments where in-memory sessions are lost.
+ */
+async function reconstructSession(
+	savedVectorId: number,
+	clientUserVector: number[],
+	clientAnsweredBills: { billId: number; score: number }[]
+): Promise<SessionData | null> {
+	const result = await loadSavedVectorData(savedVectorId);
+	if ('error' in result) return null;
+
+	const { clusterData, savedResult } = result;
 
 	const dbBillInfo = await loadBillInfo(clusterData.billIds);
 	const billInfoMap = buildBillInfoMap(clusterData, dbBillInfo);
@@ -119,7 +333,6 @@ async function reconstructSession(
 		}
 
 		for (const ab of clientAnsweredBills) {
-			// Force billId to number to prevent type mismatch with clusterData.billIds
 			const userAnswer: UserAnswer = { billId: Number(ab.billId), score: ab.score };
 			const newState = updateMatchingState(state, userAnswer, billLoadingsMap);
 			state.userVector = newState.userVector;
@@ -215,6 +428,7 @@ async function getOrReconstructSession(
  * - action: "skip" - Skip current question and get next
  */
 export const POST: RequestHandler = async ({ request, locals }): Promise<Response> => {
+	cleanupIfNeeded();
 	try {
 		const body = await request.json();
 		const {
@@ -314,14 +528,10 @@ export const POST: RequestHandler = async ({ request, locals }): Promise<Respons
 			}
 
 			default:
-				return json({ error: 'Invalid action' }, { status: 400 });
+				return json({ error: ERROR.INVALID_ACTION }, { status: 400 });
 		}
 	} catch (error) {
-		console.error('Match API error:', error);
-		return json(
-			{ error: error instanceof Error ? error.message : 'Unknown error' },
-			{ status: 500 }
-		);
+		return handleApiError(error, 'Match API error');
 	}
 };
 
@@ -336,48 +546,21 @@ async function handleStart(
 	nComponents: number = 3,
 	savedVectorId: number | null = null,
 	userId: string | null = null
-) {
+): Promise<Response> {
 	let clusterData: ClusterVectorData;
 	let clusterInfo: { id: number; name: string };
 	let selectedLabel: number;
 
 	// If savedVectorId is provided, load from database
 	if (savedVectorId) {
-		const [savedResult] = await db
-			.select()
-			.from(clusterVectorResults)
-			.where(eq(clusterVectorResults.id, savedVectorId));
+		const result = await loadSavedVectorData(savedVectorId);
+		if ('error' in result) return result.error;
 
-		if (!savedResult) {
-			return json({ error: 'Saved vector result not found' }, { status: 404 });
-		}
+		clusterInfo = result.clusterInfo;
+		selectedLabel = result.savedResult.clusterLabel;
+		clusterData = result.clusterData;
 
-		// Get cluster info
-		const [cluster] = await db
-			.select()
-			.from(billClusters)
-			.where(eq(billClusters.id, savedResult.clusterId));
-
-		if (!cluster) {
-			return json({ error: 'Cluster not found' }, { status: 404 });
-		}
-
-		clusterInfo = cluster;
-		selectedLabel = savedResult.clusterLabel;
-
-		// Parse the saved data
-		clusterData = {
-			memberVectors: JSON.parse(savedResult.memberVectors),
-			memberNames: JSON.parse(savedResult.memberNames),
-			billLoadings: JSON.parse(savedResult.billLoadings),
-			billIds: JSON.parse(savedResult.billIds),
-			explainedVariance: JSON.parse(savedResult.explainedVariance),
-			dimensions: savedResult.dimensions,
-			memberCount: savedResult.memberCount,
-			billCount: savedResult.billCount
-		};
-
-		console.log(`Loaded saved vectors: ${savedResult.name} (ID: ${savedVectorId})`);
+		console.log(`Loaded saved vectors: ${result.savedResult.name} (ID: ${savedVectorId})`);
 	} else {
 		// Fallback: calculate on the fly (for backwards compatibility)
 		if (!clusterId) {
@@ -466,110 +649,19 @@ async function handleStart(
 	);
 
 	// Track source per bill for frontend response
-	const billSourceMap = new Map<number, 'direct' | 'delegated'>();
-	const delegationStatusMap = new Map<number, 'pending' | 'voted'>();
-	const delegateIdMap = new Map<number, string>();
+	let sourceMaps: SourceMaps = {
+		billSourceMap: new Map(),
+		delegationStatusMap: new Map(),
+		delegateIdMap: new Map()
+	};
 
 	// If user is logged in, pre-populate with existing bill answers
 	if (userId) {
-		const existingAnswers = await db
-			.select()
-			.from(userBillAnswer)
-			.where(
-				and(eq(userBillAnswer.userId, userId), inArray(userBillAnswer.billId, clusterData.billIds))
-			);
-
-		// Also resolve delegated votes for bills in this cluster
-		const delegatedVotes = await resolveDelegatedVotes(userId, clusterData.billIds);
-
-		// Find bills with active (non-rejected) outgoing delegations (includes pending/voted/redelegated)
-		const activeDelegations = await db
-			.select({ billId: voteDelegation.billId, delegateId: voteDelegation.delegateId })
-			.from(voteDelegation)
-			.where(
-				and(
-					eq(voteDelegation.delegatorId, userId),
-					inArray(voteDelegation.billId, clusterData.billIds),
-					sql`${voteDelegation.status} != 'rejected'`
-				)
-			);
-		const delegatedBillIds = new Set(activeDelegations.map((d) => d.billId));
-		for (const d of activeDelegations) {
-			delegateIdMap.set(d.billId, d.delegateId);
-		}
-
-		console.log(
-			`[handleStart] cluster=${selectedLabel}, userId=${userId}, billIds count=${clusterData.billIds.length}, existingAnswers count=${existingAnswers.length}, delegatedVotes count=${delegatedVotes.size}, activeDelegations count=${delegatedBillIds.size}`
-		);
-
-		// Merge direct + delegated answers
-		const allAnswers: { billId: number; score: number; source: 'direct' | 'delegated' }[] =
-			existingAnswers
-				.filter((a) => a.answer !== 'delegated')
-				.map((a) => ({
-					billId: a.billId,
-					score: answerToScore(a.answer),
-					source: 'direct' as const
-				}));
-		for (const [billId, score] of delegatedVotes) {
-			// Only add if not already in direct answers
-			if (!allAnswers.some((a) => a.billId === billId)) {
-				allAnswers.push({ billId, score, source: 'delegated' });
-			}
-		}
-		// Add pending delegated bills (not yet voted by delegate) — mark as answered
-		// so they're skipped in question selection, but don't include in vector estimation
-		const pendingDelegatedBillIds = new Set<number>();
-		for (const billId of delegatedBillIds) {
-			if (!allAnswers.some((a) => a.billId === billId)) {
-				allAnswers.push({ billId, score: 0, source: 'delegated' });
-				pendingDelegatedBillIds.add(billId);
-			}
-		}
-
-		// Populate source per bill for frontend
-		for (const a of allAnswers) {
-			billSourceMap.set(a.billId, a.source);
-		}
-		// Override: any bill with active delegation is 'delegated' regardless
-		for (const billId of delegatedBillIds) {
-			billSourceMap.set(billId, 'delegated');
-			delegationStatusMap.set(billId, delegatedVotes.has(billId) ? 'voted' : 'pending');
-		}
-
-		if (allAnswers.length > 0) {
-			// Build bill loadings map for vector updates
-			const billLoadingsMap = new Map<number, number[]>();
-			for (let i = 0; i < clusterData.billIds.length; i++) {
-				billLoadingsMap.set(clusterData.billIds[i], clusterData.billLoadings[i]);
-			}
-
-			// Apply each existing answer to update the user vector
-			// Skip pending delegations — they have no meaningful score yet
-			for (const answer of allAnswers) {
-				if (pendingDelegatedBillIds.has(answer.billId)) {
-					// Still mark as answered for question skipping
-					state.answeredBills.push({ billId: answer.billId, score: 0 });
-					state.questionCount++;
-					continue;
-				}
-				const userAnswer: UserAnswer = { billId: answer.billId, score: answer.score };
-				const newState = updateMatchingState(state, userAnswer, billLoadingsMap);
-				state.userVector = newState.userVector;
-				state.answeredBills = newState.answeredBills;
-				state.questionCount = newState.questionCount;
-				state.uncertainty = newState.uncertainty;
-			}
-
-			// Store pending delegation IDs on state for future updateMatchingState calls
-			state.pendingDelegationBillIds = pendingDelegatedBillIds;
-		}
+		sourceMaps = await loadAndMergeUserAnswers(userId, clusterData, state);
 	}
 
-	// Generate session ID
+	// Generate session ID and store session
 	const sessionIdValue = crypto.randomUUID();
-
-	// Store session
 	sessions.set(sessionIdValue, {
 		state,
 		clusterData,
@@ -577,83 +669,10 @@ async function handleStart(
 		createdAt: new Date()
 	});
 
-	// Get first question (will skip already-answered bills)
-	const nextQuestion = selectNextQuestion(state, clusterData, billInfoMap);
-
-	// Prepare member vectors for 2D visualization
-	// Include member names and group info
-	const memberIds = Object.keys(clusterData.memberVectors).map((id) => parseInt(id));
-	const groupMap = await loadMemberGroups(memberIds);
-
-	const memberVectorsForViz = buildMemberVectorsForViz(clusterData, groupMap);
-
-	// Get current matches if we have pre-existing answers
-	const preExistingMatches =
-		state.answeredBills.length > 0 ? findMatchingMembers(state.userVector, clusterData, 10) : [];
-
-	// Enrich matches with group info
-	if (preExistingMatches.length > 0) {
-		const matchMemberIds = preExistingMatches.map((m: MatchResult) => m.member.memberId);
-		const matchGroupMap = await loadMemberGroups(matchMemberIds);
-		for (const match of preExistingMatches) {
-			match.member.group = matchGroupMap.get(match.member.memberId) || null;
-		}
-	}
-
-	return json({
-		success: true,
-		sessionId: sessionIdValue,
+	return buildMatchResponse(sessionIdValue, state, clusterData, billInfoMap, sourceMaps, {
 		clusterId: savedVectorId ? clusterInfo.id : clusterId,
 		clusterLabel: selectedLabel,
-		clusterName: clusterInfo.name,
-		dimensions: clusterData.dimensions,
-		totalBills: clusterData.billCount,
-		totalMembers: clusterData.memberCount,
-		questionCount: state.answeredBills.length,
-		nextQuestion: nextQuestion
-			? {
-					billId: nextQuestion.bill.billId,
-					title: nextQuestion.bill.title,
-					description: nextQuestion.bill.description,
-					passed: nextQuestion.bill.passed,
-					result: nextQuestion.bill.result,
-					reason: nextQuestion.reason,
-					dimensionTarget: nextQuestion.dimensionTarget,
-					billType: nextQuestion.bill.billType,
-					submissionSession: nextQuestion.bill.submissionSession,
-					billNumber: nextQuestion.bill.billNumber
-				}
-			: null,
-		uncertainty: state.uncertainty,
-		userVector: state.userVector,
-		topMatches: preExistingMatches.slice(0, 5).map((m: MatchResult) => ({
-			memberId: m.member.memberId,
-			name: m.member.name,
-			group: m.member.group,
-			similarity: m.similarity,
-			rank: m.rank,
-			latentVector: clusterData.memberVectors[String(m.member.memberId)]
-		})),
-		preExistingAnswerCount: state.answeredBills.length,
-		preExistingAnsweredBills: state.answeredBills.map((ab) => {
-			const info = billInfoMap.get(ab.billId);
-			const source = billSourceMap.get(ab.billId) || 'direct';
-			return {
-				billId: ab.billId,
-				title: info?.title || `法案 #${ab.billId}`,
-				answer: ab.score,
-				source,
-				billType: info?.billType,
-				submissionSession: info?.submissionSession,
-				billNumber: info?.billNumber,
-				...(source === 'delegated' && {
-					delegationStatus: delegationStatusMap.get(ab.billId) || 'pending',
-					delegateId: delegateIdMap.get(ab.billId)
-				})
-			};
-		}),
-		memberVectors: memberVectorsForViz,
-		explainedVariance: clusterData.explainedVariance
+		clusterName: clusterInfo.name
 	});
 }
 
@@ -671,37 +690,10 @@ async function handleResume(
 		return json({ error: 'savedVectorId is required for resume' }, { status: 400 });
 	}
 
-	// Load saved vector data from database
-	const [savedResult] = await db
-		.select()
-		.from(clusterVectorResults)
-		.where(eq(clusterVectorResults.id, savedVectorId));
+	const result = await loadSavedVectorData(savedVectorId);
+	if ('error' in result) return result.error;
 
-	if (!savedResult) {
-		return json({ error: 'Saved vector result not found' }, { status: 404 });
-	}
-
-	// Get cluster info
-	const [cluster] = await db
-		.select()
-		.from(billClusters)
-		.where(eq(billClusters.id, savedResult.clusterId));
-
-	if (!cluster) {
-		return json({ error: 'Cluster not found' }, { status: 404 });
-	}
-
-	// Parse the saved data
-	const clusterData: ClusterVectorData = {
-		memberVectors: JSON.parse(savedResult.memberVectors),
-		memberNames: JSON.parse(savedResult.memberNames),
-		billLoadings: JSON.parse(savedResult.billLoadings),
-		billIds: JSON.parse(savedResult.billIds),
-		explainedVariance: JSON.parse(savedResult.explainedVariance),
-		dimensions: savedResult.dimensions,
-		memberCount: savedResult.memberCount,
-		billCount: savedResult.billCount
-	};
+	const { clusterData, clusterInfo, savedResult } = result;
 
 	// Load bill information from database
 	const dbBillInfo = await loadBillInfo(clusterData.billIds);
@@ -715,101 +707,17 @@ async function handleResume(
 	);
 
 	// Track source per bill for frontend response
-	const resumeBillSourceMap = new Map<number, 'direct' | 'delegated'>();
-	const resumeDelegationStatusMap = new Map<number, 'pending' | 'voted'>();
-	const resumeDelegateIdMap = new Map<number, string>();
+	let sourceMaps: SourceMaps = {
+		billSourceMap: new Map(),
+		delegationStatusMap: new Map(),
+		delegateIdMap: new Map()
+	};
 
-	// If user is logged in, load all answers from user_bill_answer for bills in this cluster
 	if (userId) {
-		const existingAnswers = await db
-			.select()
-			.from(userBillAnswer)
-			.where(
-				and(eq(userBillAnswer.userId, userId), inArray(userBillAnswer.billId, clusterData.billIds))
-			);
-
-		// Also resolve delegated votes for bills in this cluster
-		const delegatedVotes = await resolveDelegatedVotes(userId, clusterData.billIds);
-
-		// Find bills with active (non-rejected) outgoing delegations
-		const activeDelegations = await db
-			.select({ billId: voteDelegation.billId, delegateId: voteDelegation.delegateId })
-			.from(voteDelegation)
-			.where(
-				and(
-					eq(voteDelegation.delegatorId, userId),
-					inArray(voteDelegation.billId, clusterData.billIds),
-					sql`${voteDelegation.status} != 'rejected'`
-				)
-			);
-		const delegatedBillIds = new Set(activeDelegations.map((d) => d.billId));
-		for (const d of activeDelegations) {
-			resumeDelegateIdMap.set(d.billId, d.delegateId);
-		}
-
-		// Merge direct + delegated answers
-		const allAnswers: { billId: number; score: number; source: 'direct' | 'delegated' }[] =
-			existingAnswers
-				.filter((a) => a.answer !== 'delegated')
-				.map((a) => ({
-					billId: a.billId,
-					score: answerToScore(a.answer),
-					source: 'direct' as const
-				}));
-		for (const [billId, score] of delegatedVotes) {
-			if (!allAnswers.some((a) => a.billId === billId)) {
-				allAnswers.push({ billId, score, source: 'delegated' });
-			}
-		}
-		// Add pending delegated bills — mark as answered but don't include in vector estimation
-		const resumePendingDelegatedBillIds = new Set<number>();
-		for (const billId of delegatedBillIds) {
-			if (!allAnswers.some((a) => a.billId === billId)) {
-				allAnswers.push({ billId, score: 0, source: 'delegated' });
-				resumePendingDelegatedBillIds.add(billId);
-			}
-		}
-
-		// Populate source & delegation status maps
-		for (const a of allAnswers) {
-			resumeBillSourceMap.set(a.billId, a.source);
-		}
-		for (const billId of delegatedBillIds) {
-			resumeBillSourceMap.set(billId, 'delegated');
-			resumeDelegationStatusMap.set(billId, delegatedVotes.has(billId) ? 'voted' : 'pending');
-		}
-
-		if (allAnswers.length > 0) {
-			// Build bill loadings map for vector updates
-			const billLoadingsMap = new Map<number, number[]>();
-			for (let i = 0; i < clusterData.billIds.length; i++) {
-				billLoadingsMap.set(clusterData.billIds[i], clusterData.billLoadings[i]);
-			}
-
-			// Apply each existing answer to update the user vector
-			// Skip pending delegations — they have no meaningful score yet
-			for (const answer of allAnswers) {
-				if (resumePendingDelegatedBillIds.has(answer.billId)) {
-					// Still mark as answered for question skipping
-					state.answeredBills.push({ billId: answer.billId, score: 0 });
-					state.questionCount++;
-					continue;
-				}
-				const userAnswer: UserAnswer = { billId: answer.billId, score: answer.score };
-				const newState = updateMatchingState(state, userAnswer, billLoadingsMap);
-				state.userVector = newState.userVector;
-				state.answeredBills = newState.answeredBills;
-				state.questionCount = newState.questionCount;
-				state.uncertainty = newState.uncertainty;
-			}
-
-			// Store pending delegation IDs on state for future updateMatchingState calls
-			state.pendingDelegationBillIds = resumePendingDelegatedBillIds;
-		}
+		sourceMaps = await loadAndMergeUserAnswers(userId, clusterData, state);
 	} else {
 		// Not logged in — use the provided answeredBills (with scores) or answeredBillIds
 		if (answeredBillsWithScores && answeredBillsWithScores.length > 0) {
-			// Use full answered bills with scores for proper vector estimation
 			const billLoadingsMap = new Map<number, number[]>();
 			for (let i = 0; i < clusterData.billIds.length; i++) {
 				billLoadingsMap.set(clusterData.billIds[i], clusterData.billLoadings[i]);
@@ -835,10 +743,8 @@ async function handleResume(
 		}
 	}
 
-	// Generate session ID
+	// Generate session ID and store session
 	const sessionIdValue = crypto.randomUUID();
-
-	// Store session
 	sessions.set(sessionIdValue, {
 		state,
 		clusterData,
@@ -846,73 +752,10 @@ async function handleResume(
 		createdAt: new Date()
 	});
 
-	// Get next unanswered question
-	const nextQuestion = selectNextQuestion(state, clusterData, billInfoMap);
-
-	// Prepare member vectors for 2D visualization
-	const memberIds = Object.keys(clusterData.memberVectors).map((id) => parseInt(id));
-	const groupMap = await loadMemberGroups(memberIds);
-
-	const memberVectorsForViz = buildMemberVectorsForViz(clusterData, groupMap);
-
-	// Get current matches with the existing user vector
-	const matches = findMatchingMembers(state.userVector, clusterData);
-	const matchResults = matches.slice(0, 5).map((m) => ({
-		memberId: m.member.memberId,
-		name: m.member.name,
-		group: groupMap.get(m.member.memberId) || null,
-		similarity: m.similarity,
-		rank: m.rank,
-		latentVector: clusterData.memberVectors[String(m.member.memberId)]
-	}));
-
-	return json({
-		success: true,
-		sessionId: sessionIdValue,
+	return buildMatchResponse(sessionIdValue, state, clusterData, billInfoMap, sourceMaps, {
 		clusterId: savedResult.clusterId,
 		clusterLabel: savedResult.clusterLabel,
-		clusterName: cluster.name,
-		dimensions: clusterData.dimensions,
-		totalBills: clusterData.billCount,
-		totalMembers: clusterData.memberCount,
-		questionCount: state.answeredBills.length,
-		nextQuestion: nextQuestion
-			? {
-					billId: nextQuestion.bill.billId,
-					title: nextQuestion.bill.title,
-					description: nextQuestion.bill.description,
-					passed: nextQuestion.bill.passed,
-					result: nextQuestion.bill.result,
-					reason: nextQuestion.reason,
-					dimensionTarget: nextQuestion.dimensionTarget,
-					billType: nextQuestion.bill.billType,
-					submissionSession: nextQuestion.bill.submissionSession,
-					billNumber: nextQuestion.bill.billNumber
-				}
-			: null,
-		uncertainty: state.uncertainty,
-		userVector: state.userVector,
-		topMatches: matchResults,
-		preExistingAnswerCount: state.answeredBills.length,
-		preExistingAnsweredBills: state.answeredBills.map((ab) => {
-			const info = billInfoMap.get(ab.billId);
-			const source = resumeBillSourceMap.get(ab.billId) || 'direct';
-			return {
-				billId: ab.billId,
-				title: info?.title || `法案 #${ab.billId}`,
-				answer: ab.score,
-				source,
-				billType: info?.billType,
-				submissionSession: info?.submissionSession,
-				billNumber: info?.billNumber,
-				...(source === 'delegated' && {
-					delegationStatus: resumeDelegationStatusMap.get(ab.billId) || 'pending',
-					delegateId: resumeDelegateIdMap.get(ab.billId)
-				})
-			};
-		}),
-		memberVectors: memberVectorsForViz,
-		explainedVariance: clusterData.explainedVariance
+		clusterName: clusterInfo.name
 	});
 }
 
@@ -1520,10 +1363,6 @@ export const GET: RequestHandler = async () => {
 			savedVectors
 		});
 	} catch (error) {
-		console.error('Error fetching clusters:', error);
-		return json(
-			{ error: error instanceof Error ? error.message : 'Unknown error' },
-			{ status: 500 }
-		);
+		return handleApiError(error, 'Error fetching clusters');
 	}
 };

@@ -3,7 +3,7 @@ import { eq, and, desc, count, lt } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import type { RequestHandler } from './$types.js';
-import { requireUser, isErrorResponse } from '$lib/server/api-utils';
+import { requireUser, isErrorResponse, ERROR, parseIntParam } from '$lib/server/api-utils';
 
 // GET /api/notifications?action=list|unread-count&limit=N&before=ID
 export const GET: RequestHandler = async ({ url, locals }) => {
@@ -23,12 +23,12 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 	}
 
 	// Default: list notifications with pagination
-	const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '20'), 50);
-	const beforeId = url.searchParams.get('before');
+	const limit = Math.min(parseIntParam(url.searchParams.get('limit')) ?? 20, 50);
+	const beforeId = parseIntParam(url.searchParams.get('before'));
 
 	const conditions = [eq(table.notification.userId, userId)];
 	if (beforeId) {
-		conditions.push(lt(table.notification.id, parseInt(beforeId)));
+		conditions.push(lt(table.notification.id, beforeId));
 	}
 
 	const notifications = await db
@@ -90,5 +90,5 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		return json({ success: true });
 	}
 
-	return json({ error: '無効なアクションです' }, { status: 400 });
+	return json({ error: ERROR.INVALID_ACTION }, { status: 400 });
 };

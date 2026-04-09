@@ -5,6 +5,7 @@ import { clusterVectorResults } from '$lib/server/db/schema.js';
 import { eq } from 'drizzle-orm';
 import { runEvaluation, type StrategyName } from '$lib/server/matching-evaluation.js';
 import type { ClusterVectorData } from '$lib/server/matching.js';
+import { handleApiError } from '$lib/server/api-utils.js';
 
 /**
  * POST /api/evaluation
@@ -81,11 +82,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			}
 		});
 	} catch (error) {
-		console.error('Evaluation API error:', error);
-		return json(
-			{ error: error instanceof Error ? error.message : 'Unknown error' },
-			{ status: 500 }
-		);
+		return handleApiError(error, 'Evaluation API error');
 	}
 };
 
@@ -113,7 +110,6 @@ export const GET: RequestHandler = async () => {
 
 		return json({ savedVectors });
 	} catch (error) {
-		console.error('Evaluation GET error:', error);
-		return json({ error: 'Failed to load saved vectors' }, { status: 500 });
+		return handleApiError(error, 'Evaluation GET error');
 	}
 };

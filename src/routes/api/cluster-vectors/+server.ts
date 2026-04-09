@@ -3,7 +3,7 @@ import type { RequestHandler } from './$types.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { db } from '$lib/server/db/index.js';
-import { requireAdmin, isErrorResponse } from '$lib/server/api-utils';
+import { requireAdmin, isErrorResponse, handleApiError } from '$lib/server/api-utils';
 import {
 	billClusters,
 	billClusterAssignments,
@@ -182,14 +182,7 @@ export const POST: RequestHandler = async ({ request, locals }): Promise<Respons
 			savedName: saveImmediately ? saveName : undefined
 		});
 	} catch (error) {
-		console.error('Error calculating cluster vectors:', error);
-		return json(
-			{
-				success: false,
-				error: error instanceof Error ? error.message : 'Unknown error'
-			},
-			{ status: 500 }
-		);
+		return handleApiError(error, 'Error calculating cluster vectors');
 	}
 };
 
@@ -247,14 +240,7 @@ export const PUT: RequestHandler = async ({ request }): Promise<Response> => {
 			message: 'Cluster vectors saved successfully'
 		});
 	} catch (error) {
-		console.error('Error saving cluster vectors:', error);
-		return json(
-			{
-				success: false,
-				error: error instanceof Error ? error.message : 'Unknown error'
-			},
-			{ status: 500 }
-		);
+		return handleApiError(error, 'Error saving cluster vectors');
 	}
 };
 
@@ -295,11 +281,7 @@ export const GET: RequestHandler = async ({ url }): Promise<Response> => {
 				savedResults
 			});
 		} catch (error) {
-			console.error('Error fetching all saved vectors:', error);
-			return json(
-				{ error: error instanceof Error ? error.message : 'Unknown error' },
-				{ status: 500 }
-			);
+			return handleApiError(error, 'Error fetching all saved vectors');
 		}
 	}
 
@@ -408,12 +390,6 @@ export const GET: RequestHandler = async ({ url }): Promise<Response> => {
 			savedResults
 		});
 	} catch (error) {
-		console.error('Error fetching cluster labels:', error);
-		return json(
-			{
-				error: error instanceof Error ? error.message : 'Unknown error'
-			},
-			{ status: 500 }
-		);
+		return handleApiError(error, 'Error fetching cluster labels');
 	}
 };

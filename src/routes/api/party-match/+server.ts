@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types.js';
 import { calculatePartyScores } from '$lib/server/party-matching.js';
+import { handleApiError } from '$lib/server/api-utils.js';
 
 /**
  * POST /api/party-match
@@ -33,10 +34,6 @@ export const POST: RequestHandler = async ({ request }) => {
 			partyScores
 		});
 	} catch (error) {
-		console.error('Party match API error:', error);
-		return json(
-			{ error: error instanceof Error ? error.message : 'Unknown error' },
-			{ status: 500 }
-		);
+		return handleApiError(error, 'Party match API error');
 	}
 };

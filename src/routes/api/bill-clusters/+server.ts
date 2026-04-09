@@ -12,6 +12,7 @@ import {
 	committeeBill
 } from '$lib/server/db/schema.js';
 import { eq, desc, inArray, sql } from 'drizzle-orm';
+import { parseIntParam } from '$lib/server/api-utils.js';
 
 /**
  * GET /api/bill-clusters
@@ -23,7 +24,10 @@ export const GET: RequestHandler = async ({ url }): Promise<Response> => {
 	try {
 		if (clusterId) {
 			// Get details of a specific cluster including all bills
-			const clusterIdNum = parseInt(clusterId);
+			const clusterIdNum = parseIntParam(clusterId);
+			if (clusterIdNum === null) {
+				return json({ error: 'Invalid cluster ID' }, { status: 400 });
+			}
 
 			// Get cluster metadata
 			const [clusterInfo] = await db

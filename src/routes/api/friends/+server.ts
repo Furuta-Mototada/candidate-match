@@ -8,7 +8,7 @@ import {
 	notifyFriendRequestAccepted,
 	notifyFriendRequestRejected
 } from '$lib/server/notifications';
-import { requireUser, isErrorResponse } from '$lib/server/api-utils';
+import { requireUser, isErrorResponse, ERROR } from '$lib/server/api-utils';
 
 // GET /api/friends?action=list|search|requests
 export const GET: RequestHandler = async ({ url, locals }) => {
@@ -326,5 +326,5 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		return json({ success: true, message: 'リクエストを取り消しました' });
 	}
 
-	return json({ error: '無効なアクションです' }, { status: 400 });
+	return json({ error: ERROR.INVALID_ACTION }, { status: 400 });
 };

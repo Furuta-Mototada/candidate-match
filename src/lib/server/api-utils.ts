@@ -67,3 +67,12 @@ export function requireIntParam(value: string | null, paramName: string): number
 	}
 	return parsed;
 }
+
+/**
+ * Standard error handler for API route catch blocks.
+ * Logs the error and returns a JSON 500 response.
+ */
+export function handleApiError(error: unknown, context: string): Response {
+	console.error(`${context}:`, error);
+	return json({ error: error instanceof Error ? error.message : 'Unknown error' }, { status: 500 });
+}

@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types.js';
 import { db } from '$lib/server/db/index.js';
+import { requireIntParam, handleApiError } from '$lib/server/api-utils.js';
 import {
 	bill,
 	billEnrichment,
@@ -77,14 +78,8 @@ export const GET: RequestHandler = async ({ url }): Promise<Response> => {
 	try {
 		const billIdParam = url.searchParams.get('billId');
 
-		if (!billIdParam) {
-			return json({ error: 'billId parameter is required' }, { status: 400 });
-		}
-
-		const billId = parseInt(billIdParam);
-		if (isNaN(billId)) {
-			return json({ error: 'Invalid billId' }, { status: 400 });
-		}
+		const billId = requireIntParam(billIdParam, 'billId');
+		if (billId instanceof Response) return billId;
 
 		// Fetch bill basic info
 		const [billData] = await db
@@ -192,11 +187,7 @@ export const GET: RequestHandler = async ({ url }): Promise<Response> => {
 
 		return json(result);
 	} catch (error) {
-		console.error('Bill enrichment API error:', error);
-		return json(
-			{ error: error instanceof Error ? error.message : 'Unknown error' },
-			{ status: 500 }
-		);
+		return handleApiError(error, 'Bill enrichment API error');
 	}
 };
 
@@ -270,10 +261,6 @@ export const POST: RequestHandler = async ({ request }): Promise<Response> => {
 
 		return json({ enrichments: enrichmentMap });
 	} catch (error) {
-		console.error('Bill enrichment batch API error:', error);
-		return json(
-			{ error: error instanceof Error ? error.message : 'Unknown error' },
-			{ status: 500 }
-		);
+		return handleApiError(error, 'Bill enrichment batch API error');
 	}
 };

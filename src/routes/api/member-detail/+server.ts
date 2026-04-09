@@ -13,19 +13,14 @@ import {
 } from '$lib/server/db/schema.js';
 import { eq, and, inArray } from 'drizzle-orm';
 import { getMemberBillScores } from '$lib/server/legislation-score-index.js';
+import { requireIntParam } from '$lib/server/api-utils.js';
 
 export const GET: RequestHandler = async ({ url }) => {
 	const memberIdParam = url.searchParams.get('memberId');
 	const billIdsParam = url.searchParams.get('billIds');
 
-	if (!memberIdParam) {
-		return json({ error: 'memberId is required' }, { status: 400 });
-	}
-
-	const memberId = parseInt(memberIdParam, 10);
-	if (isNaN(memberId)) {
-		return json({ error: 'Invalid memberId' }, { status: 400 });
-	}
+	const memberId = requireIntParam(memberIdParam, 'memberId');
+	if (memberId instanceof Response) return memberId;
 
 	// Parse bill IDs if provided
 	const billIds: number[] = billIdsParam

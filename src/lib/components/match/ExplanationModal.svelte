@@ -1,5 +1,6 @@
 <script lang="ts">
 	import ExplanationContent from '$lib/components/match/ExplanationContent.svelte';
+	import ModalOverlay from '$lib/components/ModalOverlay.svelte';
 
 	interface Props {
 		show: boolean;
@@ -7,50 +8,21 @@
 	}
 
 	let { show, onClose }: Props = $props();
-
-	function handleOverlayClick() {
-		onClose();
-	}
-
-	function handleContainerClick(e: MouseEvent) {
-		e.stopPropagation();
-	}
 </script>
 
 {#if show}
-	<!-- svelte-ignore a11y_click_events_have_key_events -->
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="modal-overlay" onclick={handleOverlayClick}>
-		<!-- svelte-ignore a11y_click_events_have_key_events -->
-		<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-		<div class="modal-container" onclick={handleContainerClick} role="document">
+	<ModalOverlay {onClose}>
+		<div class="modal-container" role="document">
 			<button class="modal-close-btn" onclick={onClose}>×</button>
 
 			<div class="explanation-content-modal">
 				<ExplanationContent />
 			</div>
 		</div>
-	</div>
+	</ModalOverlay>
 {/if}
 
 <style>
-	/* ===== MODAL ===== */
-	.modal-overlay {
-		position: fixed;
-		top: 0;
-		left: 0;
-		width: 100%;
-		height: 100%;
-		background: rgba(0, 0, 0, 0.5);
-		backdrop-filter: blur(4px);
-		z-index: 1000;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		padding: 1rem;
-		animation: fadeIn 0.2s ease-out;
-	}
-
 	.modal-container {
 		background: white;
 		width: 100%;
@@ -91,15 +63,6 @@
 
 	.explanation-content-modal {
 		padding: 2rem;
-	}
-
-	@keyframes fadeIn {
-		from {
-			opacity: 0;
-		}
-		to {
-			opacity: 1;
-		}
 	}
 
 	@keyframes scaleIn {

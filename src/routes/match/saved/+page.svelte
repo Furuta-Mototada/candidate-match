@@ -17,6 +17,7 @@
 	} from '$lib/types/index.js';
 	import { formatBillRef } from '$lib/types/match.js';
 	import DelegationModal from '$lib/components/match/DelegationModal.svelte';
+	import ModalOverlay from '$lib/components/ModalOverlay.svelte';
 	import BillDetailModal from '$lib/components/match/BillDetailModal.svelte';
 	import DelegationFlowChart from '$lib/components/match/DelegationFlowChart.svelte';
 	import GlobalResultsPhase from '$lib/components/match/GlobalResultsPhase.svelte';
@@ -340,11 +341,11 @@
 				incomingDelegations = data.incoming || [];
 				outgoingDelegations = data.outgoing || [];
 				incomingCountBuckets = data.incomingCountBuckets || {};
+				delegationsLoaded = true;
 			}
 		} catch (e) {
 			console.error('Error loading delegations:', e);
 		}
-		delegationsLoaded = true;
 		delegationsLoading = false;
 	}
 
@@ -356,11 +357,11 @@
 			const data = await res.json();
 			if (data.success) {
 				allBills = data.bills || [];
+				allBillsLoaded = true;
 			}
 		} catch (e) {
 			console.error('Error loading bills:', e);
 		}
-		allBillsLoaded = true;
 		allBillsLoading = false;
 	}
 
@@ -2093,17 +2094,8 @@
 
 	<!-- Save snapshot modal -->
 	{#if showSaveModal}
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div
-			class="modal-overlay"
-			onclick={() => (showSaveModal = false)}
-			onkeydown={(e) => {
-				if (e.key === 'Escape') showSaveModal = false;
-			}}
-		>
-			<!-- svelte-ignore a11y_no_static_element_interactions -->
-			<!-- svelte-ignore a11y_click_events_have_key_events -->
-			<div class="modal-content save-modal" onclick={(e) => e.stopPropagation()}>
+		<ModalOverlay onClose={() => (showSaveModal = false)}>
+			<div class="modal-content save-modal">
 				<h3 class="modal-title">スナップショットを保存</h3>
 				<label class="save-modal-label">
 					名前
@@ -2139,7 +2131,7 @@
 					</button>
 				</div>
 			</div>
-		</div>
+		</ModalOverlay>
 	{/if}
 </div>
 

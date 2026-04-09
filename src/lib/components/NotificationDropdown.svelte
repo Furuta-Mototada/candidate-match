@@ -82,22 +82,36 @@
 		if (notif && !notif.read) {
 			notif.read = true;
 			localAdjust -= 1;
-			await fetch('/api/notifications', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ action: 'mark-read', notificationId: id })
-			});
+			try {
+				const res = await fetch('/api/notifications', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ action: 'mark-read', notificationId: id })
+				});
+				if (!res.ok) throw new Error();
+			} catch {
+				notif.read = false;
+				localAdjust += 1;
+			}
 		}
 	}
 
 	async function markAllRead() {
+		const previousStates = notifications.map((n) => n.read);
+		const previousAdjust = localAdjust;
 		notifications = notifications.map((n) => ({ ...n, read: true }));
 		localAdjust = -unreadCount;
-		await fetch('/api/notifications', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ action: 'mark-all-read' })
-		});
+		try {
+			const res = await fetch('/api/notifications', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ action: 'mark-all-read' })
+			});
+			if (!res.ok) throw new Error();
+		} catch {
+			notifications = notifications.map((n, i) => ({ ...n, read: previousStates[i] }));
+			localAdjust = previousAdjust;
+		}
 	}
 
 	function toggle() {

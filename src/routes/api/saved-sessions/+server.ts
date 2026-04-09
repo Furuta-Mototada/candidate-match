@@ -25,7 +25,14 @@ import {
 } from '$lib/server/matching.js';
 import { resolveDelegatedVotes } from '$lib/server/delegation-helpers.js';
 import { calculatePartyScores } from '$lib/server/party-matching.js';
-import { requireUser, isErrorResponse } from '$lib/server/api-utils.js';
+import {
+	requireUser,
+	isErrorResponse,
+	parseIntParam,
+	requireIntParam,
+	handleApiError,
+	ERROR
+} from '$lib/server/api-utils.js';
 
 /**
  * GET /api/saved-sessions
@@ -46,11 +53,13 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 		const answerClusterId = url.searchParams.get('clusterId');
 
 		if (wantAnswers === 'true') {
-			return await getAnswers(userOrError.id, answerClusterId ? parseInt(answerClusterId) : null);
+			return await getAnswers(userOrError.id, parseIntParam(answerClusterId));
 		}
 
 		if (snapshotId) {
-			return await getSnapshotDetails(parseInt(snapshotId), userOrError.id);
+			const parsedSnapshotId = requireIntParam(snapshotId, 'id');
+			if (parsedSnapshotId instanceof Response) return parsedSnapshotId;
+			return await getSnapshotDetails(parsedSnapshotId, userOrError.id);
 		}
 
 		// List all snapshots
@@ -83,11 +92,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 			snapshots: snapshotList
 		});
 	} catch (error) {
-		console.error('Error fetching saved data:', error);
-		return json(
-			{ error: error instanceof Error ? error.message : 'Unknown error' },
-			{ status: 500 }
-		);
+		return handleApiError(error, 'Error fetching saved data');
 	}
 };
 
@@ -347,14 +352,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				return await handleBackfillAnswers(body, userOrError.id);
 
 			default:
-				return json({ error: 'Invalid action' }, { status: 400 });
+				return json({ error: ERROR.INVALID_ACTION }, { status: 400 });
 		}
 	} catch (error) {
-		console.error('Saved sessions API error:', error);
-		return json(
-			{ error: error instanceof Error ? error.message : 'Unknown error' },
-			{ status: 500 }
-		);
+		return handleApiError(error, 'Saved sessions API error');
 	}
 };
 
