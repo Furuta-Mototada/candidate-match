@@ -31,3 +31,6 @@ HCs/
 
 # Scrape cache
 data/raw/
+
+# Code improvement notes
+notes/

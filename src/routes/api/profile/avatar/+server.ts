@@ -17,7 +17,7 @@ async function deleteOldAvatar(userId: string) {
 		const ik = imagekit();
 		if (!ik) return;
 		try {
-			await ik.deleteFile(existing.avatarFileId);
+			await ik.files.delete(existing.avatarFileId);
 		} catch {
 			// Best-effort: don't fail the request if ImageKit delete fails
 			console.warn(`Failed to delete old avatar from ImageKit: ${existing.avatarFileId}`);
