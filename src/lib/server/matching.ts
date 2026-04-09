@@ -227,15 +227,19 @@ export function estimateUserVector(
 }
 
 /**
- * Solve linear system Ax = b using Gaussian elimination
+ * Solve linear system Ax = b using Gaussian elimination with partial pivoting.
+ * Returns a zero vector if the matrix is singular or near-singular.
  */
 function solveLinearSystem(A: number[][], b: number[]): number[] {
 	const n = b.length;
 	const augmented: number[][] = A.map((row, i) => [...row, b[i]]);
 
-	// Forward elimination
+	// Threshold for near-zero pivot detection (relative to matrix scale)
+	const PIVOT_EPSILON = 1e-12;
+
+	// Forward elimination with partial pivoting
 	for (let i = 0; i < n; i++) {
-		// Find pivot
+		// Find pivot (row with largest absolute value in column i)
 		let maxRow = i;
 		for (let k = i + 1; k < n; k++) {
 			if (Math.abs(augmented[k][i]) > Math.abs(augmented[maxRow][i])) {
@@ -244,13 +248,19 @@ function solveLinearSystem(A: number[][], b: number[]): number[] {
 		}
 		[augmented[i], augmented[maxRow]] = [augmented[maxRow], augmented[i]];
 
+		// Check for near-singular matrix
+		if (Math.abs(augmented[i][i]) < PIVOT_EPSILON) {
+			console.warn(
+				`[Matching] Near-singular matrix detected at pivot ${i} (value: ${augmented[i][i]}). Returning zero vector.`
+			);
+			return new Array(n).fill(0);
+		}
+
 		// Eliminate column
 		for (let k = i + 1; k < n; k++) {
-			if (augmented[i][i] !== 0) {
-				const factor = augmented[k][i] / augmented[i][i];
-				for (let j = i; j <= n; j++) {
-					augmented[k][j] -= factor * augmented[i][j];
-				}
+			const factor = augmented[k][i] / augmented[i][i];
+			for (let j = i; j <= n; j++) {
+				augmented[k][j] -= factor * augmented[i][j];
 			}
 		}
 	}
@@ -262,9 +272,7 @@ function solveLinearSystem(A: number[][], b: number[]): number[] {
 		for (let j = i + 1; j < n; j++) {
 			x[i] -= augmented[i][j] * x[j];
 		}
-		if (augmented[i][i] !== 0) {
-			x[i] /= augmented[i][i];
-		}
+		x[i] /= augmented[i][i];
 	}
 
 	return x;

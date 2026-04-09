@@ -65,7 +65,7 @@ export const billSession = pgTable(
 	{
 		billId: integer('bill_id')
 			.notNull()
-			.references(() => bill.id),
+			.references(() => bill.id, { onDelete: 'cascade' }),
 		sessionNumber: integer('session_number')
 			.notNull()
 			.references(() => congressSession.sessionNumber),
@@ -95,7 +95,7 @@ export const committeeBill = pgTable('committee_bill', {
 		.references(() => committee.id),
 	billId: integer('bill_id')
 		.notNull()
-		.references(() => bill.id),
+		.references(() => bill.id, { onDelete: 'cascade' }),
 	session: integer('session')
 		.notNull()
 		.references(() => congressSession.sessionNumber) // 回次
@@ -186,7 +186,7 @@ export const billSponsors = pgTable(
 	{
 		billId: integer('bill_id')
 			.notNull()
-			.references(() => bill.id),
+			.references(() => bill.id, { onDelete: 'cascade' }),
 		memberId: integer('member_id')
 			.notNull()
 			.references(() => member.id)
@@ -203,7 +203,7 @@ export const billSponsorGroups = pgTable(
 	{
 		billId: integer('bill_id')
 			.notNull()
-			.references(() => bill.id),
+			.references(() => bill.id, { onDelete: 'cascade' }),
 		groupId: integer('group_id')
 			.notNull()
 			.references(() => group.id)
@@ -220,7 +220,7 @@ export const billSupporters = pgTable(
 	{
 		billId: integer('bill_id')
 			.notNull()
-			.references(() => bill.id),
+			.references(() => bill.id, { onDelete: 'cascade' }),
 		memberId: integer('member_id')
 			.notNull()
 			.references(() => member.id)
@@ -236,7 +236,7 @@ export const billVotes = pgTable('bill_votes', {
 	id: serial('id').primaryKey(),
 	billId: integer('bill_id')
 		.notNull()
-		.references(() => bill.id),
+		.references(() => bill.id, { onDelete: 'cascade' }),
 	session: integer('session')
 		.notNull()
 		.references(() => congressSession.sessionNumber), // 回次
@@ -254,7 +254,7 @@ export const billVotesResultGroup = pgTable(
 	{
 		billVotesId: integer('bill_votes_id')
 			.notNull()
-			.references(() => billVotes.id),
+			.references(() => billVotes.id, { onDelete: 'cascade' }),
 		groupId: integer('group_id')
 			.notNull()
 			.references(() => group.id),
@@ -272,7 +272,7 @@ export const billVotesResultMember = pgTable(
 	{
 		billVotesId: integer('bill_votes_id')
 			.notNull()
-			.references(() => billVotes.id),
+			.references(() => billVotes.id, { onDelete: 'cascade' }),
 		memberId: integer('member_id')
 			.notNull()
 			.references(() => member.id),
@@ -288,7 +288,7 @@ export type NewBillVotesResultMember = typeof billVotesResultMember.$inferInsert
 export const billEmbeddings = pgTable('bill_embeddings', {
 	billId: integer('bill_id')
 		.primaryKey()
-		.references(() => bill.id),
+		.references(() => bill.id, { onDelete: 'cascade' }),
 	pdfUrl: text('pdf_url'), // URL to the PDF document
 	textContent: text('text_content'), // Extracted text content from PDF
 	embedding: text('embedding').notNull(), // JSON serialized vector (array of floats)
@@ -318,10 +318,10 @@ export const billClusterAssignments = pgTable(
 	{
 		clusterId: integer('cluster_id')
 			.notNull()
-			.references(() => billClusters.id),
+			.references(() => billClusters.id, { onDelete: 'cascade' }),
 		billId: integer('bill_id')
 			.notNull()
-			.references(() => bill.id),
+			.references(() => bill.id, { onDelete: 'cascade' }),
 		clusterLabel: integer('cluster_label').notNull(), // The cluster number assigned
 		distance: text('distance'), // Distance to cluster center (for kmeans) or other metric
 		x: real('x'), // 2D visualization x coordinate (from t-SNE/UMAP)
@@ -339,7 +339,7 @@ export const billClusterLabelNames = pgTable(
 	{
 		clusterId: integer('cluster_id')
 			.notNull()
-			.references(() => billClusters.id),
+			.references(() => billClusters.id, { onDelete: 'cascade' }),
 		clusterLabel: integer('cluster_label').notNull(), // The cluster number
 		name: text('name').notNull(), // LLM-generated name for this cluster
 		description: text('description'), // LLM-generated description
@@ -356,7 +356,7 @@ export const clusterVectorResults = pgTable('cluster_vector_results', {
 	id: serial('id').primaryKey(),
 	clusterId: integer('cluster_id')
 		.notNull()
-		.references(() => billClusters.id),
+		.references(() => billClusters.id, { onDelete: 'cascade' }),
 	clusterLabel: integer('cluster_label').notNull(), // The cluster number this result is for
 	nComponents: integer('n_components').notNull(), // Number of PCA dimensions
 	name: text('name').notNull(), // User-provided name for this calculation
@@ -422,7 +422,7 @@ export const userBillAnswer = pgTable(
 			.references(() => user.id, { onDelete: 'cascade' }),
 		billId: integer('bill_id')
 			.notNull()
-			.references(() => bill.id),
+			.references(() => bill.id, { onDelete: 'cascade' }),
 		answer: billAnswerEnum('answer').notNull(),
 		createdAt: timestamp('created_at').notNull().defaultNow(),
 		updatedAt: timestamp('updated_at').notNull().defaultNow()
@@ -442,7 +442,7 @@ export const resultSnapshot = pgTable('result_snapshot', {
 		.references(() => user.id, { onDelete: 'cascade' }),
 	clusterId: integer('cluster_id')
 		.notNull()
-		.references(() => billClusters.id),
+		.references(() => billClusters.id, { onDelete: 'cascade' }),
 	name: text('name').notNull(),
 	globalScoresJson: text('global_scores_json').notNull(), // JSON: GlobalMemberScore[]
 	clusterResultsJson: text('cluster_results_json').notNull(), // JSON: summary of cluster results at this point
@@ -469,7 +469,7 @@ export const enrichmentStatusEnum = pgEnum('enrichment_status', [
 export const billEnrichment = pgTable('bill_enrichment', {
 	billId: integer('bill_id')
 		.primaryKey()
-		.references(() => bill.id),
+		.references(() => bill.id, { onDelete: 'cascade' }),
 
 	// One-line summary (50-80 chars)
 	summaryShort: text('summary_short'),
@@ -507,7 +507,7 @@ export const billDebates = pgTable('bill_debates', {
 	id: serial('id').primaryKey(),
 	billId: integer('bill_id')
 		.notNull()
-		.references(() => bill.id),
+		.references(() => bill.id, { onDelete: 'cascade' }),
 
 	// Meeting info from Kokkai API
 	meetingId: text('meeting_id').notNull(), // issueID from API
@@ -544,7 +544,7 @@ export type NewBillDebate = typeof billDebates.$inferInsert;
 export const billDebateSummary = pgTable('bill_debate_summary', {
 	billId: integer('bill_id')
 		.primaryKey()
-		.references(() => bill.id),
+		.references(() => bill.id, { onDelete: 'cascade' }),
 
 	// Summary of pro arguments (JSON array of strings)
 	proArgumentsSummary: text('pro_arguments_summary'),
@@ -606,7 +606,7 @@ export const voteDelegation = pgTable(
 			.references(() => user.id, { onDelete: 'cascade' }),
 		billId: integer('bill_id')
 			.notNull()
-			.references(() => bill.id),
+			.references(() => bill.id, { onDelete: 'cascade' }),
 		status: delegationStatusEnum('status').notNull().default('pending'),
 		voteRationale: text('vote_rationale'),
 		createdAt: timestamp('created_at').notNull().defaultNow(),
@@ -673,7 +673,7 @@ export const notification = pgTable(
 		type: notificationTypeEnum('type').notNull(),
 		actorId: text('actor_id').references(() => user.id, { onDelete: 'set null' }),
 		resourceId: integer('resource_id'), // friendRequest.id or voteDelegation.id
-		billId: integer('bill_id').references(() => bill.id),
+		billId: integer('bill_id').references(() => bill.id, { onDelete: 'set null' }),
 		message: text('message').notNull(),
 		read: boolean('read').notNull().default(false),
 		createdAt: timestamp('created_at').notNull().defaultNow()
@@ -686,3 +686,18 @@ export const notification = pgTable(
 
 export type Notification = typeof notification.$inferSelect;
 export type NewNotification = typeof notification.$inferInsert;
+
+// ============================================================================
+// Evaluation Rate Limiting
+// ============================================================================
+
+export const evaluationRun = pgTable('evaluation_run', {
+	id: serial('id').primaryKey(),
+	userId: text('user_id')
+		.notNull()
+		.references(() => user.id, { onDelete: 'cascade' }),
+	createdAt: timestamp('created_at').notNull().defaultNow()
+});
+
+export type EvaluationRun = typeof evaluationRun.$inferSelect;
+export type NewEvaluationRun = typeof evaluationRun.$inferInsert;

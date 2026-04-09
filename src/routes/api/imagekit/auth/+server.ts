@@ -7,8 +7,13 @@ export const GET: RequestHandler = async ({ locals }) => {
 	const userOrError = requireUser(locals);
 	if (isErrorResponse(userOrError)) return userOrError;
 
+	const ik = imagekit();
+	if (!ik) {
+		return json({ error: '画像アップロード機能は現在利用できません' }, { status: 503 });
+	}
+
 	try {
-		const authParams = imagekit.getAuthenticationParameters();
+		const authParams = ik.getAuthenticationParameters();
 		return json({
 			success: true,
 			...authParams,

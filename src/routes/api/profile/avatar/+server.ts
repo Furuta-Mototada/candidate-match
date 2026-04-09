@@ -14,8 +14,10 @@ async function deleteOldAvatar(userId: string) {
 		.where(eq(table.user.id, userId));
 
 	if (existing?.avatarFileId) {
+		const ik = imagekit();
+		if (!ik) return;
 		try {
-			await imagekit.deleteFile(existing.avatarFileId);
+			await ik.deleteFile(existing.avatarFileId);
 		} catch {
 			// Best-effort: don't fail the request if ImageKit delete fails
 			console.warn(`Failed to delete old avatar from ImageKit: ${existing.avatarFileId}`);

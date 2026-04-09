@@ -1,10 +1,20 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { PageHero } from '$lib/components/index.js';
-	import { FlaskConical, Play, BookOpen, Target, Lightbulb, BarChart3 } from '@lucide/svelte';
+	import {
+		FlaskConical,
+		Play,
+		BookOpen,
+		Target,
+		Lightbulb,
+		BarChart3,
+		LogIn
+	} from '@lucide/svelte';
 	import type { PageData } from './$types.js';
 
 	let { data }: { data: PageData } = $props();
+
+	const isLoggedIn = $derived(!!data.user);
 
 	// Types
 	interface SavedVector {
@@ -77,6 +87,7 @@
 	let convergeThreshold = $state(0.2);
 	let isRunning = $state(false);
 	let error: string | null = $state(null);
+	let isRateLimited = $state(false);
 	let result: EvalResult | null = $state(null);
 	let activeChart: 'cosine' | 'rank' | 'top5' | 'uncertainty' = $state('cosine');
 	let selectedMember: number | null = $state(null);
@@ -115,6 +126,7 @@
 
 		isRunning = true;
 		error = null;
+		isRateLimited = false;
 		result = null;
 
 		try {
@@ -131,6 +143,9 @@
 
 			if (!response.ok) {
 				const data = await response.json();
+				if (response.status === 429) {
+					isRateLimited = true;
+				}
 				throw new Error(data.error || 'Evaluation failed');
 			}
 
@@ -352,61 +367,101 @@
 			<h2>評価設定</h2>
 		</div>
 
-		<div class="form-group">
-			<label for="vector-select">ベクトルデータ</label>
-			<select id="vector-select" class="select" bind:value={selectedVectorId}>
-				<option value={null}>保存済みベクトルを選択...</option>
-				{#each savedVectors as vec (vec.id)}
-					<option value={vec.id}>
-						{vec.name} — ラベル {vec.clusterLabel}（{vec.memberCount}人, {vec.billCount}法案, {vec.dimensions}次元）
-						{vec.isDefault ? ' ★' : ''}
-					</option>
-				{/each}
-			</select>
-		</div>
+		<div class="config-form-wrapper" class:blurred={!isLoggedIn}>
+			<div class="form-group">
+				<label for="vector-select">ベクトルデータ</label>
+				<select
+					id="vector-select"
+					class="select"
+					bind:value={selectedVectorId}
+					disabled={!isLoggedIn}
+				>
+					<option value={null}>保存済みベクトルを選択...</option>
+					{#each savedVectors as vec (vec.id)}
+						<option value={vec.id}>
+							{vec.name} — ラベル {vec.clusterLabel}（{vec.memberCount}人, {vec.billCount}法案, {vec.dimensions}次元）
+							{vec.isDefault ? ' ★' : ''}
+						</option>
+					{/each}
+				</select>
+			</div>
 
-		<div class="form-row">
-			<div class="form-group">
-				<label for="max-q">最大質問数</label>
-				<input id="max-q" class="input" type="number" bind:value={maxQuestions} min={5} max={50} />
+			<div class="form-row">
+				<div class="form-group">
+					<label for="max-q">最大質問数</label>
+					<input
+						id="max-q"
+						class="input"
+						type="number"
+						bind:value={maxQuestions}
+						min={5}
+						max={50}
+						disabled={!isLoggedIn}
+					/>
+				</div>
+				<div class="form-group">
+					<label for="sample-size">サンプル議員数</label>
+					<input
+						id="sample-size"
+						class="input"
+						type="number"
+						bind:value={sampleSize}
+						min={3}
+						max={50}
+						disabled={!isLoggedIn}
+					/>
+				</div>
+				<div class="form-group">
+					<label for="threshold">収束閾値</label>
+					<input
+						id="threshold"
+						class="input"
+						type="number"
+						bind:value={convergeThreshold}
+						min={0.05}
+						max={1}
+						step={0.05}
+						disabled={!isLoggedIn}
+					/>
+				</div>
 			</div>
-			<div class="form-group">
-				<label for="sample-size">サンプル議員数</label>
-				<input
-					id="sample-size"
-					class="input"
-					type="number"
-					bind:value={sampleSize}
-					min={3}
-					max={50}
-				/>
-			</div>
-			<div class="form-group">
-				<label for="threshold">収束閾値</label>
-				<input
-					id="threshold"
-					class="input"
-					type="number"
-					bind:value={convergeThreshold}
-					min={0.05}
-					max={1}
-					step={0.05}
-				/>
-			</div>
-		</div>
 
-		<button class="btn-primary" onclick={runEvaluation} disabled={isRunning || !selectedVectorId}>
-			{#if isRunning}
-				<span class="btn-spinner"></span>
-				評価を実行中...
-			{:else}
-				<Play size={18} class="inline-icon" />
-				評価を実行
+			<button
+				class="btn-primary"
+				onclick={runEvaluation}
+				disabled={isRunning || !selectedVectorId || !isLoggedIn}
+			>
+				{#if isRunning}
+					<span class="btn-spinner"></span>
+					評価を実行中...
+				{:else}
+					<Play size={18} class="inline-icon" />
+					評価を実行
+				{/if}
+			</button>
+
+			{#if !isLoggedIn}
+				<div class="login-overlay">
+					<div class="login-overlay-content">
+						<LogIn size={28} />
+						<p>評価を実行するにはログインが必要です</p>
+						<a href="/auth/login?redirect=/evaluation" class="btn-login">ログイン</a>
+						<a href="/auth/register?redirect=/evaluation" class="btn-register-link"
+							>アカウント作成</a
+						>
+					</div>
+				</div>
 			{/if}
-		</button>
+		</div>
 
 		{#if error}
-			<p class="error-msg">{error}</p>
+			{#if isRateLimited}
+				<div class="rate-limit-notice">
+					<p>⏳ {error}</p>
+				</div>
+			{:else}
+				<p class="error-msg">{error}</p>
+			{/if}
 		{/if}
 	</section>
 
@@ -1098,6 +1153,93 @@
 		color: #dc2626;
 		font-size: 0.9rem;
 		margin: 0.75rem 0 0;
+	}
+
+	.config-form-wrapper {
+		position: relative;
+	}
+
+	.config-form-wrapper.blurred > :not(.login-overlay) {
+		filter: blur(3px);
+		pointer-events: none;
+		user-select: none;
+	}
+
+	.login-overlay {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 10;
+	}
+
+	.login-overlay-content {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.75rem;
+		padding: 2rem 2.5rem;
+		background: rgba(255, 255, 255, 0.95);
+		border: 1px solid #e5e7eb;
+		border-radius: 16px;
+		box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
+		text-align: center;
+		color: #374151;
+	}
+
+	.login-overlay-content p {
+		margin: 0;
+		font-size: 1rem;
+		font-weight: 600;
+		color: #1f2937;
+	}
+
+	.btn-login {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		background: #6366f1;
+		color: white;
+		padding: 0.6rem 1.75rem;
+		border: none;
+		border-radius: 8px;
+		font-size: 0.95rem;
+		font-weight: 600;
+		text-decoration: none;
+		transition:
+			background 0.2s,
+			transform 0.2s;
+	}
+
+	.btn-login:hover {
+		background: #4f46e5;
+		transform: translateY(-1px);
+	}
+
+	.btn-register-link {
+		font-size: 0.85rem;
+		color: #6366f1;
+		text-decoration: none;
+	}
+
+	.btn-register-link:hover {
+		text-decoration: underline;
+	}
+
+	.rate-limit-notice {
+		margin: 0.75rem 0 0;
+		padding: 0.75rem 1rem;
+		background: #fef3c7;
+		border: 1px solid #fcd34d;
+		border-radius: 8px;
+		border-left: 3px solid #f59e0b;
+	}
+
+	.rate-limit-notice p {
+		margin: 0;
+		color: #92400e;
+		font-size: 0.9rem;
 	}
 
 	/* ===== RESULTS SECTION ===== */

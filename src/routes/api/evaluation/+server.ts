@@ -1,20 +1,48 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types.js';
 import { db } from '$lib/server/db/index.js';
-import { clusterVectorResults } from '$lib/server/db/schema.js';
-import { eq } from 'drizzle-orm';
+import { clusterVectorResults, evaluationRun } from '$lib/server/db/schema.js';
+import { eq, and, gte } from 'drizzle-orm';
 import { runEvaluation, type StrategyName } from '$lib/server/matching-evaluation.js';
 import type { ClusterVectorData } from '$lib/server/matching.js';
-import { handleApiError } from '$lib/server/api-utils.js';
+import { requireUser, isErrorResponse, handleApiError } from '$lib/server/api-utils.js';
+
+/** Maximum evaluation runs per user within the rate limit window */
+const MAX_EVALS_PER_WINDOW = 3;
+/** Rate limit window in milliseconds (1 hour) */
+const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 
 /**
  * POST /api/evaluation
  *
  * Run adaptive question selection evaluation.
+ * Requires authentication. Rate-limited to prevent abuse.
  * Body: { savedVectorId, maxQuestions?, sampleSize?, convergeThreshold?, strategies? }
  */
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async ({ request, locals }) => {
+	const userOrError = requireUser(locals);
+	if (isErrorResponse(userOrError)) return userOrError;
+	const currentUser = userOrError;
+
 	try {
+		// Rate limit check
+		const windowStart = new Date(Date.now() - RATE_LIMIT_WINDOW_MS);
+		const recentRuns = await db
+			.select({ id: evaluationRun.id })
+			.from(evaluationRun)
+			.where(
+				and(eq(evaluationRun.userId, currentUser.id), gte(evaluationRun.createdAt, windowStart))
+			);
+
+		if (recentRuns.length >= MAX_EVALS_PER_WINDOW) {
+			return json(
+				{
+					error: `評価の実行は1時間に${MAX_EVALS_PER_WINDOW}回までです。しばらく待ってからお試しください。`
+				},
+				{ status: 429 }
+			);
+		}
+
 		const body = await request.json();
 		const { savedVectorId, maxQuestions, sampleSize, convergeThreshold, strategies } = body;
 
@@ -60,6 +88,9 @@ export const POST: RequestHandler = async ({ request }) => {
 			convergeThreshold: convergeThreshold ?? 0.2,
 			strategies: strategies ?? validStrategies
 		});
+
+		// Record this evaluation run for rate limiting
+		await db.insert(evaluationRun).values({ userId: currentUser.id });
 
 		return json({
 			success: true,

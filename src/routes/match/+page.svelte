@@ -4,6 +4,7 @@
 	import { SvelteSet } from 'svelte/reactivity';
 	import { goto } from '$app/navigation';
 	import type { PageData } from './$types.js';
+	import { encryptAndStore, readAndDecrypt } from '$lib/utils/session-crypto.js';
 	import {
 		Vote,
 		CircleCheck,
@@ -1403,18 +1404,23 @@
 			mounted = true;
 		}, 100);
 
-		// Check for pending save after login/register
-		const pendingSave = sessionStorage.getItem('pendingSaveData');
-		if (pendingSave && data.user) {
-			const urlParams = new URLSearchParams(window.location.search);
-			const via = urlParams.get('via');
+		// Check for pending save after login/register (async decryption)
+		if (data.user) {
+			readAndDecrypt<{
+				selectedSavedVectorKey: string;
+				clusterId: number;
+				nComponents: number;
+				clusterResults: ClusterResult[];
+				globalScores: GlobalMemberScore[];
+				clusterLabelsToProcess: number[];
+				clusterLabelNameMap: Record<number, string>;
+			}>('pendingSaveData').then((parsed) => {
+				if (!parsed) return;
+				const urlParams = new URLSearchParams(window.location.search);
+				const via = urlParams.get('via');
 
-			if (via === 'register') {
-				// New account — restore state, backfill answers, allow save
-				try {
-					const parsed = JSON.parse(pendingSave);
-					sessionStorage.removeItem('pendingSaveData');
-					// Restore matching state
+				if (via === 'register') {
+					// New account — restore state, backfill answers, allow save
 					selectedSavedVectorKey = parsed.selectedSavedVectorKey;
 					clusterId = parsed.clusterId;
 					nComponents = parsed.nComponents;
@@ -1444,20 +1450,17 @@
 							})
 						}).catch((err) => console.error('Failed to backfill answers:', err));
 					}
-				} catch {
-					sessionStorage.removeItem('pendingSaveData');
+				} else {
+					// Existing account login — warn and don't allow save
+					showExistingAccountWarning = true;
 				}
-			} else {
-				// Existing account login — warn and don't allow save
-				sessionStorage.removeItem('pendingSaveData');
-				showExistingAccountWarning = true;
-			}
 
-			// Clean up URL params
-			if (via) {
-				const cleanUrl = window.location.pathname;
-				window.history.replaceState({}, '', cleanUrl);
-			}
+				// Clean up URL params
+				if (via) {
+					const cleanUrl = window.location.pathname;
+					window.history.replaceState({}, '', cleanUrl);
+				}
+			});
 		}
 	});
 
@@ -1468,7 +1471,7 @@
 	/**
 	 * Store matching state and redirect to login for saving
 	 */
-	function loginToSave() {
+	async function loginToSave() {
 		const saveData = {
 			selectedSavedVectorKey,
 			clusterId,
@@ -1491,7 +1494,12 @@
 			clusterLabelsToProcess,
 			clusterLabelNameMap
 		};
-		sessionStorage.setItem('pendingSaveData', JSON.stringify(saveData));
+		try {
+			await encryptAndStore('pendingSaveData', saveData);
+		} catch {
+			// Fallback to plain JSON if encryption fails
+			sessionStorage.setItem('pendingSaveData', JSON.stringify(saveData));
+		}
 		goto('/auth/register?redirect=/match');
 	}
 </script>
