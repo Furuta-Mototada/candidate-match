@@ -1,11 +1,11 @@
 import { json } from '@sveltejs/kit';
 import { imagekit, IMAGEKIT_PUBLIC_KEY, IMAGEKIT_URL_ENDPOINT } from '$lib/server/imagekit';
 import type { RequestHandler } from './$types.js';
+import { requireUser, isErrorResponse } from '$lib/server/api-utils';
 
 export const GET: RequestHandler = async ({ locals }) => {
-	if (!locals.user) {
-		return json({ error: '認証が必要です' }, { status: 401 });
-	}
+	const userOrError = requireUser(locals);
+	if (isErrorResponse(userOrError)) return userOrError;
 
 	try {
 		const authParams = imagekit.getAuthenticationParameters();

@@ -1,11 +1,11 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types.js';
 import { db } from '$lib/server/db/index.js';
+import { getBillMetadata } from '$lib/server/bill-queries.js';
 import {
 	resultSnapshot,
 	userBillAnswer,
 	billClusterAssignments,
-	bill,
 	billClusters,
 	clusterVectorResults,
 	billClusterLabelNames,
@@ -17,6 +17,7 @@ import {
 	estimateUserVector,
 	findMatchingMembers,
 	loadMemberGroups,
+	buildMemberVectorsForViz,
 	answerToScore,
 	scoreToAnswer,
 	type ClusterVectorData,
@@ -24,6 +25,7 @@ import {
 } from '$lib/server/matching.js';
 import { resolveDelegatedVotes } from '$lib/server/delegation-helpers.js';
 import { calculatePartyScores } from '$lib/server/party-matching.js';
+import { requireUser, isErrorResponse } from '$lib/server/api-utils.js';
 
 /**
  * GET /api/saved-sessions
@@ -36,27 +38,26 @@ import { calculatePartyScores } from '$lib/server/party-matching.js';
  */
 export const GET: RequestHandler = async ({ url, locals }) => {
 	try {
-		if (!locals.user) {
-			return json({ error: 'Authentication required' }, { status: 401 });
-		}
+		const userOrError = requireUser(locals);
+		if (isErrorResponse(userOrError)) return userOrError;
 
 		const snapshotId = url.searchParams.get('id');
 		const wantAnswers = url.searchParams.get('answers');
 		const answerClusterId = url.searchParams.get('clusterId');
 
 		if (wantAnswers === 'true') {
-			return await getAnswers(locals.user.id, answerClusterId ? parseInt(answerClusterId) : null);
+			return await getAnswers(userOrError.id, answerClusterId ? parseInt(answerClusterId) : null);
 		}
 
 		if (snapshotId) {
-			return await getSnapshotDetails(parseInt(snapshotId), locals.user.id);
+			return await getSnapshotDetails(parseInt(snapshotId), userOrError.id);
 		}
 
 		// List all snapshots
 		const snapshots = await db
 			.select()
 			.from(resultSnapshot)
-			.where(eq(resultSnapshot.userId, locals.user.id))
+			.where(eq(resultSnapshot.userId, userOrError.id))
 			.orderBy(desc(resultSnapshot.createdAt));
 
 		const snapshotList: SnapshotListItem[] = snapshots.map((s) => {
@@ -236,12 +237,7 @@ async function enrichClusterResultsWithVizData(
 			// Build memberVectorsForViz
 			const allMemberIds = Object.keys(clusterData.memberVectors).map((id) => parseInt(id));
 			const groupMap = await loadMemberGroups(allMemberIds);
-			const memberVectorsForViz = Object.entries(clusterData.memberVectors).map(([id, vector]) => ({
-				memberId: parseInt(id),
-				name: clusterData.memberNames[id] || `Member ${id}`,
-				group: groupMap.get(parseInt(id)) || null,
-				latentVector: vector
-			}));
+			const memberVectorsForViz = buildMemberVectorsForViz(clusterData, groupMap);
 
 			return {
 				...cr,
@@ -289,27 +285,15 @@ async function getAnswers(userId: string, clusterId: number | null) {
 
 	// Get bill titles and metadata
 	const answeredBillIds = answers.filter((a) => a.answer !== 'delegated').map((a) => a.billId);
-	const billTitles =
-		answeredBillIds.length > 0
-			? await db
-					.select({
-						id: bill.id,
-						title: bill.title,
-						type: bill.type,
-						submissionSession: bill.submissionSession,
-						number: bill.number
-					})
-					.from(bill)
-					.where(inArray(bill.id, answeredBillIds))
-			: [];
+	const billTitles = await getBillMetadata(answeredBillIds);
 	const billInfoMap = new Map(
 		billTitles.map((b) => [
 			b.id,
 			{
 				title: b.title || '',
-				type: b.type,
-				submissionSession: b.submissionSession,
-				number: b.number
+				type: b.type ?? undefined,
+				submissionSession: b.submissionSession ?? undefined,
+				number: b.number ?? undefined
 			}
 		])
 	);
@@ -343,25 +327,24 @@ async function getAnswers(userId: string, clusterId: number | null) {
  */
 export const POST: RequestHandler = async ({ request, locals }) => {
 	try {
-		if (!locals.user) {
-			return json({ error: 'Authentication required' }, { status: 401 });
-		}
+		const userOrError = requireUser(locals);
+		if (isErrorResponse(userOrError)) return userOrError;
 
 		const body = await request.json();
 		const { action } = body;
 
 		switch (action) {
 			case 'snapshot':
-				return await handleSnapshot(body, locals.user.id);
+				return await handleSnapshot(body, userOrError.id);
 
 			case 'delete':
-				return await handleDelete(body, locals.user.id);
+				return await handleDelete(body, userOrError.id);
 
 			case 'live-results':
-				return await handleLiveResults(body, locals.user.id);
+				return await handleLiveResults(body, userOrError.id);
 
 			case 'backfill-answers':
-				return await handleBackfillAnswers(body, locals.user.id);
+				return await handleBackfillAnswers(body, userOrError.id);
 
 			default:
 				return json({ error: 'Invalid action' }, { status: 400 });
@@ -709,13 +692,7 @@ async function handleLiveResults(
 		const allMemberIds = Object.keys(clusterData.memberVectors).map((id) => parseInt(id));
 		const groupMap = await loadMemberGroups(allMemberIds);
 
-		// Build memberVectorsForViz from all members
-		const memberVectorsForViz = Object.entries(clusterData.memberVectors).map(([id, vector]) => ({
-			memberId: parseInt(id),
-			name: clusterData.memberNames[id] || `Member ${id}`,
-			group: groupMap.get(parseInt(id)) || null,
-			latentVector: vector
-		}));
+		const memberVectorsForViz = buildMemberVectorsForViz(clusterData, groupMap);
 
 		clusterResultsList.push({
 			clusterLabel,
@@ -748,27 +725,15 @@ async function handleLiveResults(
 
 	// Load bill titles and metadata
 	const billIdsArr = Array.from(allBillIds);
-	const billTitles =
-		billIdsArr.length > 0
-			? await db
-					.select({
-						id: bill.id,
-						title: bill.title,
-						type: bill.type,
-						submissionSession: bill.submissionSession,
-						number: bill.number
-					})
-					.from(bill)
-					.where(inArray(bill.id, billIdsArr))
-			: [];
+	const billTitles = await getBillMetadata(billIdsArr);
 	const billInfoMap2 = new Map(
 		billTitles.map((b) => [
 			b.id,
 			{
 				title: b.title || '',
-				type: b.type,
-				submissionSession: b.submissionSession,
-				number: b.number
+				type: b.type ?? undefined,
+				submissionSession: b.submissionSession ?? undefined,
+				number: b.number ?? undefined
 			}
 		])
 	);

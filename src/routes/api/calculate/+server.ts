@@ -1,11 +1,10 @@
 import { exec } from 'child_process';
-import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types.js';
+import { requireAdmin, isErrorResponse } from '$lib/server/api-utils';
 
 export const POST: RequestHandler = async ({ locals }): Promise<Response> => {
-	if (!locals.user || locals.user.role !== 'admin') {
-		return json({ error: 'Admin permission required' }, { status: 403 });
-	}
+	const adminOrError = requireAdmin(locals);
+	if (isErrorResponse(adminOrError)) return adminOrError;
 
 	const stream = new ReadableStream({
 		start(controller) {

@@ -102,9 +102,11 @@ export type UpstreamNode = {
 export async function getDelegationTreeUpstream(
 	userId: string,
 	billId: number,
-	visited: Set<string> = new Set()
+	visited: Set<string> = new Set(),
+	depth: number = 0
 ): Promise<UpstreamNode[]> {
-	if (visited.has(userId)) return [];
+	const MAX_DEPTH = 100;
+	if (visited.has(userId) || depth >= MAX_DEPTH) return [];
 	visited.add(userId);
 
 	const upstreamDelegations = await db
@@ -121,7 +123,7 @@ export async function getDelegationTreeUpstream(
 
 	const nodes: UpstreamNode[] = [];
 	for (const d of upstreamDelegations) {
-		const children = await getDelegationTreeUpstream(d.delegatorId, billId, visited);
+		const children = await getDelegationTreeUpstream(d.delegatorId, billId, visited, depth + 1);
 		nodes.push({
 			username: d.delegatorUsername,
 			status: d.status,

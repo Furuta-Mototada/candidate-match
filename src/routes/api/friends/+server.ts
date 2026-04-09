@@ -8,15 +8,15 @@ import {
 	notifyFriendRequestAccepted,
 	notifyFriendRequestRejected
 } from '$lib/server/notifications';
+import { requireUser, isErrorResponse } from '$lib/server/api-utils';
 
 // GET /api/friends?action=list|search|requests
 export const GET: RequestHandler = async ({ url, locals }) => {
-	if (!locals.user) {
-		return json({ error: '認証が必要です' }, { status: 401 });
-	}
+	const userOrError = requireUser(locals);
+	if (isErrorResponse(userOrError)) return userOrError;
 
 	const action = url.searchParams.get('action') ?? 'list';
-	const userId = locals.user.id;
+	const userId = userOrError.id;
 
 	if (action === 'search') {
 		const query = url.searchParams.get('q')?.trim();
@@ -63,7 +63,13 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 					friendStatus = 'rejected';
 				}
 			}
-			return { id: row.id, username: row.username, avatarUrl: row.avatarUrl, friendStatus };
+			return {
+				id: row.id,
+				username: row.username,
+				avatarUrl: row.avatarUrl,
+				friendStatus,
+				requestId: row.requestId ?? null
+			};
 		});
 
 		return json({ users: usersWithStatus });
@@ -144,13 +150,12 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 
 // POST /api/friends
 export const POST: RequestHandler = async ({ request, locals }) => {
-	if (!locals.user) {
-		return json({ error: '認証が必要です' }, { status: 401 });
-	}
+	const userOrError = requireUser(locals);
+	if (isErrorResponse(userOrError)) return userOrError;
 
 	const body = await request.json();
 	const { action } = body;
-	const userId = locals.user.id;
+	const userId = userOrError.id;
 
 	// Send a friend request
 	if (action === 'send') {
@@ -204,7 +209,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						.update(table.friendRequest)
 						.set({ status: 'accepted', updatedAt: new Date() })
 						.where(eq(table.friendRequest.id, existing.id));
-					await notifyFriendRequestAccepted(receiverId, userId, locals.user!.username, existing.id);
+					await notifyFriendRequestAccepted(receiverId, userId, userOrError.username, existing.id);
 					return json({ success: true, message: 'フレンドになりました！' });
 				}
 				return json({ error: 'リクエスト送信済みです' }, { status: 400 });
@@ -215,7 +220,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					.update(table.friendRequest)
 					.set({ senderId: userId, receiverId, status: 'pending', updatedAt: new Date() })
 					.where(eq(table.friendRequest.id, existing.id));
-				await notifyFriendRequestReceived(receiverId, userId, locals.user!.username, existing.id);
+				await notifyFriendRequestReceived(receiverId, userId, userOrError.username, existing.id);
 				return json({ success: true, message: 'リクエストを送信しました' });
 			}
 		}
@@ -229,7 +234,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			})
 			.returning({ id: table.friendRequest.id });
 
-		await notifyFriendRequestReceived(receiverId, userId, locals.user!.username, inserted.id);
+		await notifyFriendRequestReceived(receiverId, userId, userOrError.username, inserted.id);
 
 		return json({ success: true, message: 'リクエストを送信しました' });
 	}
@@ -262,9 +267,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			.where(eq(table.friendRequest.id, requestId));
 
 		if (response === 'accepted') {
-			await notifyFriendRequestAccepted(req.senderId, userId, locals.user!.username, requestId);
+			await notifyFriendRequestAccepted(req.senderId, userId, userOrError.username, requestId);
 		} else {
-			await notifyFriendRequestRejected(req.senderId, userId, locals.user!.username, requestId);
+			await notifyFriendRequestRejected(req.senderId, userId, userOrError.username, requestId);
 		}
 
 		return json({

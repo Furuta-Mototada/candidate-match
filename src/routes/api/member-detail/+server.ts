@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types.js';
 import { db } from '$lib/server/db/index.js';
+import { getBillMetadata } from '$lib/server/bill-queries.js';
 import {
 	member,
 	memberParty,
@@ -8,8 +9,7 @@ import {
 	memberGroup,
 	group,
 	billVotes,
-	billVotesResultMember,
-	bill
+	billVotesResultMember
 } from '$lib/server/db/schema.js';
 import { eq, and, inArray } from 'drizzle-orm';
 import { getMemberBillScores } from '$lib/server/legislation-score-index.js';
@@ -102,20 +102,16 @@ export const GET: RequestHandler = async ({ url }) => {
 			}
 
 			// Get bill titles and metadata
-			const billRows = await db
-				.select({
-					id: bill.id,
-					title: bill.title,
-					type: bill.type,
-					submissionSession: bill.submissionSession,
-					number: bill.number
-				})
-				.from(bill)
-				.where(inArray(bill.id, billIds));
+			const billRows = await getBillMetadata(billIds);
 
 			const billInfoMap = new Map<
 				number,
-				{ title: string | null; type: string; submissionSession: number; number: number }
+				{
+					title: string | null;
+					type: string | null;
+					submissionSession: number | null;
+					number: number | null;
+				}
 			>();
 			for (const row of billRows) {
 				billInfoMap.set(row.id, {

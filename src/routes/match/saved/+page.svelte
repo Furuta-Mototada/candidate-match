@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, tick, untrack } from 'svelte';
+	import { getAnswerLabel, getAnswerClass } from '$lib/utils/vote-helpers.js';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { goto } from '$app/navigation';
 	import { LoadingSpinner } from '$lib/components/index.js';
@@ -568,17 +569,7 @@
 		return (sim * 100).toFixed(1) + '%';
 	}
 
-	function getAnswerLabel(answer: number): string {
-		if (answer === 1) return '賛成';
-		if (answer === -1) return '反対';
-		return 'スキップ';
-	}
-
-	function getAnswerClass(answer: number): string {
-		if (answer === 1) return 'answer-agree';
-		if (answer === -1) return 'answer-disagree';
-		return 'answer-skip';
-	}
+	// getAnswerLabel and getAnswerClass imported from $lib/utils/vote-helpers.js
 
 	// ── Delegation functions ──
 

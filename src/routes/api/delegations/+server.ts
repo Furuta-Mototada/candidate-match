@@ -3,6 +3,7 @@ import { eq, and, inArray, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import type { RequestHandler } from './$types.js';
+import { getBillTitle } from '$lib/server/bill-queries.js';
 import {
 	getDelegationChainDownstream,
 	getDelegationChainUpstream,
@@ -21,6 +22,7 @@ import {
 	notifyDelegationRetracted,
 	notifyUpstreamDelegatorsVoted
 } from '$lib/server/notifications';
+import { requireUser, isErrorResponse } from '$lib/server/api-utils';
 
 /**
  * GET /api/delegations?action=incoming|outgoing|for-bill&billId=N
@@ -30,12 +32,11 @@ import {
  * - for-bill: check if user has an active delegation for a specific bill
  */
 export const GET: RequestHandler = async ({ url, locals }) => {
-	if (!locals.user) {
-		return json({ error: '認証が必要です' }, { status: 401 });
-	}
+	const userOrError = requireUser(locals);
+	if (isErrorResponse(userOrError)) return userOrError;
 
 	const action = url.searchParams.get('action') ?? 'outgoing';
-	const userId = locals.user.id;
+	const userId = userOrError.id;
 
 	if (action === 'incoming') {
 		// Delegations where I am the delegate and status is pending
@@ -112,7 +113,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 
 	if (action === 'all') {
 		// Admin debug mode: only admins can see full delegation details
-		const isAdmin = locals.user.role === 'admin';
+		const isAdmin = userOrError.role === 'admin';
 		const debugMode = isAdmin && url.searchParams.get('debug') === 'true';
 
 		// Get both incoming and outgoing for the management page
@@ -427,23 +428,13 @@ export const GET: RequestHandler = async ({ url, locals }) => {
  * - retract: Retract (cancel) your delegation
  */
 export const POST: RequestHandler = async ({ request, locals }) => {
-	if (!locals.user) {
-		return json({ error: '認証が必要です' }, { status: 401 });
-	}
+	const userOrError = requireUser(locals);
+	if (isErrorResponse(userOrError)) return userOrError;
 
 	const body = await request.json();
 	const { action } = body;
-	const userId = locals.user.id;
-	const currentUsername = locals.user.username;
-
-	// Helper to look up bill title
-	async function getBillTitle(billId: number): Promise<string | null> {
-		const [b] = await db
-			.select({ title: table.bill.title })
-			.from(table.bill)
-			.where(eq(table.bill.id, billId));
-		return b?.title ?? null;
-	}
+	const userId = userOrError.id;
+	const currentUsername = userOrError.username;
 
 	// ── Create a delegation ──
 	if (action === 'delegate') {

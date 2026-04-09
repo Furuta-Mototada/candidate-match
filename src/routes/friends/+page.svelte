@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { Users, Mailbox, Search } from '@lucide/svelte';
 	import { LoadingSpinner } from '$lib/components/index.js';
 	import Avatar from '$lib/components/Avatar.svelte';
@@ -11,6 +12,7 @@
 		username: string;
 		avatarUrl: string | null;
 		friendStatus: 'none' | 'pending_sent' | 'pending_received' | 'accepted' | 'rejected';
+		requestId: number | null;
 	};
 
 	type Friend = {
@@ -48,26 +50,64 @@
 	let searchLoading = $state(false);
 	let message: { text: string; type: 'success' | 'error' } | null = $state(null);
 	let searchTimeout: ReturnType<typeof setTimeout> | null = null;
+	let searchAbortController: AbortController | null = null;
+
+	onDestroy(() => {
+		if (searchTimeout) clearTimeout(searchTimeout);
+		if (searchAbortController) searchAbortController.abort();
+	});
 
 	// Resolve streamed data
 	$effect(() => {
 		const promise = data.streamed;
 		if (promise && typeof promise.then === 'function') {
 			pageDataLoading = true;
-			promise.then((resolved: { friends: Friend[]; incoming: IncomingRequest[]; outgoing: OutgoingRequest[] }) => {
-				friends = resolved.friends || [];
-				incoming = resolved.incoming || [];
-				outgoing = resolved.outgoing || [];
-				pageDataLoading = false;
-			}).catch(() => {
-				pageDataLoading = false;
-			});
+			promise
+				.then(
+					(resolved: {
+						friends: Friend[];
+						incoming: IncomingRequest[];
+						outgoing: OutgoingRequest[];
+					}) => {
+						friends = resolved.friends || [];
+						incoming = resolved.incoming || [];
+						outgoing = resolved.outgoing || [];
+						pageDataLoading = false;
+					}
+				)
+				.catch(() => {
+					pageDataLoading = false;
+				});
 		}
 	});
 
 	function showMessage(text: string, type: 'success' | 'error') {
 		message = { text, type };
 		setTimeout(() => (message = null), 3000);
+	}
+
+	async function friendsPostAction(
+		payload: Record<string, unknown>,
+		errorMsg: string
+	): Promise<boolean> {
+		try {
+			const res = await fetch('/api/friends', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(payload)
+			});
+			const data = await res.json();
+			if (data.success) {
+				showMessage(data.message, 'success');
+				return true;
+			} else {
+				showMessage(data.error, 'error');
+				return false;
+			}
+		} catch {
+			showMessage(errorMsg, 'error');
+			return false;
+		}
 	}
 
 	async function loadFriends() {
@@ -106,94 +146,57 @@
 
 	async function searchUsers() {
 		if (!searchQuery.trim()) return;
+		// Cancel any in-flight search request
+		if (searchAbortController) searchAbortController.abort();
+		searchAbortController = new AbortController();
 		searchLoading = true;
 		try {
-			const res = await fetch(`/api/friends?action=search&q=${encodeURIComponent(searchQuery)}`);
+			const res = await fetch(`/api/friends?action=search&q=${encodeURIComponent(searchQuery)}`, {
+				signal: searchAbortController.signal
+			});
 			const data = await res.json();
 			searchResults = data.users ?? [];
-		} catch {
+		} catch (e) {
+			if (e instanceof DOMException && e.name === 'AbortError') return;
 			showMessage('検索に失敗しました', 'error');
 		}
 		searchLoading = false;
 	}
 
 	async function sendRequest(receiverId: string) {
-		try {
-			const res = await fetch('/api/friends', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ action: 'send', receiverId })
-			});
-			const data = await res.json();
-			if (data.success) {
-				showMessage(data.message, 'success');
-				// Refresh search results to update status
-				await searchUsers();
-				await loadRequests();
-			} else {
-				showMessage(data.error, 'error');
-			}
-		} catch {
-			showMessage('リクエストの送信に失敗しました', 'error');
+		const ok = await friendsPostAction(
+			{ action: 'send', receiverId },
+			'リクエストの送信に失敗しました'
+		);
+		if (ok) {
+			await searchUsers();
+			await loadRequests();
 		}
 	}
 
 	async function respondToRequest(requestId: number, response: 'accepted' | 'rejected') {
-		try {
-			const res = await fetch('/api/friends', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ action: 'respond', requestId, response })
-			});
-			const data = await res.json();
-			if (data.success) {
-				showMessage(data.message, 'success');
-				await loadRequests();
-				await loadFriends();
-			} else {
-				showMessage(data.error, 'error');
-			}
-		} catch {
-			showMessage('応答に失敗しました', 'error');
+		const ok = await friendsPostAction(
+			{ action: 'respond', requestId, response },
+			'応答に失敗しました'
+		);
+		if (ok) {
+			await loadRequests();
+			await loadFriends();
 		}
 	}
 
 	async function cancelRequest(requestId: number) {
-		try {
-			const res = await fetch('/api/friends', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ action: 'cancel', requestId })
-			});
-			const data = await res.json();
-			if (data.success) {
-				showMessage(data.message, 'success');
-				await loadRequests();
-			} else {
-				showMessage(data.error, 'error');
-			}
-		} catch {
-			showMessage('取り消しに失敗しました', 'error');
+		const ok = await friendsPostAction({ action: 'cancel', requestId }, '取り消しに失敗しました');
+		if (ok) {
+			await loadRequests();
 		}
 	}
 
 	async function removeFriend(friendId: string) {
 		if (!confirm('このフレンドを削除しますか？')) return;
-		try {
-			const res = await fetch('/api/friends', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ action: 'remove', friendId })
-			});
-			const data = await res.json();
-			if (data.success) {
-				showMessage(data.message, 'success');
-				await loadFriends();
-			} else {
-				showMessage(data.error, 'error');
-			}
-		} catch {
-			showMessage('削除に失敗しました', 'error');
+		const ok = await friendsPostAction({ action: 'remove', friendId }, '削除に失敗しました');
+		if (ok) {
+			await loadFriends();
 		}
 	}
 
@@ -221,208 +224,211 @@
 		{#if pageDataLoading}
 			<LoadingSpinner message="データを読み込み中..." size="large" />
 		{:else}
+			{#if message}
+				<div class="toast toast-{message.type}">{message.text}</div>
+			{/if}
 
-		{#if message}
-			<div class="toast toast-{message.type}">{message.text}</div>
-		{/if}
-
-		<!-- Tabs -->
-		<div class="tabs">
-			<button class="tab" class:tab-active={tab === 'friends'} onclick={() => switchTab('friends')}>
-				フレンド一覧
-				{#if friends.length > 0}
-					<span class="tab-count">{friends.length}</span>
-				{/if}
-			</button>
-			<button
-				class="tab"
-				class:tab-active={tab === 'requests'}
-				onclick={() => switchTab('requests')}
-			>
-				リクエスト
-				{#if pendingCount > 0}
-					<span class="tab-count tab-count-alert">{pendingCount}</span>
-				{/if}
-			</button>
-			<button class="tab" class:tab-active={tab === 'search'} onclick={() => switchTab('search')}>
-				ユーザー検索
-			</button>
-		</div>
-
-		<!-- Friends List -->
-		{#if tab === 'friends'}
-			<div class="panel">
-				{#if loading}
-					<div class="empty-state">読み込み中...</div>
-				{:else if friends.length === 0}
-					<div class="empty-state">
-						<div class="empty-icon"><Users size={32} /></div>
-						<p>まだフレンドがいません</p>
-						<button class="btn-primary" onclick={() => switchTab('search')}>
-							ユーザーを検索する
-						</button>
-					</div>
-				{:else}
-					<ul class="user-list">
-						{#each friends as friend (friend.friendId)}
-							<li class="user-item">
-								<div class="user-info">
-									<Avatar
-										username={friend.friendUsername}
-										avatarUrl={friend.friendAvatarUrl}
-										size="md"
-									/>
-									<div>
-										<span class="username">{friend.friendUsername}</span>
-										<span class="meta">
-											{new Date(friend.since).toLocaleDateString('ja-JP')} から
-										</span>
-									</div>
-								</div>
-								<button class="btn-danger-ghost" onclick={() => removeFriend(friend.friendId)}>
-									削除
-								</button>
-							</li>
-						{/each}
-					</ul>
-				{/if}
-			</div>
-		{/if}
-
-		<!-- Requests -->
-		{#if tab === 'requests'}
-			<div class="panel">
-				{#if loading}
-					<div class="empty-state">読み込み中...</div>
-				{:else}
-					{#if incoming.length > 0}
-						<h3 class="section-heading">受信リクエスト</h3>
-						<ul class="user-list">
-							{#each incoming as req (req.id)}
-								<li class="user-item">
-									<div class="user-info">
-										<Avatar
-											username={req.senderUsername}
-											avatarUrl={req.senderAvatarUrl}
-											size="md"
-										/>
-										<div>
-											<span class="username">{req.senderUsername}</span>
-											<span class="meta">
-												{new Date(req.createdAt).toLocaleDateString('ja-JP')}
-											</span>
-										</div>
-									</div>
-									<div class="action-group">
-										<button
-											class="btn-primary btn-sm"
-											onclick={() => respondToRequest(req.id, 'accepted')}
-										>
-											承認
-										</button>
-										<button
-											class="btn-ghost btn-sm"
-											onclick={() => respondToRequest(req.id, 'rejected')}
-										>
-											拒否
-										</button>
-									</div>
-								</li>
-							{/each}
-						</ul>
+			<!-- Tabs -->
+			<div class="tabs">
+				<button
+					class="tab"
+					class:tab-active={tab === 'friends'}
+					onclick={() => switchTab('friends')}
+				>
+					フレンド一覧
+					{#if friends.length > 0}
+						<span class="tab-count">{friends.length}</span>
 					{/if}
+				</button>
+				<button
+					class="tab"
+					class:tab-active={tab === 'requests'}
+					onclick={() => switchTab('requests')}
+				>
+					リクエスト
+					{#if pendingCount > 0}
+						<span class="tab-count tab-count-alert">{pendingCount}</span>
+					{/if}
+				</button>
+				<button class="tab" class:tab-active={tab === 'search'} onclick={() => switchTab('search')}>
+					ユーザー検索
+				</button>
+			</div>
 
-					{#if outgoing.length > 0}
-						<h3 class="section-heading" class:mt={incoming.length > 0}>送信リクエスト</h3>
+			<!-- Friends List -->
+			{#if tab === 'friends'}
+				<div class="panel">
+					{#if loading}
+						<div class="empty-state">読み込み中...</div>
+					{:else if friends.length === 0}
+						<div class="empty-state">
+							<div class="empty-icon"><Users size={32} /></div>
+							<p>まだフレンドがいません</p>
+							<button class="btn-primary" onclick={() => switchTab('search')}>
+								ユーザーを検索する
+							</button>
+						</div>
+					{:else}
 						<ul class="user-list">
-							{#each outgoing as req (req.id)}
+							{#each friends as friend (friend.friendId)}
 								<li class="user-item">
 									<div class="user-info">
 										<Avatar
-											username={req.receiverUsername}
-											avatarUrl={req.receiverAvatarUrl}
+											username={friend.friendUsername}
+											avatarUrl={friend.friendAvatarUrl}
 											size="md"
 										/>
 										<div>
-											<span class="username">{req.receiverUsername}</span>
+											<span class="username">{friend.friendUsername}</span>
 											<span class="meta">
-												{new Date(req.createdAt).toLocaleDateString('ja-JP')}
+												{new Date(friend.since).toLocaleDateString('ja-JP')} から
 											</span>
 										</div>
 									</div>
-									<button class="btn-ghost btn-sm" onclick={() => cancelRequest(req.id)}>
-										取り消す
+									<button class="btn-danger-ghost" onclick={() => removeFriend(friend.friendId)}>
+										削除
 									</button>
 								</li>
 							{/each}
 						</ul>
-					{/if}
-
-					{#if incoming.length === 0 && outgoing.length === 0}
-						<div class="empty-state">
-							<div class="empty-icon"><Mailbox size={32} /></div>
-							<p>リクエストはありません</p>
-						</div>
-					{/if}
-				{/if}
-			</div>
-		{/if}
-
-		<!-- Search -->
-		{#if tab === 'search'}
-			<div class="panel">
-				<div class="search-box">
-					<input
-						type="text"
-						placeholder="ユーザー名で検索..."
-						bind:value={searchQuery}
-						oninput={handleSearchInput}
-						class="search-input"
-					/>
-					{#if searchLoading}
-						<span class="search-spinner"></span>
 					{/if}
 				</div>
+			{/if}
 
-				{#if searchResults.length > 0}
-					<ul class="user-list">
-						{#each searchResults as user (user.id)}
-							<li class="user-item">
-								<div class="user-info">
-									<Avatar username={user.username} avatarUrl={user.avatarUrl} size="md" />
-									<span class="username">{user.username}</span>
-								</div>
-								{#if user.friendStatus === 'accepted'}
-									<span class="status-badge status-friend">フレンド</span>
-								{:else if user.friendStatus === 'pending_sent'}
-									<span class="status-badge status-pending">リクエスト済み</span>
-								{:else if user.friendStatus === 'pending_received'}
-									<button
-										class="btn-primary btn-sm"
-										onclick={() => respondToRequest(0, 'accepted')}
-									>
-										承認する
-									</button>
-								{:else}
-									<button class="btn-primary btn-sm" onclick={() => sendRequest(user.id)}>
-										リクエスト送信
-									</button>
-								{/if}
-							</li>
-						{/each}
-					</ul>
-				{:else if searchQuery.trim() && !searchLoading}
-					<div class="empty-state">
-						<p>「{searchQuery}」に一致するユーザーが見つかりません</p>
+			<!-- Requests -->
+			{#if tab === 'requests'}
+				<div class="panel">
+					{#if loading}
+						<div class="empty-state">読み込み中...</div>
+					{:else}
+						{#if incoming.length > 0}
+							<h3 class="section-heading">受信リクエスト</h3>
+							<ul class="user-list">
+								{#each incoming as req (req.id)}
+									<li class="user-item">
+										<div class="user-info">
+											<Avatar
+												username={req.senderUsername}
+												avatarUrl={req.senderAvatarUrl}
+												size="md"
+											/>
+											<div>
+												<span class="username">{req.senderUsername}</span>
+												<span class="meta">
+													{new Date(req.createdAt).toLocaleDateString('ja-JP')}
+												</span>
+											</div>
+										</div>
+										<div class="action-group">
+											<button
+												class="btn-primary btn-sm"
+												onclick={() => respondToRequest(req.id, 'accepted')}
+											>
+												承認
+											</button>
+											<button
+												class="btn-ghost btn-sm"
+												onclick={() => respondToRequest(req.id, 'rejected')}
+											>
+												拒否
+											</button>
+										</div>
+									</li>
+								{/each}
+							</ul>
+						{/if}
+
+						{#if outgoing.length > 0}
+							<h3 class="section-heading" class:mt={incoming.length > 0}>送信リクエスト</h3>
+							<ul class="user-list">
+								{#each outgoing as req (req.id)}
+									<li class="user-item">
+										<div class="user-info">
+											<Avatar
+												username={req.receiverUsername}
+												avatarUrl={req.receiverAvatarUrl}
+												size="md"
+											/>
+											<div>
+												<span class="username">{req.receiverUsername}</span>
+												<span class="meta">
+													{new Date(req.createdAt).toLocaleDateString('ja-JP')}
+												</span>
+											</div>
+										</div>
+										<button class="btn-ghost btn-sm" onclick={() => cancelRequest(req.id)}>
+											取り消す
+										</button>
+									</li>
+								{/each}
+							</ul>
+						{/if}
+
+						{#if incoming.length === 0 && outgoing.length === 0}
+							<div class="empty-state">
+								<div class="empty-icon"><Mailbox size={32} /></div>
+								<p>リクエストはありません</p>
+							</div>
+						{/if}
+					{/if}
+				</div>
+			{/if}
+
+			<!-- Search -->
+			{#if tab === 'search'}
+				<div class="panel">
+					<div class="search-box">
+						<input
+							type="text"
+							placeholder="ユーザー名で検索..."
+							bind:value={searchQuery}
+							oninput={handleSearchInput}
+							class="search-input"
+						/>
+						{#if searchLoading}
+							<span class="search-spinner"></span>
+						{/if}
 					</div>
-				{:else if !searchQuery.trim()}
-					<div class="empty-state">
-						<div class="empty-icon"><Search size={32} /></div>
-						<p>ユーザー名を入力して検索</p>
-					</div>
-				{/if}
-			</div>
-		{/if}
+
+					{#if searchResults.length > 0}
+						<ul class="user-list">
+							{#each searchResults as user (user.id)}
+								<li class="user-item">
+									<div class="user-info">
+										<Avatar username={user.username} avatarUrl={user.avatarUrl} size="md" />
+										<span class="username">{user.username}</span>
+									</div>
+									{#if user.friendStatus === 'accepted'}
+										<span class="status-badge status-friend">フレンド</span>
+									{:else if user.friendStatus === 'pending_sent'}
+										<span class="status-badge status-pending">リクエスト済み</span>
+									{:else if user.friendStatus === 'pending_received' && user.requestId}
+										<button
+											class="btn-primary btn-sm"
+											onclick={() => respondToRequest(user.requestId!, 'accepted')}
+										>
+											承認する
+										</button>
+									{:else}
+										<button class="btn-primary btn-sm" onclick={() => sendRequest(user.id)}>
+											リクエスト送信
+										</button>
+									{/if}
+								</li>
+							{/each}
+						</ul>
+					{:else if searchQuery.trim() && !searchLoading}
+						<div class="empty-state">
+							<p>「{searchQuery}」に一致するユーザーが見つかりません</p>
+						</div>
+					{:else if !searchQuery.trim()}
+						<div class="empty-state">
+							<div class="empty-icon"><Search size={32} /></div>
+							<p>ユーザー名を入力して検索</p>
+						</div>
+					{/if}
+				</div>
+			{/if}
 		{/if}
 	</div>
 </div>

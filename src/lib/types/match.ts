@@ -230,6 +230,38 @@ export interface EnrichedBillData {
 }
 
 // ============================================================================
+// Member Detail
+// ============================================================================
+
+export interface MemberDetail {
+	memberId: number;
+	names: string[];
+	nameReading: string | null;
+	partyHistory: Array<{
+		partyName: string;
+		chamber: string | null;
+		startDate: string | null;
+		endDate: string | null;
+	}>;
+	groupHistory: Array<{
+		groupName: string;
+		chamber: string | null;
+		startDate: string | null;
+		endDate: string | null;
+	}>;
+	billScoreRecords: Array<{
+		billId: number;
+		billTitle: string | null;
+		billType: string | null;
+		submissionSession: number | null;
+		billNumber: number | null;
+		normalizedScore: number | null;
+		hasVoteRecord: boolean;
+		approved: boolean | null;
+	}>;
+}
+
+// ============================================================================
 // Utility Functions
 // ============================================================================
 

@@ -5,6 +5,7 @@ import * as table from '$lib/server/db/schema';
 import { sql } from 'drizzle-orm';
 import { imagekit } from '$lib/server/imagekit';
 import type { RequestHandler } from './$types.js';
+import { requireUser, isErrorResponse } from '$lib/server/api-utils';
 
 async function deleteOldAvatar(userId: string) {
 	const [existing] = await db
@@ -23,9 +24,8 @@ async function deleteOldAvatar(userId: string) {
 }
 
 export const POST: RequestHandler = async ({ request, locals }) => {
-	if (!locals.user) {
-		return json({ error: '認証が必要です' }, { status: 401 });
-	}
+	const userOrError = requireUser(locals);
+	if (isErrorResponse(userOrError)) return userOrError;
 
 	const body = await request.json();
 	const { url, fileId } = body;
@@ -44,28 +44,27 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	}
 
 	// Delete the old avatar from ImageKit before saving the new one
-	await deleteOldAvatar(locals.user.id);
+	await deleteOldAvatar(userOrError.id);
 
 	await db
 		.update(table.user)
 		.set({ avatarUrl: url, avatarFileId: fileId, updatedAt: sql`now()` })
-		.where(eq(table.user.id, locals.user.id));
+		.where(eq(table.user.id, userOrError.id));
 
 	return json({ success: true, avatarUrl: url });
 };
 
 export const DELETE: RequestHandler = async ({ locals }) => {
-	if (!locals.user) {
-		return json({ error: '認証が必要です' }, { status: 401 });
-	}
+	const userOrError = requireUser(locals);
+	if (isErrorResponse(userOrError)) return userOrError;
 
 	// Delete the avatar from ImageKit
-	await deleteOldAvatar(locals.user.id);
+	await deleteOldAvatar(userOrError.id);
 
 	await db
 		.update(table.user)
 		.set({ avatarUrl: null, avatarFileId: null, updatedAt: sql`now()` })
-		.where(eq(table.user.id, locals.user.id));
+		.where(eq(table.user.id, userOrError.id));
 
 	return json({ success: true });
 };

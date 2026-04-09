@@ -1,4 +1,8 @@
 <script lang="ts">
+	import { getAnswerLabel, getAnswerClass } from '$lib/utils/vote-helpers.js';
+	import { fetchMemberDetail } from '$lib/utils/member-detail-loader.js';
+	import { createHoldGesture } from '$lib/utils/hold-gesture.svelte.js';
+	import type { MemberDetail } from '$lib/types/index.js';
 	import LatentSpaceVisualization from '$lib/components/match/LatentSpaceVisualization.svelte';
 	import EnrichedBillCard from '$lib/components/match/EnrichedBillCard.svelte';
 	import BillDetailPanel from '$lib/components/match/BillDetailPanel.svelte';
@@ -270,33 +274,7 @@
 	});
 
 	// Member detail state
-	interface MemberDetail {
-		memberId: number;
-		names: string[];
-		nameReading: string | null;
-		partyHistory: Array<{
-			partyName: string;
-			chamber: string | null;
-			startDate: string | null;
-			endDate: string | null;
-		}>;
-		groupHistory: Array<{
-			groupName: string;
-			chamber: string | null;
-			startDate: string | null;
-			endDate: string | null;
-		}>;
-		billScoreRecords: Array<{
-			billId: number;
-			billTitle: string | null;
-			billType: string | null;
-			submissionSession: number | null;
-			billNumber: number | null;
-			normalizedScore: number | null;
-			hasVoteRecord: boolean;
-			approved: boolean | null;
-		}>;
-	}
+	// MemberDetail type imported from $lib/types/index.js
 
 	let selectedMember = $state<{ memberId: number; name: string; group: string | null } | null>(
 		null
@@ -316,12 +294,7 @@
 		memberDetail = null;
 		try {
 			const billIds = currentClusterAnsweredBills.map((b) => b.billId);
-			let url = `/api/member-detail?memberId=${encodeURIComponent(String(memberId))}`;
-			if (billIds.length > 0) url += `&billIds=${encodeURIComponent(billIds.join(','))}`;
-			const res = await fetch(url);
-			if (res.ok) {
-				memberDetail = await res.json();
-			}
+			memberDetail = await fetchMemberDetail(memberId, billIds);
 		} catch (err) {
 			console.error('Failed to load member detail:', err);
 		} finally {
@@ -381,64 +354,31 @@
 		}
 	}
 
-	// Long-press vote state
-	const HOLD_DURATION = 600; // ms to hold before vote casts
-	let holdingVote = $state<number | null>(null);
-	let holdProgress = $state(0);
-	let holdTimer: ReturnType<typeof setInterval> | null = null;
-	let holdStartTime = 0;
-
-	function startHold(vote: number) {
-		if (isLoading) return;
-		holdingVote = vote;
-		holdProgress = 0;
-		holdStartTime = Date.now();
-		holdTimer = setInterval(() => {
-			const elapsed = Date.now() - holdStartTime;
-			holdProgress = Math.min(elapsed / HOLD_DURATION, 1);
-			if (holdProgress >= 1) {
-				cancelHold();
-				if (currentBillDelegation) {
-					pendingRetractVote = vote;
-				} else {
-					onSubmitAnswer(vote);
-				}
+	// Long-press vote gesture
+	const voteHold = createHoldGesture<number>({
+		onComplete: (vote) => {
+			if (currentBillDelegation) {
+				pendingRetractVote = vote;
+			} else {
+				onSubmitAnswer(vote);
 			}
-		}, 16);
+		},
+		disabled: () => isLoading
+	});
+
+	function billAnswerLabel(bill: AnsweredBill): string {
+		return getAnswerLabel(bill.answer, {
+			source: bill.source,
+			delegationStatus: bill.delegationStatus,
+			skipLabel: 'スキップ'
+		});
 	}
 
-	function cancelHold() {
-		if (holdTimer) {
-			clearInterval(holdTimer);
-			holdTimer = null;
-		}
-		holdingVote = null;
-		holdProgress = 0;
-	}
-
-	function getAnswerLabel(bill: AnsweredBill): string {
-		if (bill.source === 'delegated') {
-			if (bill.delegationStatus === 'voted') {
-				if (bill.answer === 1) return '委任: 賛成';
-				if (bill.answer === -1) return '委任: 反対';
-				return '委任済';
-			}
-			return '委任中';
-		}
-		if (bill.answer === 1) return '賛成';
-		if (bill.answer === -1) return '反対';
-		return 'スキップ';
-	}
-
-	function getAnswerClass(bill: AnsweredBill): string {
-		if (bill.source === 'delegated') {
-			return bill.delegationStatus === 'voted'
-				? 'answer-delegated-voted'
-				: 'answer-delegated-pending';
-		}
-		if (bill.answer === 1) return 'answer-agree';
-		if (bill.answer === -1) return 'answer-disagree';
-		return 'answer-neutral';
+	function billAnswerClass(bill: AnsweredBill): string {
+		return getAnswerClass(bill.answer, {
+			source: bill.source,
+			delegationStatus: bill.delegationStatus
+		});
 	}
 
 	// Delegation for answered bills (reuses the main delegation modal via edit flow)
@@ -496,58 +436,69 @@
 					<hr class="vote-divider" />
 					<div class="vote-buttons">
 						<button
-							onpointerdown={() => startHold(1)}
-							onpointerup={cancelHold}
-							onpointerleave={cancelHold}
+							onpointerdown={() => voteHold.start(1)}
+							onpointerup={voteHold.cancel}
+							onpointerleave={voteHold.cancel}
 							disabled={isLoading}
 							class="vote-btn vote-agree"
-							class:holding={holdingVote === 1}
+							class:holding={voteHold.holdingId === 1}
 						>
 							<span
 								class="vote-fill vote-fill-agree"
-								style="transform: scaleY({holdingVote === 1 ? holdProgress : 0})"
+								style="transform: scaleY({voteHold.holdingId === 1 ? voteHold.progress : 0})"
 							></span>
 							<span class="vote-emoji"
-								><ThumbsUp size={28} color={holdingVote === 1 ? '#166534' : '#22c55e'} /></span
+								><ThumbsUp
+									size={28}
+									color={voteHold.holdingId === 1 ? '#166534' : '#22c55e'}
+								/></span
 							>
-							<span class="vote-label" class:vote-label-active={holdingVote === 1}>賛成</span>
+							<span class="vote-label" class:vote-label-active={voteHold.holdingId === 1}>賛成</span
+							>
 						</button>
 						<button
-							onpointerdown={() => startHold(0)}
-							onpointerup={cancelHold}
-							onpointerleave={cancelHold}
+							onpointerdown={() => voteHold.start(0)}
+							onpointerup={voteHold.cancel}
+							onpointerleave={voteHold.cancel}
 							disabled={isLoading}
 							class="vote-btn vote-neutral"
-							class:holding={holdingVote === 0}
+							class:holding={voteHold.holdingId === 0}
 						>
 							<span
 								class="vote-fill vote-fill-neutral"
-								style="transform: scaleY({holdingVote === 0 ? holdProgress : 0})"
+								style="transform: scaleY({voteHold.holdingId === 0 ? voteHold.progress : 0})"
 							></span>
 							<span class="vote-emoji"
 								><CircleQuestionMark
 									size={28}
-									color={holdingVote === 0 ? '#1e40af' : '#3b82f6'}
+									color={voteHold.holdingId === 0 ? '#1e40af' : '#3b82f6'}
 								/></span
 							>
-							<span class="vote-label" class:vote-label-active={holdingVote === 0}>わからない</span>
+							<span class="vote-label" class:vote-label-active={voteHold.holdingId === 0}
+								>わからない</span
+							>
 						</button>
 						<button
-							onpointerdown={() => startHold(-1)}
-							onpointerup={cancelHold}
-							onpointerleave={cancelHold}
+							onpointerdown={() => voteHold.start(-1)}
+							onpointerup={voteHold.cancel}
+							onpointerleave={voteHold.cancel}
 							disabled={isLoading}
 							class="vote-btn vote-disagree"
-							class:holding={holdingVote === -1}
+							class:holding={voteHold.holdingId === -1}
 						>
 							<span
 								class="vote-fill vote-fill-disagree"
-								style="transform: scaleY({holdingVote === -1 ? holdProgress : 0})"
+								style="transform: scaleY({voteHold.holdingId === -1 ? voteHold.progress : 0})"
 							></span>
 							<span class="vote-emoji"
-								><ThumbsDown size={28} color={holdingVote === -1 ? '#991b1b' : '#ef4444'} /></span
+								><ThumbsDown
+									size={28}
+									color={voteHold.holdingId === -1 ? '#991b1b' : '#ef4444'}
+								/></span
 							>
-							<span class="vote-label" class:vote-label-active={holdingVote === -1}>反対</span>
+							<span class="vote-label" class:vote-label-active={voteHold.holdingId === -1}
+								>反対</span
+							>
 						</button>
 					</div>
 					<p class="vote-hint">長押しで投票</p>
@@ -622,7 +573,7 @@
 			<div class="collection-grid">
 				{#each visibleAnsweredBills as bill (bill.billId)}
 					{@const isBeingEdited = isEditingAnswer && currentQuestion?.billId === bill.billId}
-					<div class="collect-card {getAnswerClass(bill)}" class:card-editing={isBeingEdited}>
+					<div class="collect-card {billAnswerClass(bill)}" class:card-editing={isBeingEdited}>
 						<div class="card-accent"></div>
 						<div class="card-top-row">
 							<span class="card-icon-sm">
@@ -636,7 +587,7 @@
 									<CircleQuestionMark size={14} />
 								{/if}
 							</span>
-							<span class="card-badge {getAnswerClass(bill)}">{getAnswerLabel(bill)}</span>
+							<span class="card-badge {billAnswerClass(bill)}">{billAnswerLabel(bill)}</span>
 						</div>
 						{#if formatBillRef(bill.billType, bill.submissionSession, bill.billNumber)}
 							<div class="card-ref">

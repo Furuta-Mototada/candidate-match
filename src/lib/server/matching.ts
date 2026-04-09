@@ -316,18 +316,7 @@ export function selectNextQuestion(
 		}
 
 		// Calculate member variance on this bill (from their projected scores)
-		// Project each member's vector onto the bill loading direction
-		const projectedScores = memberVectors.map((mv) => {
-			let proj = 0;
-			for (let d = 0; d < state.dimensions; d++) {
-				proj += mv[d] * loading[d];
-			}
-			return proj;
-		});
-
-		const mean = projectedScores.reduce((a, b) => a + b, 0) / projectedScores.length;
-		const variance =
-			projectedScores.reduce((sum, s) => sum + (s - mean) ** 2, 0) / projectedScores.length;
+		const variance = calcProjectedVariance(memberVectors, loading);
 
 		// Combined score: uncertainty reduction × controversy
 		const combinedScore = uncertaintyScore * (1 + Math.sqrt(variance));
@@ -537,6 +526,37 @@ export async function loadMemberGroups(memberIds: number[]): Promise<Map<number,
 }
 
 /**
+ * Build the member vectors array used for visualization on the client.
+ */
+export function buildMemberVectorsForViz(
+	clusterData: ClusterVectorData,
+	groupMap: Map<number, string>
+) {
+	return Object.entries(clusterData.memberVectors).map(([id, vector]) => ({
+		memberId: parseInt(id),
+		name: clusterData.memberNames[id] || `Member ${id}`,
+		group: groupMap.get(parseInt(id)) || null,
+		latentVector: vector
+	}));
+}
+
+/**
+ * Calculate the variance of member vectors projected onto a bill loading direction.
+ */
+function calcProjectedVariance(memberVectors: number[][], loading: number[]): number {
+	const projectedScores = memberVectors.map((mv) => {
+		let proj = 0;
+		for (let d = 0; d < loading.length; d++) {
+			proj += mv[d] * loading[d];
+		}
+		return proj;
+	});
+	if (projectedScores.length === 0) return 0;
+	const mean = projectedScores.reduce((a, b) => a + b, 0) / projectedScores.length;
+	return projectedScores.reduce((sum, s) => sum + (s - mean) ** 2, 0) / projectedScores.length;
+}
+
+/**
  * Build bill info map with loadings from cluster data
  */
 export function buildBillInfoMap(
@@ -552,22 +572,7 @@ export function buildBillInfoMap(
 
 		// Calculate member variance for this bill
 		const memberVectors = Object.values(clusterData.memberVectors);
-		const projectedScores = memberVectors.map((mv) => {
-			let proj = 0;
-			for (let d = 0; d < loading.length; d++) {
-				proj += mv[d] * loading[d];
-			}
-			return proj;
-		});
-
-		const mean =
-			projectedScores.length > 0
-				? projectedScores.reduce((a, b) => a + b, 0) / projectedScores.length
-				: 0;
-		const variance =
-			projectedScores.length > 0
-				? projectedScores.reduce((sum, s) => sum + (s - mean) ** 2, 0) / projectedScores.length
-				: 0;
+		const variance = calcProjectedVariance(memberVectors, loading);
 
 		map.set(billId, {
 			billId,

@@ -46,6 +46,23 @@
 
 	let { data }: { data: PageData } = $props();
 
+	async function matchApi(payload: Record<string, unknown>): Promise<Response> {
+		return fetch('/api/match', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(payload)
+		});
+	}
+
+	function upsertClusterResult(result: ClusterResult) {
+		const idx = clusterResults.findIndex((cr) => cr.clusterLabel === result.clusterLabel);
+		if (idx >= 0) {
+			clusterResults = [...clusterResults.slice(0, idx), result, ...clusterResults.slice(idx + 1)];
+		} else {
+			clusterResults = [...clusterResults, result];
+		}
+	}
+
 	// State
 	let savedVectors: SavedVectorInfo[] = $state([]);
 	let savedVectorsLoading: boolean = $state(true);
@@ -268,6 +285,9 @@
 				fetchPartyScores();
 			}, 300);
 		}
+		return () => {
+			if (partyScoreTimer) clearTimeout(partyScoreTimer);
+		};
 	});
 
 	/**
@@ -376,20 +396,16 @@
 		error = null;
 
 		try {
-			const response = await fetch('/api/match', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					action: 'resume',
-					savedVectorId: clusterVectorInfo.id,
-					existingUserVector: existingResult?.userVector,
-					answeredBillIds: existingResult?.answeredBills?.map((b) => b.billId) || [],
-					answeredBills:
-						existingResult?.answeredBills?.map((b) => ({
-							billId: b.billId,
-							score: b.answer
-						})) || []
-				})
+			const response = await matchApi({
+				action: 'resume',
+				savedVectorId: clusterVectorInfo.id,
+				existingUserVector: existingResult?.userVector,
+				answeredBillIds: existingResult?.answeredBills?.map((b) => b.billId) || [],
+				answeredBills:
+					existingResult?.answeredBills?.map((b) => ({
+						billId: b.billId,
+						score: b.answer
+					})) || []
 			});
 
 			const result = await response.json();
@@ -444,13 +460,9 @@
 			if (!existingResult) {
 				// This cluster was never processed — start a session to get pre-existing data
 				try {
-					const response = await fetch('/api/match', {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({
-							action: 'start',
-							savedVectorId: vectorInfo.id
-						})
+					const response = await matchApi({
+						action: 'start',
+						savedVectorId: vectorInfo.id
 					});
 
 					const result = await response.json();
@@ -459,22 +471,16 @@
 						// Get full matches by calling results
 						let matches: MemberMatch[] = [];
 						if (result.preExistingAnswerCount > 0) {
-							const resultsResponse = await fetch('/api/match', {
-								method: 'POST',
-								headers: { 'Content-Type': 'application/json' },
-								body: JSON.stringify({
-									action: 'results',
-									sessionId: result.sessionId,
-									savedVectorId: vectorInfo.id,
-									userVector: result.userVector,
-									answeredBills:
-										result.preExistingAnsweredBills?.map(
-											(b: { billId: number; answer: number }) => ({
-												billId: b.billId,
-												score: b.answer
-											})
-										) || []
-								})
+							const resultsResponse = await matchApi({
+								action: 'results',
+								sessionId: result.sessionId,
+								savedVectorId: vectorInfo.id,
+								userVector: result.userVector,
+								answeredBills:
+									result.preExistingAnsweredBills?.map((b: { billId: number; answer: number }) => ({
+										billId: b.billId,
+										score: b.answer
+									})) || []
 							});
 							const resultsData = await resultsResponse.json();
 							if (resultsResponse.ok && resultsData.success) {
@@ -520,20 +526,16 @@
 					// Resume this cluster
 					const existingResult = clusterResult;
 
-					const response = await fetch('/api/match', {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({
-							action: 'resume',
-							savedVectorId: vectorInfo.id,
-							existingUserVector: existingResult?.userVector,
-							answeredBillIds: existingResult?.answeredBills?.map((b) => b.billId) || [],
-							answeredBills:
-								existingResult?.answeredBills?.map((b) => ({
-									billId: b.billId,
-									score: b.answer
-								})) || []
-						})
+					const response = await matchApi({
+						action: 'resume',
+						savedVectorId: vectorInfo.id,
+						existingUserVector: existingResult?.userVector,
+						answeredBillIds: existingResult?.answeredBills?.map((b) => b.billId) || [],
+						answeredBills:
+							existingResult?.answeredBills?.map((b) => ({
+								billId: b.billId,
+								score: b.answer
+							})) || []
 					});
 
 					const result = await response.json();
@@ -634,13 +636,9 @@
 				throw new Error(`クラスター ${clusterLabel} の保存済みベクトルが見つかりません`);
 			}
 
-			const response = await fetch('/api/match', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					action: 'start',
-					savedVectorId: savedVector.id
-				})
+			const response = await matchApi({
+				action: 'start',
+				savedVectorId: savedVector.id
 			});
 
 			const result = await response.json();
@@ -702,21 +700,17 @@
 		);
 
 		try {
-			let response = await fetch('/api/match', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					action: 'answer',
-					sessionId: sessionId,
-					billId: currentQuestion.billId,
-					score: score,
-					savedVectorId: currentSavedVectorId,
-					userVector: userVector,
-					answeredBills: currentClusterAnsweredBills.map((b) => ({
-						billId: b.billId,
-						score: b.answer
-					}))
-				})
+			let response = await matchApi({
+				action: 'answer',
+				sessionId: sessionId,
+				billId: currentQuestion.billId,
+				score: score,
+				savedVectorId: currentSavedVectorId,
+				userVector: userVector,
+				answeredBills: currentClusterAnsweredBills.map((b) => ({
+					billId: b.billId,
+					score: b.answer
+				}))
 			});
 
 			let result = await response.json();
@@ -729,19 +723,15 @@
 			// Auto-retry on session loss: reconstruct session via resume then retry the answer
 			if (response.status === 404 && currentSavedVectorId) {
 				console.log('[submitAnswer] Session lost, attempting recovery...');
-				const resumeResponse = await fetch('/api/match', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({
-						action: 'resume',
-						savedVectorId: currentSavedVectorId,
-						existingUserVector: userVector,
-						answeredBillIds: currentClusterAnsweredBills.map((b) => b.billId),
-						answeredBills: currentClusterAnsweredBills.map((b) => ({
-							billId: b.billId,
-							score: b.answer
-						}))
-					})
+				const resumeResponse = await matchApi({
+					action: 'resume',
+					savedVectorId: currentSavedVectorId,
+					existingUserVector: userVector,
+					answeredBillIds: currentClusterAnsweredBills.map((b) => b.billId),
+					answeredBills: currentClusterAnsweredBills.map((b) => ({
+						billId: b.billId,
+						score: b.answer
+					}))
 				});
 
 				const resumeResult = await resumeResponse.json();
@@ -749,21 +739,17 @@
 				if (resumeResponse.ok && resumeResult.success) {
 					sessionId = resumeResult.sessionId;
 					// Retry the answer with the new session
-					response = await fetch('/api/match', {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({
-							action: 'answer',
-							sessionId: sessionId,
-							billId: currentQuestion.billId,
-							score: score,
-							savedVectorId: currentSavedVectorId,
-							userVector: userVector,
-							answeredBills: currentClusterAnsweredBills.map((b) => ({
-								billId: b.billId,
-								score: b.answer
-							}))
-						})
+					response = await matchApi({
+						action: 'answer',
+						sessionId: sessionId,
+						billId: currentQuestion.billId,
+						score: score,
+						savedVectorId: currentSavedVectorId,
+						userVector: userVector,
+						answeredBills: currentClusterAnsweredBills.map((b) => ({
+							billId: b.billId,
+							score: b.answer
+						}))
 					});
 					result = await response.json();
 				}
@@ -815,23 +801,19 @@
 					`[submitAnswer] Next question ${currentQuestion.billId} already answered, requesting skip`
 				);
 				// Auto-skip this duplicate by requesting another answer
-				const skipResponse = await fetch('/api/match', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({
-						action: 'answer',
-						sessionId: sessionId,
-						billId: currentQuestion.billId,
-						score:
-							currentClusterAnsweredBills.find((b) => b.billId === currentQuestion!.billId)
-								?.answer ?? 0,
-						savedVectorId: currentSavedVectorId,
-						userVector: result.userVector || userVector,
-						answeredBills: currentClusterAnsweredBills.map((b) => ({
-							billId: b.billId,
-							score: b.answer
-						}))
-					})
+				const skipResponse = await matchApi({
+					action: 'answer',
+					sessionId: sessionId,
+					billId: currentQuestion.billId,
+					score:
+						currentClusterAnsweredBills.find((b) => b.billId === currentQuestion!.billId)?.answer ??
+						0,
+					savedVectorId: currentSavedVectorId,
+					userVector: result.userVector || userVector,
+					answeredBills: currentClusterAnsweredBills.map((b) => ({
+						billId: b.billId,
+						score: b.answer
+					}))
 				});
 				const skipResult = await skipResponse.json();
 				if (skipResponse.ok && skipResult.success) {
@@ -922,20 +904,16 @@
 
 			if (!isAlreadyAnswered && currentQuestion) {
 				// New bill - skip via API to advance to next question
-				const response = await fetch('/api/match', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({
-						action: 'skip',
-						sessionId: sessionId,
-						billId,
-						savedVectorId: currentSavedVectorId,
-						userVector: userVector,
-						answeredBills: currentClusterAnsweredBills.map((b) => ({
-							billId: b.billId,
-							score: b.answer
-						}))
-					})
+				const response = await matchApi({
+					action: 'skip',
+					sessionId: sessionId,
+					billId,
+					savedVectorId: currentSavedVectorId,
+					userVector: userVector,
+					answeredBills: currentClusterAnsweredBills.map((b) => ({
+						billId: b.billId,
+						score: b.answer
+					}))
 				});
 
 				const result = await response.json();
@@ -1004,19 +982,15 @@
 			let matchesToSave = currentClusterMatches;
 			if (matchesToSave.length === 0 && sessionId) {
 				try {
-					const response = await fetch('/api/match', {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({
-							action: 'results',
-							sessionId: sessionId,
-							savedVectorId: currentSavedVectorId,
-							userVector: userVector,
-							answeredBills: currentClusterAnsweredBills.map((b) => ({
-								billId: b.billId,
-								score: b.answer
-							}))
-						})
+					const response = await matchApi({
+						action: 'results',
+						sessionId: sessionId,
+						savedVectorId: currentSavedVectorId,
+						userVector: userVector,
+						answeredBills: currentClusterAnsweredBills.map((b) => ({
+							billId: b.billId,
+							score: b.answer
+						}))
 					});
 					const result = await response.json();
 					if (response.ok && result.success) {
@@ -1043,18 +1017,7 @@
 				yDimension
 			};
 
-			const existingIndex = clusterResults.findIndex(
-				(cr) => cr.clusterLabel === currentClusterLabel
-			);
-			if (existingIndex >= 0) {
-				clusterResults = [
-					...clusterResults.slice(0, existingIndex),
-					currentResult,
-					...clusterResults.slice(existingIndex + 1)
-				];
-			} else {
-				clusterResults = [...clusterResults, currentResult];
-			}
+			upsertClusterResult(currentResult);
 		}
 
 		isLoading = true;
@@ -1071,20 +1034,16 @@
 
 			if (existingResult) {
 				// Resume this cluster with existing state
-				const response = await fetch('/api/match', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({
-						action: 'resume',
-						savedVectorId: vectorInfo.id,
-						existingUserVector: existingResult.userVector,
-						answeredBillIds: existingResult.answeredBills?.map((b) => b.billId) || [],
-						answeredBills:
-							existingResult.answeredBills?.map((b) => ({
-								billId: b.billId,
-								score: b.answer
-							})) || []
-					})
+				const response = await matchApi({
+					action: 'resume',
+					savedVectorId: vectorInfo.id,
+					existingUserVector: existingResult.userVector,
+					answeredBillIds: existingResult.answeredBills?.map((b) => b.billId) || [],
+					answeredBills:
+						existingResult.answeredBills?.map((b) => ({
+							billId: b.billId,
+							score: b.answer
+						})) || []
 				});
 
 				const result = await response.json();
@@ -1112,13 +1071,9 @@
 				currentClusterMatches = existingResult.matches || [];
 			} else {
 				// Start fresh for this cluster
-				const response = await fetch('/api/match', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({
-						action: 'start',
-						savedVectorId: vectorInfo.id
-					})
+				const response = await matchApi({
+					action: 'start',
+					savedVectorId: vectorInfo.id
 				});
 
 				const result = await response.json();
@@ -1168,19 +1123,15 @@
 			let matchesToSave = currentClusterMatches;
 			if (matchesToSave.length === 0 && sessionId && answeredCount > 0) {
 				try {
-					const response = await fetch('/api/match', {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({
-							action: 'results',
-							sessionId: sessionId,
-							savedVectorId: currentSavedVectorId,
-							userVector: userVector,
-							answeredBills: currentClusterAnsweredBills.map((b) => ({
-								billId: b.billId,
-								score: b.answer
-							}))
-						})
+					const response = await matchApi({
+						action: 'results',
+						sessionId: sessionId,
+						savedVectorId: currentSavedVectorId,
+						userVector: userVector,
+						answeredBills: currentClusterAnsweredBills.map((b) => ({
+							billId: b.billId,
+							score: b.answer
+						}))
 					});
 					const result = await response.json();
 					if (response.ok && result.success) {
@@ -1208,21 +1159,7 @@
 				yDimension
 			};
 
-			// Check if this cluster already exists in results (resume mode)
-			const existingIndex = clusterResults.findIndex(
-				(cr) => cr.clusterLabel === currentClusterLabel
-			);
-			if (existingIndex >= 0) {
-				// Update existing result
-				clusterResults = [
-					...clusterResults.slice(0, existingIndex),
-					newResult,
-					...clusterResults.slice(existingIndex + 1)
-				];
-			} else {
-				// Add new result
-				clusterResults = [...clusterResults, newResult];
-			}
+			upsertClusterResult(newResult);
 
 			// Reset importance to default for next cluster
 			pendingImportance = 3;
@@ -1308,19 +1245,15 @@
 				!allClusterData.some((cr) => cr.clusterLabel === currentClusterLabel)
 			) {
 				try {
-					const resultsRes = await fetch('/api/match', {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({
-							action: 'results',
-							sessionId,
-							savedVectorId: currentSavedVectorId,
-							userVector: userVector,
-							answeredBills: currentClusterAnsweredBills.map((b) => ({
-								billId: b.billId,
-								score: b.answer
-							}))
-						})
+					const resultsRes = await matchApi({
+						action: 'results',
+						sessionId,
+						savedVectorId: currentSavedVectorId,
+						userVector: userVector,
+						answeredBills: currentClusterAnsweredBills.map((b) => ({
+							billId: b.billId,
+							score: b.answer
+						}))
 					});
 					if (resultsRes.ok) {
 						const resultsData = await resultsRes.json();

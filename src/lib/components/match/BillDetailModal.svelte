@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { EnrichedBillData } from '$lib/types/index.js';
+	import { getAnswerLabel, getAnswerClass } from '$lib/utils/vote-helpers.js';
 	import {
 		ThumbsUp,
 		ThumbsDown,
@@ -101,19 +102,7 @@
 		return result;
 	}
 
-	function getAnswerLabel(score: number | null): string {
-		if (score === 1) return '賛成';
-		if (score === -1) return '反対';
-		if (score === 0) return 'スキップ';
-		return '未回答';
-	}
-
-	function getAnswerClass(score: number | null): string {
-		if (score === 1) return 'answer-agree';
-		if (score === -1) return 'answer-disagree';
-		if (score === 0) return 'answer-skip';
-		return 'answer-none';
-	}
+	// getAnswerLabel and getAnswerClass imported from $lib/utils/vote-helpers.js
 
 	$effect(() => {
 		loadEnrichment();

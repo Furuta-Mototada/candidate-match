@@ -256,62 +256,65 @@ function runSingleSimulation(
 
 	const steps: EvaluationStep[] = [];
 
-	for (let q = 0; q < maxQuestions; q++) {
-		// Select next bill based on strategy
-		const billId = selectNextBillForStrategy(strategy, state, clusterData, billInfoMap);
-		if (billId === null) break;
+	try {
+		for (let q = 0; q < maxQuestions; q++) {
+			// Select next bill based on strategy
+			const billId = selectNextBillForStrategy(strategy, state, clusterData, billInfoMap);
+			if (billId === null) break;
 
-		// "Answer" the bill as if we are this member
-		const score = memberAnswers.get(billId) ?? 0;
-		const answer: UserAnswer = { billId, score };
+			// "Answer" the bill as if we are this member
+			const score = memberAnswers.get(billId) ?? 0;
+			const answer: UserAnswer = { billId, score };
 
-		state.answeredBills.push(answer);
-		state.questionCount++;
+			state.answeredBills.push(answer);
+			state.questionCount++;
 
-		// Re-estimate user vector from all answers so far
-		const { vector, uncertainty } = estimateUserVector(
-			state.answeredBills,
-			billLoadingsMap,
-			dimensions
-		);
-		state.userVector = vector;
-		state.uncertainty = uncertainty;
+			// Re-estimate user vector from all answers so far
+			const { vector, uncertainty } = estimateUserVector(
+				state.answeredBills,
+				billLoadingsMap,
+				dimensions
+			);
+			state.userVector = vector;
+			state.uncertainty = uncertainty;
 
-		// Compute metrics
-		const cosError = 1 - cosineSimilarity(vector, trueVector);
+			// Compute metrics
+			const cosError = 1 - cosineSimilarity(vector, trueVector);
 
-		let mse = 0;
-		for (let d = 0; d < dimensions; d++) {
-			mse += (vector[d] - trueVector[d]) ** 2;
+			let mse = 0;
+			for (let d = 0; d < dimensions; d++) {
+				mse += (vector[d] - trueVector[d]) ** 2;
+			}
+			mse /= dimensions;
+
+			const uncertaintySum = uncertainty.reduce((a, b) => a + b, 0);
+
+			// Find rank of this member
+			const matches = findMatchingMembers(
+				vector,
+				clusterData,
+				Object.keys(clusterData.memberVectors).length
+			);
+			const memberMatch = matches.find((m) => m.member.memberId === memberId);
+			const trueRank = memberMatch ? memberMatch.rank : matches.length + 1;
+
+			steps.push({
+				questionNumber: q + 1,
+				billId,
+				cosineError: cosError,
+				vectorMSE: mse,
+				uncertaintySum,
+				top1Correct: trueRank === 1,
+				top5Correct: trueRank <= 5,
+				trueRank
+			});
 		}
-		mse /= dimensions;
 
-		const uncertaintySum = uncertainty.reduce((a, b) => a + b, 0);
-
-		// Find rank of this member
-		const matches = findMatchingMembers(
-			vector,
-			clusterData,
-			Object.keys(clusterData.memberVectors).length
-		);
-		const memberMatch = matches.find((m) => m.member.memberId === memberId);
-		const trueRank = memberMatch ? memberMatch.rank : matches.length + 1;
-
-		steps.push({
-			questionNumber: q + 1,
-			billId,
-			cosineError: cosError,
-			vectorMSE: mse,
-			uncertaintySum,
-			top1Correct: trueRank === 1,
-			top5Correct: trueRank <= 5,
-			trueRank
-		});
-	}
-
-	// Restore random
-	if (strategy === 'random') {
-		Math.random = originalRandom;
+		// Restore random
+	} finally {
+		if (strategy === 'random') {
+			Math.random = originalRandom;
+		}
 	}
 
 	return { strategy, memberId, memberName, steps };

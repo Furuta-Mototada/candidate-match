@@ -222,42 +222,42 @@ export async function notifyUpstreamDelegatorsVoted(
 	score: number,
 	rationale?: string | null
 ) {
-	// Find all 'redelegated' delegations pointing at this delegate for this bill
-	const redelegated = await db
-		.select({
-			id: table.voteDelegation.id,
-			delegatorId: table.voteDelegation.delegatorId
-		})
-		.from(table.voteDelegation)
-		.where(
-			and(
-				eq(table.voteDelegation.delegateId, delegateId),
-				eq(table.voteDelegation.billId, billId),
-				eq(table.voteDelegation.status, 'redelegated')
-			)
-		);
+	const MAX_DEPTH = 100;
+	const visited = new Set<string>();
+	const queue: string[] = [delegateId];
 
-	for (const d of redelegated) {
-		await notifyDelegationVoted(
-			d.delegatorId,
-			actorId,
-			voterUsername,
-			d.id,
-			billId,
-			billTitle,
-			score,
-			rationale
-		);
-		// Recursively notify further upstream
-		await notifyUpstreamDelegatorsVoted(
-			d.delegatorId,
-			actorId,
-			voterUsername,
-			billId,
-			billTitle,
-			score,
-			rationale
-		);
+	while (queue.length > 0 && visited.size < MAX_DEPTH) {
+		const currentDelegateId = queue.shift()!;
+		if (visited.has(currentDelegateId)) continue;
+		visited.add(currentDelegateId);
+
+		const redelegated = await db
+			.select({
+				id: table.voteDelegation.id,
+				delegatorId: table.voteDelegation.delegatorId
+			})
+			.from(table.voteDelegation)
+			.where(
+				and(
+					eq(table.voteDelegation.delegateId, currentDelegateId),
+					eq(table.voteDelegation.billId, billId),
+					eq(table.voteDelegation.status, 'redelegated')
+				)
+			);
+
+		for (const d of redelegated) {
+			await notifyDelegationVoted(
+				d.delegatorId,
+				actorId,
+				voterUsername,
+				d.id,
+				billId,
+				billTitle,
+				score,
+				rationale
+			);
+			queue.push(d.delegatorId);
+		}
 	}
 }
 
@@ -272,39 +272,40 @@ export async function notifyUpstreamDelegatorsVoteChanged(
 	billTitle: string | null,
 	newScore: number
 ) {
-	// Find all 'redelegated' delegations pointing at this delegate for this bill
-	const redelegated = await db
-		.select({
-			id: table.voteDelegation.id,
-			delegatorId: table.voteDelegation.delegatorId
-		})
-		.from(table.voteDelegation)
-		.where(
-			and(
-				eq(table.voteDelegation.delegateId, delegateId),
-				eq(table.voteDelegation.billId, billId),
-				eq(table.voteDelegation.status, 'redelegated')
-			)
-		);
+	const MAX_DEPTH = 100;
+	const visited = new Set<string>();
+	const queue: string[] = [delegateId];
 
-	for (const d of redelegated) {
-		await notifyDelegationVoteChanged(
-			d.delegatorId,
-			actorId,
-			voterUsername,
-			d.id,
-			billId,
-			billTitle,
-			newScore
-		);
-		// Recursively notify further upstream
-		await notifyUpstreamDelegatorsVoteChanged(
-			d.delegatorId,
-			actorId,
-			voterUsername,
-			billId,
-			billTitle,
-			newScore
-		);
+	while (queue.length > 0 && visited.size < MAX_DEPTH) {
+		const currentDelegateId = queue.shift()!;
+		if (visited.has(currentDelegateId)) continue;
+		visited.add(currentDelegateId);
+
+		const redelegated = await db
+			.select({
+				id: table.voteDelegation.id,
+				delegatorId: table.voteDelegation.delegatorId
+			})
+			.from(table.voteDelegation)
+			.where(
+				and(
+					eq(table.voteDelegation.delegateId, currentDelegateId),
+					eq(table.voteDelegation.billId, billId),
+					eq(table.voteDelegation.status, 'redelegated')
+				)
+			);
+
+		for (const d of redelegated) {
+			await notifyDelegationVoteChanged(
+				d.delegatorId,
+				actorId,
+				voterUsername,
+				d.id,
+				billId,
+				billTitle,
+				newScore
+			);
+			queue.push(d.delegatorId);
+		}
 	}
 }

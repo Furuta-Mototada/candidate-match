@@ -3,15 +3,15 @@ import { eq, and, desc, count, lt } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import type { RequestHandler } from './$types.js';
+import { requireUser, isErrorResponse } from '$lib/server/api-utils';
 
 // GET /api/notifications?action=list|unread-count&limit=N&before=ID
 export const GET: RequestHandler = async ({ url, locals }) => {
-	if (!locals.user) {
-		return json({ error: '認証が必要です' }, { status: 401 });
-	}
+	const userOrError = requireUser(locals);
+	if (isErrorResponse(userOrError)) return userOrError;
 
 	const action = url.searchParams.get('action') ?? 'list';
-	const userId = locals.user.id;
+	const userId = userOrError.id;
 
 	if (action === 'unread-count') {
 		const [result] = await db
@@ -58,13 +58,12 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 
 // POST /api/notifications
 export const POST: RequestHandler = async ({ request, locals }) => {
-	if (!locals.user) {
-		return json({ error: '認証が必要です' }, { status: 401 });
-	}
+	const userOrError = requireUser(locals);
+	if (isErrorResponse(userOrError)) return userOrError;
 
 	const body = await request.json();
 	const { action } = body;
-	const userId = locals.user.id;
+	const userId = userOrError.id;
 
 	// Mark a single notification as read
 	if (action === 'mark-read') {

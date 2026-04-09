@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Handshake, Hourglass, TriangleAlert, X } from '@lucide/svelte';
 	import Avatar from '$lib/components/Avatar.svelte';
+	import { createHoldGesture } from '$lib/utils/hold-gesture.svelte.js';
 
 	type Friend = {
 		requestId: number;
@@ -44,35 +45,13 @@
 	let confirmingFriend: Friend | null = $state(null);
 
 	// Long-press state for friend delegation
-	const HOLD_DURATION = 600;
-	let holdingFriendId = $state<string | null>(null);
-	let holdProgress = $state(0);
-	let holdTimer: ReturnType<typeof setInterval> | null = null;
-	let holdStartTime = 0;
-
-	function startFriendHold(friend: Friend) {
-		if (submitting) return;
-		holdingFriendId = friend.friendId;
-		holdProgress = 0;
-		holdStartTime = Date.now();
-		holdTimer = setInterval(() => {
-			const elapsed = Date.now() - holdStartTime;
-			holdProgress = Math.min(elapsed / HOLD_DURATION, 1);
-			if (holdProgress >= 1) {
-				cancelFriendHold();
-				handleFriendClick(friend);
-			}
-		}, 16);
-	}
-
-	function cancelFriendHold() {
-		if (holdTimer) {
-			clearInterval(holdTimer);
-			holdTimer = null;
-		}
-		holdingFriendId = null;
-		holdProgress = 0;
-	}
+	const friendHold = createHoldGesture<string>({
+		onComplete: (friendId) => {
+			const friend = friends.find((f) => f.friendId === friendId);
+			if (friend) handleFriendClick(friend);
+		},
+		disabled: () => submitting
+	});
 
 	$effect(() => {
 		if (show) {
@@ -80,7 +59,7 @@
 			error = null;
 			successMessage = null;
 			confirmingFriend = null;
-			cancelFriendHold();
+			friendHold.cancel();
 		}
 	});
 
@@ -248,17 +227,17 @@
 							{@const isCurrentDelegate = currentDelegateId === friend.friendId}
 							<button
 								class="friend-item"
-								class:holding={holdingFriendId === friend.friendId}
+								class:holding={friendHold.holdingId === friend.friendId}
 								class:current-delegate={isCurrentDelegate}
-								onpointerdown={() => startFriendHold(friend)}
-								onpointerup={cancelFriendHold}
-								onpointerleave={cancelFriendHold}
+								onpointerdown={() => friendHold.start(friend.friendId)}
+								onpointerup={friendHold.cancel}
+								onpointerleave={friendHold.cancel}
 								disabled={submitting || isCurrentDelegate}
 							>
 								<span
 									class="friend-fill"
-									style="transform: scaleX({holdingFriendId === friend.friendId
-										? holdProgress
+									style="transform: scaleX({friendHold.holdingId === friend.friendId
+										? friendHold.progress
 										: 0})"
 								></span>
 								<span class="friend-avatar"

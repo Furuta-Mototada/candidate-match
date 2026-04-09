@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { db } from '$lib/server/db/index.js';
+import { requireAdmin, isErrorResponse } from '$lib/server/api-utils';
 import {
 	billClusters,
 	billClusterAssignments,
@@ -45,9 +46,8 @@ interface CalculationResult {
  * If saveImmediately is true and saveName is provided, saves all calculated clusters to the database
  */
 export const POST: RequestHandler = async ({ request, locals }): Promise<Response> => {
-	if (!locals.user || locals.user.role !== 'admin') {
-		return json({ error: 'Admin permission required' }, { status: 403 });
-	}
+	const adminOrError = requireAdmin(locals);
+	if (isErrorResponse(adminOrError)) return adminOrError;
 
 	try {
 		const body = await request.json();

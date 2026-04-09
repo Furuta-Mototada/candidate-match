@@ -1,4 +1,9 @@
 <script lang="ts">
+	import {
+		getAnswerLabel as baseAnswerLabel,
+		getAnswerClass as baseAnswerClass
+	} from '$lib/utils/vote-helpers.js';
+	import { fetchMemberDetail } from '$lib/utils/member-detail-loader.js';
 	import LatentSpaceVisualization from '$lib/components/match/LatentSpaceVisualization.svelte';
 	import TopMatchSpotlight from '$lib/components/match/TopMatchSpotlight.svelte';
 	import ClusterInsightCard from '$lib/components/match/ClusterInsightCard.svelte';
@@ -6,7 +11,8 @@
 		ClusterResult,
 		BaseClusterResult,
 		GlobalMemberScore,
-		PartyScores
+		PartyScores,
+		MemberDetail
 	} from '$lib/types/index.js';
 	import { formatBillRef } from '$lib/types/index.js';
 	import {
@@ -107,33 +113,7 @@
 	});
 
 	// Member detail state
-	interface MemberDetail {
-		memberId: number;
-		names: string[];
-		nameReading: string | null;
-		partyHistory: Array<{
-			partyName: string;
-			chamber: string | null;
-			startDate: string | null;
-			endDate: string | null;
-		}>;
-		groupHistory: Array<{
-			groupName: string;
-			chamber: string | null;
-			startDate: string | null;
-			endDate: string | null;
-		}>;
-		billScoreRecords: Array<{
-			billId: number;
-			billTitle: string | null;
-			billType: string | null;
-			submissionSession: number | null;
-			billNumber: number | null;
-			normalizedScore: number | null;
-			hasVoteRecord: boolean;
-			approved: boolean | null;
-		}>;
-	}
+	// MemberDetail type imported from $lib/types/index.js
 
 	let selectedMember = $state<{ memberId: number; name: string; group: string | null } | null>(
 		null
@@ -164,17 +144,11 @@
 		memberDetailLoading = true;
 		memberDetail = null;
 		try {
-			// Always load ALL bill IDs across all clusters for category grouping
 			let billIds: number[] = [];
 			for (const cr of clusterResults) {
 				if (cr.answeredBills) billIds.push(...cr.answeredBills.map((b) => b.billId));
 			}
-			let url = `/api/member-detail?memberId=${encodeURIComponent(String(memberId))}`;
-			if (billIds.length > 0) url += `&billIds=${encodeURIComponent(billIds.join(','))}`;
-			const res = await fetch(url);
-			if (res.ok) {
-				memberDetail = await res.json();
-			}
+			memberDetail = await fetchMemberDetail(memberId, billIds);
 		} catch (err) {
 			console.error('Failed to load member detail:', err);
 		} finally {
@@ -325,19 +299,12 @@
 	}
 
 	function getAnswerText(score: number, source?: 'direct' | 'delegated'): string {
-		if (source === 'delegated') {
-			if (score === 0) return '委任中';
-			const label = score === 1 ? '賛成' : score === -1 ? '反対' : 'どちらでもない';
-			return `委任(${label})`;
-		}
-		return score === 1 ? '賛成' : score === -1 ? '反対' : 'どちらでもない';
+		return baseAnswerLabel(score, { source, skipLabel: 'どちらでもない' });
 	}
 
 	function getAnswerColor(score: number, source?: 'direct' | 'delegated'): string {
 		if (source === 'delegated') return 'answer-delegated';
-		if (score === 1) return 'answer-agree';
-		if (score === -1) return 'answer-disagree';
-		return 'answer-neutral';
+		return baseAnswerClass(score);
 	}
 
 	async function handleSave() {

@@ -1,5 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types.js';
+import { requireAdmin, isErrorResponse } from '$lib/server/api-utils.js';
+import { getBillTitle } from '$lib/server/bill-queries.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { db } from '$lib/server/db/index.js';
@@ -11,7 +13,6 @@ import {
 	member,
 	userBillAnswer,
 	voteDelegation,
-	bill as billTable,
 	user as userTable
 } from '$lib/server/db/schema.js';
 import { eq, inArray, desc, and, sql } from 'drizzle-orm';
@@ -22,6 +23,7 @@ import {
 	findMatchingMembers,
 	loadBillInfo,
 	loadMemberGroups,
+	buildMemberVectorsForViz,
 	buildBillInfoMap,
 	answerToScore,
 	scoreToAnswer,
@@ -277,9 +279,8 @@ export const POST: RequestHandler = async ({ request, locals }): Promise<Respons
 				return await handleDirectVote(billId, score, userId);
 
 			case 'set-default': {
-				if (!locals.user || locals.user.role !== 'admin') {
-					return json({ error: 'Admin access required' }, { status: 403 });
-				}
+				const adminOrError = requireAdmin(locals);
+				if (isErrorResponse(adminOrError)) return adminOrError;
 				const { name: configName, configClusterId } = body;
 				if (!configName || configClusterId == null) {
 					return json({ error: 'name and configClusterId are required' }, { status: 400 });
@@ -303,9 +304,8 @@ export const POST: RequestHandler = async ({ request, locals }): Promise<Respons
 			}
 
 			case 'clear-default': {
-				if (!locals.user || locals.user.role !== 'admin') {
-					return json({ error: 'Admin access required' }, { status: 403 });
-				}
+				const adminOrError = requireAdmin(locals);
+				if (isErrorResponse(adminOrError)) return adminOrError;
 				await db
 					.update(clusterVectorResults)
 					.set({ isDefault: false })
@@ -585,12 +585,7 @@ async function handleStart(
 	const memberIds = Object.keys(clusterData.memberVectors).map((id) => parseInt(id));
 	const groupMap = await loadMemberGroups(memberIds);
 
-	const memberVectorsForViz = Object.entries(clusterData.memberVectors).map(([id, vector]) => ({
-		memberId: parseInt(id),
-		name: clusterData.memberNames[id] || `Member ${id}`,
-		group: groupMap.get(parseInt(id)) || null,
-		latentVector: vector
-	}));
+	const memberVectorsForViz = buildMemberVectorsForViz(clusterData, groupMap);
 
 	// Get current matches if we have pre-existing answers
 	const preExistingMatches =
@@ -858,12 +853,7 @@ async function handleResume(
 	const memberIds = Object.keys(clusterData.memberVectors).map((id) => parseInt(id));
 	const groupMap = await loadMemberGroups(memberIds);
 
-	const memberVectorsForViz = Object.entries(clusterData.memberVectors).map(([id, vector]) => ({
-		memberId: parseInt(id),
-		name: clusterData.memberNames[id] || `Member ${id}`,
-		group: groupMap.get(parseInt(id)) || null,
-		latentVector: vector
-	}));
+	const memberVectorsForViz = buildMemberVectorsForViz(clusterData, groupMap);
 
 	// Get current matches with the existing user vector
 	const matches = findMatchingMembers(state.userVector, clusterData);
@@ -1031,16 +1021,12 @@ async function handleAnswer(
 					);
 
 				if (votedIncoming.length > 0) {
-					const [billInfo] = await db
-						.select({ title: billTable.title })
-						.from(billTable)
-						.where(eq(billTable.id, billId));
-					const [userInfo] = await db
+					const billTitle = await getBillTitle(billId);
+					const [voteUserInfo] = await db
 						.select({ username: userTable.username })
 						.from(userTable)
 						.where(eq(userTable.id, userId));
-					const billTitle = billInfo?.title ?? null;
-					const username = userInfo?.username ?? 'ユーザー';
+					const username = voteUserInfo?.username ?? 'ユーザー';
 
 					for (const d of votedIncoming) {
 						await notifyDelegationVoteChanged(
@@ -1092,10 +1078,7 @@ async function handleAnswer(
 				});
 
 			// Notify the delegate that the delegator overrode the delegation
-			const [billInfo] = await db
-				.select({ title: billTable.title })
-				.from(billTable)
-				.where(eq(billTable.id, billId));
+			const billTitle = await getBillTitle(billId);
 			const [userInfo] = await db
 				.select({ username: userTable.username })
 				.from(userTable)
@@ -1106,7 +1089,7 @@ async function handleAnswer(
 				userInfo?.username ?? 'ユーザー',
 				activeDelegation.id,
 				billId,
-				billInfo?.title ?? null
+				billTitle
 			);
 		}
 	}

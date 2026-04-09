@@ -18,6 +18,7 @@
 		BookOpen,
 		Cog
 	} from '@lucide/svelte';
+	import { createHoldGesture } from '$lib/utils/hold-gesture.svelte.js';
 
 	interface Props {
 		show: boolean;
@@ -35,9 +36,11 @@
 	const TOTAL_STEPS = 4;
 
 	// Demo state for interactive elements
-	let demoHolding = $state<number | null>(null);
-	let demoProgress = $state(0);
-	let demoTimer: ReturnType<typeof setInterval> | null = null;
+	const demoHold = createHoldGesture<number>({
+		onComplete: (vote) => {
+			demoVoted = vote;
+		}
+	});
 	let demoVoted = $state<number | null>(null);
 	let demoImportance = $state(3);
 
@@ -56,36 +59,8 @@
 	}
 
 	function resetDemoState() {
-		demoHolding = null;
-		demoProgress = 0;
+		demoHold.cancel();
 		demoVoted = null;
-		if (demoTimer) {
-			clearInterval(demoTimer);
-			demoTimer = null;
-		}
-	}
-
-	function startDemoHold(vote: number) {
-		demoHolding = vote;
-		demoProgress = 0;
-		const start = Date.now();
-		demoTimer = setInterval(() => {
-			const elapsed = Date.now() - start;
-			demoProgress = Math.min(elapsed / 600, 1);
-			if (demoProgress >= 1) {
-				cancelDemoHold();
-				demoVoted = vote;
-			}
-		}, 16);
-	}
-
-	function cancelDemoHold() {
-		if (demoTimer) {
-			clearInterval(demoTimer);
-			demoTimer = null;
-		}
-		demoHolding = null;
-		demoProgress = 0;
 	}
 
 	function handleDismiss() {
@@ -223,61 +198,61 @@
 							<!-- Demo vote buttons -->
 							<div class="demo-vote-buttons">
 								<button
-									onpointerdown={() => startDemoHold(1)}
-									onpointerup={cancelDemoHold}
-									onpointerleave={cancelDemoHold}
+									onpointerdown={() => demoHold.start(1)}
+									onpointerup={demoHold.cancel}
+									onpointerleave={demoHold.cancel}
 									class="demo-vote-btn demo-vote-agree"
-									class:holding={demoHolding === 1}
+									class:holding={demoHold.holdingId === 1}
 									class:voted={demoVoted === 1}
 								>
 									<span
 										class="demo-vote-fill demo-fill-agree"
-										style="transform: scaleY({demoHolding === 1 ? demoProgress : 0})"
+										style="transform: scaleY({demoHold.holdingId === 1 ? demoHold.progress : 0})"
 									></span>
 									<span class="demo-vote-emoji"
 										><ThumbsUp
 											size={24}
-											color={demoHolding === 1 || demoVoted === 1 ? '#166534' : '#22c55e'}
+											color={demoHold.holdingId === 1 || demoVoted === 1 ? '#166534' : '#22c55e'}
 										/></span
 									>
 									<span class="demo-vote-label">賛成</span>
 								</button>
 								<button
-									onpointerdown={() => startDemoHold(0)}
-									onpointerup={cancelDemoHold}
-									onpointerleave={cancelDemoHold}
+									onpointerdown={() => demoHold.start(0)}
+									onpointerup={demoHold.cancel}
+									onpointerleave={demoHold.cancel}
 									class="demo-vote-btn demo-vote-neutral"
-									class:holding={demoHolding === 0}
+									class:holding={demoHold.holdingId === 0}
 									class:voted={demoVoted === 0}
 								>
 									<span
 										class="demo-vote-fill demo-fill-neutral"
-										style="transform: scaleY({demoHolding === 0 ? demoProgress : 0})"
+										style="transform: scaleY({demoHold.holdingId === 0 ? demoHold.progress : 0})"
 									></span>
 									<span class="demo-vote-emoji"
 										><CircleQuestionMark
 											size={24}
-											color={demoHolding === 0 || demoVoted === 0 ? '#1e40af' : '#3b82f6'}
+											color={demoHold.holdingId === 0 || demoVoted === 0 ? '#1e40af' : '#3b82f6'}
 										/></span
 									>
 									<span class="demo-vote-label">わからない</span>
 								</button>
 								<button
-									onpointerdown={() => startDemoHold(-1)}
-									onpointerup={cancelDemoHold}
-									onpointerleave={cancelDemoHold}
+									onpointerdown={() => demoHold.start(-1)}
+									onpointerup={demoHold.cancel}
+									onpointerleave={demoHold.cancel}
 									class="demo-vote-btn demo-vote-disagree"
-									class:holding={demoHolding === -1}
+									class:holding={demoHold.holdingId === -1}
 									class:voted={demoVoted === -1}
 								>
 									<span
 										class="demo-vote-fill demo-fill-disagree"
-										style="transform: scaleY({demoHolding === -1 ? demoProgress : 0})"
+										style="transform: scaleY({demoHold.holdingId === -1 ? demoHold.progress : 0})"
 									></span>
 									<span class="demo-vote-emoji"
 										><ThumbsDown
 											size={24}
-											color={demoHolding === -1 || demoVoted === -1 ? '#991b1b' : '#ef4444'}
+											color={demoHold.holdingId === -1 || demoVoted === -1 ? '#991b1b' : '#ef4444'}
 										/></span
 									>
 									<span class="demo-vote-label">反対</span>

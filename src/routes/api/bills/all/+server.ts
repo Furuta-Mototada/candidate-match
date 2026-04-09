@@ -4,6 +4,7 @@ import { db } from '$lib/server/db/index.js';
 import { bill, userBillAnswer, voteDelegation, user } from '$lib/server/db/schema.js';
 import { eq, and, sql } from 'drizzle-orm';
 import { answerToScore } from '$lib/server/matching.js';
+import { requireUser, isErrorResponse } from '$lib/server/api-utils.js';
 
 /**
  * GET /api/bills/all
@@ -15,11 +16,10 @@ import { answerToScore } from '$lib/server/matching.js';
  * - Outgoing delegation info (if delegated to someone)
  */
 export const GET: RequestHandler = async ({ locals }) => {
-	if (!locals.user) {
-		return json({ error: 'Authentication required' }, { status: 401 });
-	}
+	const userOrError = requireUser(locals);
+	if (isErrorResponse(userOrError)) return userOrError;
 
-	const userId = locals.user.id;
+	const userId = userOrError.id;
 
 	// Fetch all bills with left-joined user answer and outgoing delegation
 	const rows = await db

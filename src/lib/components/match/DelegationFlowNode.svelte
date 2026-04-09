@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Handle, Position } from '@xyflow/svelte';
+	import { getAnswerLabel } from '$lib/utils/vote-helpers.js';
 	import { Hourglass, CircleCheck, XCircle, RefreshCw } from '@lucide/svelte';
 	import Avatar from '$lib/components/Avatar.svelte';
 
@@ -24,9 +25,7 @@
 	} = $props();
 
 	function getVoteLabel(score: number): string {
-		if (score === 1) return '賛成';
-		if (score === -1) return '反対';
-		return 'わからない';
+		return getAnswerLabel(score, { skipLabel: 'わからない' });
 	}
 </script>
 
