@@ -103,26 +103,28 @@ async function reconstructSession(
 	const dbBillInfo = await loadBillInfo(clusterData.billIds);
 	const billInfoMap = buildBillInfoMap(clusterData, dbBillInfo);
 
-	// Reconstruct matching state from client-provided data
-	const answeredBills: UserAnswer[] = clientAnsweredBills.map((b) => ({
-		billId: b.billId,
-		score: b.score
-	}));
+	// Initialize a fresh state and replay answers to get proper uncertainty
+	const state = initializeMatchingState(
+		savedResult.clusterId,
+		savedResult.clusterLabel,
+		clusterData.dimensions
+	);
 
-	const state: MatchingState = {
-		clusterId: savedResult.clusterId,
-		clusterLabel: savedResult.clusterLabel,
-		dimensions: clusterData.dimensions,
-		userVector:
-			clientUserVector.length === clusterData.dimensions
-				? clientUserVector
-				: new Array(clusterData.dimensions).fill(0),
-		answeredBills,
-		questionCount: answeredBills.length,
-		uncertainty: new Array(clusterData.dimensions).fill(
-			Math.max(0.1, 1.0 - answeredBills.length * 0.05)
-		)
-	};
+	if (clientAnsweredBills.length > 0) {
+		const billLoadingsMap = new Map<number, number[]>();
+		for (let i = 0; i < clusterData.billIds.length; i++) {
+			billLoadingsMap.set(clusterData.billIds[i], clusterData.billLoadings[i]);
+		}
+
+		for (const ab of clientAnsweredBills) {
+			const userAnswer: UserAnswer = { billId: ab.billId, score: ab.score };
+			const newState = updateMatchingState(state, userAnswer, billLoadingsMap);
+			state.userVector = newState.userVector;
+			state.answeredBills = newState.answeredBills;
+			state.questionCount = newState.questionCount;
+			state.uncertainty = newState.uncertainty;
+		}
+	}
 
 	const session: SessionData = {
 		state,
