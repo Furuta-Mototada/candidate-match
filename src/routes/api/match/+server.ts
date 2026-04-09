@@ -150,7 +150,37 @@ async function getOrReconstructSession(
 	// Try in-memory first
 	if (sessionId) {
 		const session = sessions.get(sessionId);
-		if (session) return session;
+		if (session) {
+			// Validate: if client reports MORE answered bills than in-memory state,
+			// the in-memory state is stale (e.g. race condition or concurrent request
+			// overwrote it). Repair by replaying client answers using already-loaded clusterData.
+			const clientCount = clientAnsweredBills?.length ?? 0;
+			const serverCount = session.state.answeredBills.length;
+			if (clientCount > serverCount && clientAnsweredBills) {
+				console.warn(
+					`[session] In-memory session STALE: server has ${serverCount} answered bills, client has ${clientCount}. Repairing from client data.`
+				);
+				const repairedState = initializeMatchingState(
+					session.state.clusterId,
+					session.state.clusterLabel,
+					session.state.dimensions
+				);
+				const billLoadingsMap = new Map<number, number[]>();
+				for (let i = 0; i < session.clusterData.billIds.length; i++) {
+					billLoadingsMap.set(session.clusterData.billIds[i], session.clusterData.billLoadings[i]);
+				}
+				for (const ab of clientAnsweredBills) {
+					const userAnswer: UserAnswer = { billId: Number(ab.billId), score: ab.score };
+					const newState = updateMatchingState(repairedState, userAnswer, billLoadingsMap);
+					repairedState.userVector = newState.userVector;
+					repairedState.answeredBills = newState.answeredBills;
+					repairedState.questionCount = newState.questionCount;
+					repairedState.uncertainty = newState.uncertainty;
+				}
+				session.state = repairedState;
+			}
+			return session;
+		}
 	}
 
 	// Fallback: reconstruct from DB (essential for serverless environments like Vercel)
@@ -914,14 +944,7 @@ async function handleAnswer(
 
 	// Log exactly what the client sent for reconstruction
 	const sessionInMemory = sessionId ? sessions.has(sessionId) : false;
-	console.log(
-		`[handleAnswer] billId=${billId} (type=${typeof billId}), score=${score}, userId=${userId}, sessionInMemory=${sessionInMemory}, savedVectorId=${savedVectorId}, clientAnsweredBills=${clientAnsweredBills?.length ?? 'undefined'}, clientUserVector=${clientUserVector ? 'present' : 'undefined'}`
-	);
-	if (clientAnsweredBills && clientAnsweredBills.length > 0) {
-		console.log(
-			`[handleAnswer] clientAnsweredBills billIds: [${clientAnsweredBills.map((b) => `${b.billId}(${typeof b.billId})`).join(', ')}]`
-		);
-	}
+	const preRepairCount = sessionInMemory ? sessions.get(sessionId)!.state.answeredBills.length : -1;
 
 	const session = await getOrReconstructSession(
 		sessionId,
@@ -936,12 +959,12 @@ async function handleAnswer(
 		return json({ error: 'Session not found or expired' }, { status: 404 });
 	}
 
-	console.log(
-		`[handleAnswer] Session state after reconstruction: answeredBills=[${session.state.answeredBills.map((a) => `${a.billId}(${typeof a.billId})`).join(', ')}] (${session.state.answeredBills.length} total), clusterBillIds sample=[${session.clusterData.billIds
-			.slice(0, 3)
-			.map((id: number) => `${id}(${typeof id})`)
-			.join(', ')}...]`
-	);
+	const wasRepaired = preRepairCount >= 0 && session.state.answeredBills.length > preRepairCount;
+	if (wasRepaired) {
+		console.log(
+			`[handleAnswer] Session repaired: ${preRepairCount} → ${session.state.answeredBills.length} answered bills`
+		);
+	}
 
 	if (billId === undefined || score === undefined) {
 		return json({ error: 'billId and score are required' }, { status: 400 });
@@ -1104,10 +1127,6 @@ async function handleAnswer(
 	// Get next question
 	let nextQuestion = selectNextQuestion(newState, session.clusterData, session.billInfoMap);
 
-	console.log(
-		`[handleAnswer] After update: answeredBills=[${newState.answeredBills.map((a) => a.billId).join(', ')}] (${newState.answeredBills.length} total), nextQuestion=${nextQuestion?.bill.billId ?? 'null'}`
-	);
-
 	// Server-side safety check: ensure nextQuestion is not already in answeredBills
 	// This guards against any edge case where reconstruction + selectNextQuestion desyncs
 	const answeredBillIdSet = new Set(newState.answeredBills.map((a) => a.billId));
@@ -1165,11 +1184,11 @@ async function handleAnswer(
 		isComplete: nextQuestion === null,
 		_debug: {
 			sessionInMemory,
-			reconstructedFrom: sessionInMemory ? 'memory' : 'client+db',
+			wasRepaired,
+			preRepairCount,
 			clientAnsweredBillsCount: clientAnsweredBills?.length ?? 0,
 			serverAnsweredBillIds: newState.answeredBills.map((a) => a.billId),
-			nextQuestionBillId: nextQuestion?.bill.billId ?? null,
-			justAnsweredBillId: billId
+			nextQuestionBillId: nextQuestion?.bill.billId ?? null
 		}
 	});
 }
