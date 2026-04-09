@@ -199,19 +199,28 @@ export function estimateUserVector(
 	// Solve using simple Gaussian elimination (for small dimensions)
 	const userVector = solveLinearSystem(VtV, VtS);
 
-	// Estimate uncertainty: inverse of diagonal of V^T V
-	// Higher values in V^T V diagonal = more information about that dimension
+	// Estimate uncertainty per dimension on an absolute [0, 1] scale using a
+	// Bayesian precision approach, decoupled from the regularization parameter λ.
+	//
+	// uncertainty[i] = priorPrecision / (priorPrecision + dataInfo[i])
+	//
+	// where dataInfo[i] = Σ_k loading[k][i]² = VtV[i][i] - λ  (pure data contribution)
+	//
+	// With no answers:  dataInfo = 0       → uncertainty = 1.0
+	// With lots of data: dataInfo → ∞      → uncertainty → 0.0
+	//
+	// priorPrecision controls the rate: lower = faster confidence growth.
+	// With typical loading ~0.3 per dimension and priorPrecision=0.4:
+	//   1 question:  uncertainty ≈ 0.4/(0.4+0.09) = 0.82  → confidence ~18%
+	//   5 questions: uncertainty ≈ 0.4/(0.4+0.45) = 0.47  → confidence ~53%
+	//   10 questions: uncertainty ≈ 0.4/(0.4+0.9) = 0.31  → confidence ~69%
+	//   20 questions: uncertainty ≈ 0.4/(0.4+1.8) = 0.18  → confidence ~82%
+	//   30 questions: uncertainty ≈ 0.4/(0.4+2.7) = 0.13  → confidence ~87%
+	const priorPrecision = 0.4;
 	const uncertainty: number[] = [];
 	for (let i = 0; i < dimensions; i++) {
-		// Uncertainty is inversely related to how much information we have
-		const info = VtV[i][i];
-		uncertainty.push(1.0 / Math.max(info, 0.1));
-	}
-
-	// Normalize uncertainty to [0, 1]
-	const maxUncert = Math.max(...uncertainty);
-	for (let i = 0; i < uncertainty.length; i++) {
-		uncertainty[i] /= maxUncert;
+		const dataInfo = Math.max(0, VtV[i][i] - lambda); // pure data, exclude regularization
+		uncertainty.push(priorPrecision / (priorPrecision + dataInfo));
 	}
 
 	return { vector: userVector, uncertainty };
@@ -434,10 +443,15 @@ export function updateMatchingState(
 		newAnswers = [...state.answeredBills, answer];
 	}
 
-	// Exclude pending delegations from vector estimation (score=0 would bias toward neutral)
-	const answersForVector = state.pendingDelegationBillIds
-		? newAnswers.filter((a) => !state.pendingDelegationBillIds!.has(a.billId))
-		: newAnswers;
+	// Exclude skips (score=0) and pending delegations from vector estimation.
+	// Skips provide no information about the user's position — including them
+	// would both bias the vector toward neutral and falsely increase confidence.
+	let answersForVector = newAnswers.filter((a) => a.score !== 0);
+	if (state.pendingDelegationBillIds) {
+		answersForVector = answersForVector.filter(
+			(a) => !state.pendingDelegationBillIds!.has(a.billId)
+		);
+	}
 	const { vector, uncertainty } = estimateUserVector(
 		answersForVector,
 		billLoadings,

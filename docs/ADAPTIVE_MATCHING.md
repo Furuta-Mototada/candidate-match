@@ -177,21 +177,42 @@ $$
 
 where $\lambda = 0.01$ is the regularization parameter (Tikhonov / ridge). The system is solved via Gaussian elimination with partial pivoting.
 
-#### 4.2 Uncertainty Update
+#### 4.2 Skip and Neutral Answer Handling
 
-The Fisher information matrix for this linear model is $\mathbf{F} = \mathbf{V}_{\mathcal{A}}^T \mathbf{V}_{\mathcal{A}} + \lambda \mathbf{I}$. The per-dimension uncertainty is derived from its diagonal:
+Answers with score $a_j = 0$ (skips / "I don't know" / neutral) are **excluded from vector estimation**. They provide no information about the user's position — including them would both bias the vector toward the origin and falsely increase confidence. However, skipped bills are still tracked in $\mathcal{A}$ so they are not asked again.
+
+Similarly, bills with pending delegations (where the delegate has not yet voted) are excluded from vector estimation.
+
+#### 4.3 Uncertainty Update
+
+The information matrix for this linear model is $\mathbf{F} = \mathbf{V}_{\mathcal{A}}^T \mathbf{V}_{\mathcal{A}} + \lambda \mathbf{I}$. The per-dimension uncertainty uses a Bayesian precision approach, decoupled from the regularization parameter $\lambda$:
 
 $$
-\tilde{u}_k = \frac{1}{\max(F_{kk},\; 0.1)}
+\boxed{u_k^{(t)} = \frac{\tau_0}{\tau_0 + D_k}}, \qquad D_k = F_{kk} - \lambda = \sum_{l=1}^{t} v_{j_l,k}^2
 $$
 
-Normalized to $[0, 1]$:
+where $\tau_0 = 0.4$ is the **prior precision** parameter and $D_k$ is the pure data contribution (excluding regularization). This gives:
+
+- With no answers: $D_k = 0 \Rightarrow u_k = 1.0$ (maximum uncertainty)
+- As answers accumulate: $D_k \to \infty \Rightarrow u_k \to 0$ (full confidence)
+
+The user-facing **confidence** indicator is derived on the client as:
 
 $$
-u_k^{(t)} = \frac{\tilde{u}_k}{\max_{k'} \tilde{u}_{k'}}
+\text{confidence} = \left(1 - \frac{1}{d}\sum_{k=1}^{d} u_k^{(t)}\right) \times 100\%
 $$
 
-As the user answers more questions, $F_{kk}$ grows and $u_k$ shrinks toward zero. The session terminates when $\max_k u_k^{(t)} < \tau$ (default $\tau = 0.2$) or $t \geq T_{\max}$ (default $T_{\max} = 20$).
+With typical bill loadings (~0.3 per dimension), approximate confidence growth:
+
+| Questions answered | Confidence |
+|---|---|
+| 1 | ~18% |
+| 5 | ~53% |
+| 10 | ~69% |
+| 20 | ~82% |
+| 30 | ~87% |
+
+The session terminates when $\max_k u_k^{(t)} < \tau$ (default $\tau = 0.2$) or $t \geq T_{\max}$ (default $T_{\max} = 20$).
 
 ### 5. Member Matching
 
@@ -682,6 +703,7 @@ CREATE TABLE result_snapshot (
 | `maxQuestions` | 20 | Maximum questions before auto-complete |
 | `uncertaintyThreshold` | 0.2 | Stop when all uncertainties below this |
 | `regularizationLambda` | 0.01 | Regularization for least squares solution |
+| `priorPrecision` | 0.4 | Controls confidence growth rate (lower = faster) |
 
 ### Session Configuration
 

@@ -62,7 +62,7 @@ For each (strategy, member) pair:
 1. Initialize an empty matching state (zero vector, uniform uncertainty)
 2. Use the strategy to select the next bill
 3. Look up the member's simulated answer for that bill
-4. Update the user vector using Weighted Least Squares (same as production)
+4. Update the user vector using Weighted Least Squares (same as production). Skip answers (score = 0) are excluded from the design matrix — they contribute no information and do not affect uncertainty.
 5. Compute metrics:
    - Cosine error: `1 − cos(ẑ, z_true)`
    - Vector MSE: mean squared error between estimated and true vector
@@ -246,7 +246,7 @@ Run the evaluation benchmark.
 This evaluation module reuses the core matching infrastructure:
 
 - **`initializeMatchingState()`** — Same state initialization as production
-- **`estimateUserVector()`** — Same WLS estimation with regularization
+- **`estimateUserVector()`** — Same WLS estimation with regularization. Skip/neutral answers (score = 0) are filtered out before estimation. Uncertainty is computed per-dimension using Bayesian precision: `u[d] = τ₀ / (τ₀ + D[d])` where `τ₀` is the prior precision (0.4) and `D[d]` is the data contribution from `VᵀV`.
 - **`selectNextQuestion()`** — The CAT strategy calls the same function used in `/match`
 - **`cosineSimilarity()`** — Same similarity metric
 - **`findMatchingMembers()`** — Same ranking function
