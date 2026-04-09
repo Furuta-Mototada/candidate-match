@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { requireAdmin, isErrorResponse } from '$lib/server/api-utils';
+import { requireAdmin, isErrorResponse, BUFFER_SIZE } from '$lib/server/api-utils';
 
 const execAsync = promisify(exec);
 
@@ -44,7 +44,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		// Execute clustering script
 		const { stdout, stderr } = await execAsync(command, {
 			env: process.env,
-			maxBuffer: 10 * 1024 * 1024 // 10MB buffer for large outputs
+			maxBuffer: BUFFER_SIZE.MEDIUM
 		});
 
 		console.log('Script output:', stdout);

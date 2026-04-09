@@ -161,10 +161,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	if (action === 'send') {
 		const { receiverId } = body;
 		if (!receiverId) {
-			return json({ error: 'ユーザーIDが必要です' }, { status: 400 });
+			return json({ error: ERROR.USER_ID_REQUIRED }, { status: 400 });
 		}
 		if (receiverId === userId) {
-			return json({ error: '自分にリクエストは送れません' }, { status: 400 });
+			return json({ error: ERROR.SELF_ACTION }, { status: 400 });
 		}
 
 		// Check receiver exists
@@ -174,7 +174,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			.where(eq(table.user.id, receiverId));
 
 		if (!receiver) {
-			return json({ error: 'ユーザーが見つかりません' }, { status: 404 });
+			return json({ error: ERROR.USER_NOT_FOUND }, { status: 404 });
 		}
 
 		// Check for existing request in either direction
@@ -243,7 +243,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	if (action === 'respond') {
 		const { requestId, response } = body;
 		if (!requestId || !['accepted', 'rejected'].includes(response)) {
-			return json({ error: '無効なリクエストです' }, { status: 400 });
+			return json({ error: ERROR.INVALID_REQUEST }, { status: 400 });
 		}
 
 		const [req] = await db
@@ -258,7 +258,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			);
 
 		if (!req) {
-			return json({ error: 'リクエストが見つかりません' }, { status: 404 });
+			return json({ error: ERROR.REQUEST_NOT_FOUND }, { status: 404 });
 		}
 
 		await db
@@ -282,7 +282,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	if (action === 'remove') {
 		const { friendId } = body;
 		if (!friendId) {
-			return json({ error: 'フレンドIDが必要です' }, { status: 400 });
+			return json({ error: ERROR.USER_ID_REQUIRED }, { status: 400 });
 		}
 
 		await db
@@ -310,7 +310,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	if (action === 'cancel') {
 		const { requestId } = body;
 		if (!requestId) {
-			return json({ error: 'リクエストIDが必要です' }, { status: 400 });
+			return json({ error: ERROR.INVALID_REQUEST }, { status: 400 });
 		}
 
 		await db

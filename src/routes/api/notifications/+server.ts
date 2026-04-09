@@ -3,7 +3,13 @@ import { eq, and, desc, count, lt } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import type { RequestHandler } from './$types.js';
-import { requireUser, isErrorResponse, ERROR, parseIntParam } from '$lib/server/api-utils';
+import {
+	requireUser,
+	isErrorResponse,
+	ERROR,
+	parsePaginationParams,
+	paginateResults
+} from '$lib/server/api-utils';
 
 // GET /api/notifications?action=list|unread-count&limit=N&before=ID
 export const GET: RequestHandler = async ({ url, locals }) => {
@@ -23,8 +29,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 	}
 
 	// Default: list notifications with pagination
-	const limit = Math.min(parseIntParam(url.searchParams.get('limit')) ?? 20, 50);
-	const beforeId = parseIntParam(url.searchParams.get('before'));
+	const { limit, beforeId } = parsePaginationParams(url);
 
 	const conditions = [eq(table.notification.userId, userId)];
 	if (beforeId) {
@@ -50,8 +55,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 		.orderBy(desc(table.notification.createdAt))
 		.limit(limit + 1);
 
-	const hasMore = notifications.length > limit;
-	const items = hasMore ? notifications.slice(0, limit) : notifications;
+	const { items, hasMore } = paginateResults(notifications, limit);
 
 	return json({ notifications: items, hasMore });
 };
@@ -69,7 +73,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	if (action === 'mark-read') {
 		const { notificationId } = body;
 		if (!notificationId) {
-			return json({ error: '通知IDが必要です' }, { status: 400 });
+			return json({ error: ERROR.NOTIFICATION_ID_REQUIRED }, { status: 400 });
 		}
 
 		await db

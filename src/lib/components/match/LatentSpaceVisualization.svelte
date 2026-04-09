@@ -83,6 +83,47 @@
 	let rafId: number | null = null;
 	let lastMouseEvent: MouseEvent | null = null;
 
+	// ── Canvas drawing constants ──
+	const COLORS = {
+		background: '#ffffff',
+		grid: '#e5e7eb',
+		axis: '#9ca3af',
+		zeroline: '#d1d5db',
+		axisLabel: '#374151',
+		tickLabel: '#6b7280',
+		memberFill: '#6366f1',
+		memberStroke: '#4f46e5',
+		highlightFill: '#f59e0b',
+		highlightStroke: '#d97706',
+		hoverFill: '#ec4899',
+		hoverStroke: '#db2777',
+		hoverLabel: '#1f2937',
+		userFill: '#10b981',
+		userStroke: '#059669',
+		userLabel: '#065f46',
+		trajectory: '#10b981'
+	} as const;
+
+	const SIZES = {
+		padding: { normal: 55, compact: 45 },
+		gridLines: { normal: 5, compact: 4 },
+		memberRadius: { normal: 6, compact: 5 },
+		highlightRadius: { normal: 7, compact: 6 },
+		hoverRadius: { normal: 8, compact: 7 },
+		userRadius: { normal: 10, compact: 8 },
+		userGlow: { normal: 22, compact: 16 },
+		historyDotRadius: { normal: 4, compact: 3 },
+		hitTestRadius: 15,
+		labelOffset: { normal: 12, compact: 10 },
+		userLabelOffset: { normal: 14, compact: 11 }
+	} as const;
+
+	const FONTS = {
+		axisLabel: { normal: '13px sans-serif', compact: '11px sans-serif' },
+		tickLabel: { normal: '10px sans-serif', compact: '9px sans-serif' },
+		memberLabel: { normal: 'bold 12px sans-serif', compact: 'bold 10px sans-serif' }
+	} as const;
+
 	// Available dimensions based on vector length
 	let availableDimensions = $derived(
 		members.length > 0 && members[0].latentVector.length > 0
@@ -182,12 +223,12 @@
 		// The inline style in the template handles width/height/aspect-ratio
 
 		const bounds = visualizationBounds;
-		const padding = compact ? 45 : 55;
+		const padding = compact ? SIZES.padding.compact : SIZES.padding.normal;
 		const plotWidth = displayWidth - padding * 2;
 		const plotHeight = displayHeight - padding * 2;
 
 		// Clear canvas
-		ctx.fillStyle = '#ffffff';
+		ctx.fillStyle = COLORS.background;
 		ctx.fillRect(0, 0, displayWidth, displayHeight);
 
 		// Helper function to convert data to canvas coordinates
@@ -197,10 +238,10 @@
 			displayHeight - padding - ((val - bounds.minY) / (bounds.maxY - bounds.minY)) * plotHeight;
 
 		// Draw grid
-		ctx.strokeStyle = '#e5e7eb';
+		ctx.strokeStyle = COLORS.grid;
 		ctx.lineWidth = 1;
 
-		const gridLines = compact ? 4 : 5;
+		const gridLines = compact ? SIZES.gridLines.compact : SIZES.gridLines.normal;
 		for (let i = 0; i <= gridLines; i++) {
 			const x = padding + (plotWidth / gridLines) * i;
 			ctx.beginPath();
@@ -218,7 +259,7 @@
 		}
 
 		// Draw axes
-		ctx.strokeStyle = '#9ca3af';
+		ctx.strokeStyle = COLORS.axis;
 		ctx.lineWidth = 2;
 
 		// X axis
@@ -234,8 +275,8 @@
 		ctx.stroke();
 
 		// Axis labels
-		ctx.fillStyle = '#374151';
-		ctx.font = compact ? '11px sans-serif' : '13px sans-serif';
+		ctx.fillStyle = COLORS.axisLabel;
+		ctx.font = compact ? FONTS.axisLabel.compact : FONTS.axisLabel.normal;
 		ctx.textAlign = 'center';
 
 		const xLabel = explainedVariance[xDimension]
@@ -253,8 +294,8 @@
 		ctx.restore();
 
 		// Scale tick labels
-		ctx.font = compact ? '9px sans-serif' : '10px sans-serif';
-		ctx.fillStyle = '#6b7280';
+		ctx.font = compact ? FONTS.tickLabel.compact : FONTS.tickLabel.normal;
+		ctx.fillStyle = COLORS.tickLabel;
 
 		// X axis ticks
 		for (let i = 0; i <= gridLines; i++) {
@@ -273,7 +314,7 @@
 		}
 
 		// Draw zero lines if in range
-		ctx.strokeStyle = '#d1d5db';
+		ctx.strokeStyle = COLORS.zeroline;
 		ctx.lineWidth = 1;
 		ctx.setLineDash([4, 4]);
 
@@ -311,10 +352,16 @@
 
 			// Draw regular point
 			ctx.beginPath();
-			ctx.arc(x, y, compact ? 5 : 6, 0, Math.PI * 2);
-			ctx.fillStyle = '#6366f1';
+			ctx.arc(
+				x,
+				y,
+				compact ? SIZES.memberRadius.compact : SIZES.memberRadius.normal,
+				0,
+				Math.PI * 2
+			);
+			ctx.fillStyle = COLORS.memberFill;
 			ctx.fill();
-			ctx.strokeStyle = '#4f46e5';
+			ctx.strokeStyle = COLORS.memberStroke;
 			ctx.lineWidth = 1.5;
 			ctx.stroke();
 		}
@@ -328,10 +375,16 @@
 			const y = toCanvasY(member.latentVector[yDimension] ?? 0);
 
 			ctx.beginPath();
-			ctx.arc(x, y, compact ? 6 : 7, 0, Math.PI * 2);
-			ctx.fillStyle = '#f59e0b';
+			ctx.arc(
+				x,
+				y,
+				compact ? SIZES.highlightRadius.compact : SIZES.highlightRadius.normal,
+				0,
+				Math.PI * 2
+			);
+			ctx.fillStyle = COLORS.highlightFill;
 			ctx.fill();
-			ctx.strokeStyle = '#d97706';
+			ctx.strokeStyle = COLORS.highlightStroke;
 			ctx.lineWidth = 2;
 			ctx.stroke();
 		}
@@ -342,23 +395,27 @@
 			const y = toCanvasY(hoveredMember.latentVector[yDimension] ?? 0);
 
 			ctx.beginPath();
-			ctx.arc(x, y, compact ? 7 : 8, 0, Math.PI * 2);
-			ctx.fillStyle = '#ec4899';
+			ctx.arc(x, y, compact ? SIZES.hoverRadius.compact : SIZES.hoverRadius.normal, 0, Math.PI * 2);
+			ctx.fillStyle = COLORS.hoverFill;
 			ctx.fill();
-			ctx.strokeStyle = '#db2777';
+			ctx.strokeStyle = COLORS.hoverStroke;
 			ctx.lineWidth = 2;
 			ctx.stroke();
 
 			// Draw label
-			ctx.fillStyle = '#1f2937';
-			ctx.font = compact ? 'bold 10px sans-serif' : 'bold 12px sans-serif';
+			ctx.fillStyle = COLORS.hoverLabel;
+			ctx.font = compact ? FONTS.memberLabel.compact : FONTS.memberLabel.normal;
 			ctx.textAlign = 'left';
-			ctx.fillText(hoveredMember.name, x + (compact ? 10 : 12), y + 4);
+			ctx.fillText(
+				hoveredMember.name,
+				x + (compact ? SIZES.labelOffset.compact : SIZES.labelOffset.normal),
+				y + 4
+			);
 		}
 
 		// Draw user vector trajectory
 		if (userVectorHistory.length > 0) {
-			ctx.strokeStyle = '#10b981';
+			ctx.strokeStyle = COLORS.trajectory;
 			ctx.lineWidth = 2;
 			ctx.setLineDash([5, 5]);
 			ctx.beginPath();
@@ -393,7 +450,13 @@
 
 				const alpha = 0.2 + (i / userVectorHistory.length) * 0.6;
 				ctx.beginPath();
-				ctx.arc(x, y, compact ? 3 : 4, 0, Math.PI * 2);
+				ctx.arc(
+					x,
+					y,
+					compact ? SIZES.historyDotRadius.compact : SIZES.historyDotRadius.normal,
+					0,
+					Math.PI * 2
+				);
 				ctx.fillStyle = `rgba(16, 185, 129, ${alpha})`;
 				ctx.fill();
 			}
@@ -407,28 +470,45 @@
 				const uy = toCanvasY(userVector[yDimension] ?? 0);
 
 				// Glow effect
-				const gradient = ctx.createRadialGradient(ux, uy, 0, ux, uy, compact ? 16 : 22);
+				const gradient = ctx.createRadialGradient(
+					ux,
+					uy,
+					0,
+					ux,
+					uy,
+					compact ? SIZES.userGlow.compact : SIZES.userGlow.normal
+				);
 				gradient.addColorStop(0, 'rgba(16, 185, 129, 0.4)');
 				gradient.addColorStop(1, 'rgba(16, 185, 129, 0)');
 				ctx.fillStyle = gradient;
 				ctx.beginPath();
-				ctx.arc(ux, uy, compact ? 16 : 22, 0, Math.PI * 2);
+				ctx.arc(ux, uy, compact ? SIZES.userGlow.compact : SIZES.userGlow.normal, 0, Math.PI * 2);
 				ctx.fill();
 
 				// User dot
 				ctx.beginPath();
-				ctx.arc(ux, uy, compact ? 8 : 10, 0, Math.PI * 2);
-				ctx.fillStyle = '#10b981';
+				ctx.arc(
+					ux,
+					uy,
+					compact ? SIZES.userRadius.compact : SIZES.userRadius.normal,
+					0,
+					Math.PI * 2
+				);
+				ctx.fillStyle = COLORS.userFill;
 				ctx.fill();
-				ctx.strokeStyle = '#059669';
+				ctx.strokeStyle = COLORS.userStroke;
 				ctx.lineWidth = 3;
 				ctx.stroke();
 
 				// "You" label
-				ctx.fillStyle = '#065f46';
-				ctx.font = compact ? 'bold 10px sans-serif' : 'bold 12px sans-serif';
+				ctx.fillStyle = COLORS.userLabel;
+				ctx.font = compact ? FONTS.memberLabel.compact : FONTS.memberLabel.normal;
 				ctx.textAlign = 'left';
-				ctx.fillText('あなた', ux + (compact ? 11 : 14), uy + 4);
+				ctx.fillText(
+					'あなた',
+					ux + (compact ? SIZES.userLabelOffset.compact : SIZES.userLabelOffset.normal),
+					uy + 4
+				);
 			}
 		}
 	}
@@ -469,7 +549,7 @@
 		const mouseY = (event.clientY - rect.top) * scaleY;
 
 		const bounds = visualizationBounds;
-		const padding = compact ? 45 : 55;
+		const padding = compact ? SIZES.padding.compact : SIZES.padding.normal;
 		const plotWidth = width - padding * 2;
 		const plotHeight = height - padding * 2;
 
@@ -486,7 +566,7 @@
 			const y = toCanvasY(member.latentVector[yDimension] ?? 0);
 			const dist = Math.sqrt((mouseX - x) ** 2 + (mouseY - y) ** 2);
 
-			if (dist < 15 && dist < minDist) {
+			if (dist < SIZES.hitTestRadius && dist < minDist) {
 				minDist = dist;
 				found = member;
 			}
@@ -516,7 +596,7 @@
 		const mouseY = (event.clientY - rect.top) * scaleY;
 
 		const bounds = visualizationBounds;
-		const padding = compact ? 45 : 55;
+		const padding = compact ? SIZES.padding.compact : SIZES.padding.normal;
 		const plotWidth = width - padding * 2;
 		const plotHeight = height - padding * 2;
 
@@ -533,7 +613,7 @@
 			const y = toCanvasY(member.latentVector[yDimension] ?? 0);
 			const dist = Math.sqrt((mouseX - x) ** 2 + (mouseY - y) ** 2);
 
-			if (dist < 15 && dist < minDist) {
+			if (dist < SIZES.hitTestRadius && dist < minDist) {
 				minDist = dist;
 				found = member;
 			}

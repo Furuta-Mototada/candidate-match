@@ -148,13 +148,11 @@ export interface ResultSnapshotData {
 	clusterId: number;
 	name: string;
 	globalScores: GlobalMemberScore[];
-	clusterResults: (SnapshotClusterResult | ClusterResult)[];
+	clusterResults: (BaseClusterResult | ClusterResult)[];
 	totalAnswered: number;
 	createdAt: string;
 	partyScores?: PartyScores | null;
 }
-
-export type SnapshotClusterResult = BaseClusterResult;
 
 export interface SnapshotListItem {
 	id: number;
@@ -262,17 +260,7 @@ export interface MemberDetail {
 }
 
 // ============================================================================
-// Utility Functions
+// Utility Functions — re-exported from $lib/utils/format.ts for convenience
 // ============================================================================
 
-/**
- * Format a bill reference string like "第219回 参法 第1号"
- */
-export function formatBillRef(
-	billType?: string | null,
-	submissionSession?: number | null,
-	billNumber?: number | null
-): string | null {
-	if (!billType || !submissionSession || !billNumber) return null;
-	return `第${submissionSession}回 ${billType} 第${billNumber}号`;
-}
+export { formatBillRef } from '$lib/utils/format.js';

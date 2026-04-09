@@ -490,22 +490,19 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		}
 
 		if (delegateId === userId) {
-			return json({ error: '自分に委任はできません' }, { status: 400 });
+			return json({ error: ERROR.SELF_ACTION }, { status: 400 });
 		}
 
 		// Verify they are friends
 		const isFriend = await checkFriendship(userId, delegateId);
 		if (!isFriend) {
-			return json({ error: 'フレンドのみに委任できます' }, { status: 400 });
+			return json({ error: ERROR.FRIENDS_ONLY }, { status: 400 });
 		}
 
 		// Check for delegation cycles
 		const hasCycle = await detectDelegationCycle(userId, delegateId, billId);
 		if (hasCycle) {
-			return json(
-				{ error: '委任の循環が検出されました。この委任先には委任できません。' },
-				{ status: 400 }
-			);
+			return json({ error: ERROR.DELEGATION_CYCLE }, { status: 400 });
 		}
 
 		// Check if user already has a delegation for this bill
@@ -616,13 +613,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			typeof rationale === 'string' ? rationale.trim().slice(0, 500) : null;
 
 		if (!delegationId) {
-			return json({ error: '委任IDが必要です' }, { status: 400 });
+			return json({ error: ERROR.DELEGATION_ID_REQUIRED }, { status: 400 });
 		}
 
 		const delegation = await findDelegationForAction(delegationId, userId, 'pending');
 
 		if (!delegation) {
-			return json({ error: '委任が見つかりません' }, { status: 404 });
+			return json({ error: ERROR.DELEGATION_NOT_FOUND }, { status: 404 });
 		}
 
 		// Check if delegate already voted for this bill themselves
@@ -733,28 +730,25 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		}
 
 		if (newDelegateId === userId) {
-			return json({ error: '自分に委任はできません' }, { status: 400 });
+			return json({ error: ERROR.SELF_ACTION }, { status: 400 });
 		}
 
 		const delegation = await findDelegationForAction(delegationId, userId, 'pending');
 
 		if (!delegation) {
-			return json({ error: '委任が見つかりません' }, { status: 404 });
+			return json({ error: ERROR.DELEGATION_NOT_FOUND }, { status: 404 });
 		}
 
 		// Verify friendship with the new delegate
 		const isFriend = await checkFriendship(userId, newDelegateId);
 		if (!isFriend) {
-			return json({ error: 'フレンドのみに委任できます' }, { status: 400 });
+			return json({ error: ERROR.FRIENDS_ONLY }, { status: 400 });
 		}
 
 		// Check for cycles: userId -> newDelegateId for this bill
 		const hasCycle = await detectDelegationCycle(userId, newDelegateId, delegation.billId);
 		if (hasCycle) {
-			return json(
-				{ error: '委任の循環が検出されました。この委任先には委任できません。' },
-				{ status: 400 }
-			);
+			return json({ error: ERROR.DELEGATION_CYCLE }, { status: 400 });
 		}
 
 		await autoForwardPendingDelegations(userId, delegation.billId);
@@ -846,13 +840,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		const { delegationId } = body;
 
 		if (!delegationId) {
-			return json({ error: '委任IDが必要です' }, { status: 400 });
+			return json({ error: ERROR.DELEGATION_ID_REQUIRED }, { status: 400 });
 		}
 
 		const delegation = await findDelegationForAction(delegationId, userId, 'pending');
 
 		if (!delegation) {
-			return json({ error: '委任が見つかりません' }, { status: 404 });
+			return json({ error: ERROR.DELEGATION_NOT_FOUND }, { status: 404 });
 		}
 
 		// Find all pending delegations for this bill before rejecting (for notifications)
@@ -913,7 +907,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		const { delegationId } = body;
 
 		if (!delegationId) {
-			return json({ error: '委任IDが必要です' }, { status: 400 });
+			return json({ error: ERROR.DELEGATION_ID_REQUIRED }, { status: 400 });
 		}
 
 		const [delegation] = await db
@@ -924,7 +918,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			);
 
 		if (!delegation) {
-			return json({ error: '委任が見つかりません' }, { status: 404 });
+			return json({ error: ERROR.DELEGATION_NOT_FOUND }, { status: 404 });
 		}
 
 		await db.delete(table.voteDelegation).where(eq(table.voteDelegation.id, delegationId));
@@ -971,13 +965,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		const { delegationId } = body;
 
 		if (!delegationId) {
-			return json({ error: '委任IDが必要です' }, { status: 400 });
+			return json({ error: ERROR.DELEGATION_ID_REQUIRED }, { status: 400 });
 		}
 
 		const delegation = await findDelegationForAction(delegationId, userId, 'voted');
 
 		if (!delegation) {
-			return json({ error: '委任が見つかりません' }, { status: 404 });
+			return json({ error: ERROR.DELEGATION_NOT_FOUND }, { status: 404 });
 		}
 
 		// Revert ALL to pending
@@ -1000,13 +994,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		const { delegationId } = body;
 
 		if (!delegationId) {
-			return json({ error: '委任IDが必要です' }, { status: 400 });
+			return json({ error: ERROR.DELEGATION_ID_REQUIRED }, { status: 400 });
 		}
 
 		const delegation = await findDelegationForAction(delegationId, userId, 'rejected');
 
 		if (!delegation) {
-			return json({ error: '委任が見つかりません' }, { status: 404 });
+			return json({ error: ERROR.DELEGATION_NOT_FOUND }, { status: 404 });
 		}
 
 		// Find ALL rejected delegations for this bill before reverting

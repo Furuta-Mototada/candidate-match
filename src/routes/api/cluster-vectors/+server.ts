@@ -3,7 +3,7 @@ import type { RequestHandler } from './$types.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { db } from '$lib/server/db/index.js';
-import { requireAdmin, isErrorResponse, handleApiError } from '$lib/server/api-utils';
+import { requireAdmin, isErrorResponse, handleApiError, BUFFER_SIZE } from '$lib/server/api-utils';
 import {
 	billClusters,
 	billClusterAssignments,
@@ -82,7 +82,7 @@ export const POST: RequestHandler = async ({ request, locals }): Promise<Respons
 		const { stdout, stderr } = await execAsync(cmd, {
 			cwd: process.cwd(),
 			env: process.env,
-			maxBuffer: 50 * 1024 * 1024 // 50MB buffer for large outputs
+			maxBuffer: BUFFER_SIZE.LARGE
 		});
 
 		if (stderr) {

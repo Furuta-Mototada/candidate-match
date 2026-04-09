@@ -1,6 +1,12 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types.js';
-import { requireAdmin, isErrorResponse, handleApiError, ERROR } from '$lib/server/api-utils.js';
+import {
+	requireAdmin,
+	isErrorResponse,
+	handleApiError,
+	ERROR,
+	BUFFER_SIZE
+} from '$lib/server/api-utils.js';
 import { getBillTitle } from '$lib/server/bill-queries.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -588,7 +594,7 @@ async function handleStart(
 			cwd: process.cwd(),
 			env: process.env,
 			shell: '/bin/zsh',
-			maxBuffer: 50 * 1024 * 1024
+			maxBuffer: BUFFER_SIZE.LARGE
 		});
 
 		if (stderr) {
@@ -1136,11 +1142,11 @@ async function handleSkip(
  */
 async function handleRetractAnswer(billId: number, userId: string | null) {
 	if (!userId) {
-		return json({ error: 'ログインが必要です' }, { status: 401 });
+		return json({ error: ERROR.AUTH_REQUIRED }, { status: 401 });
 	}
 
 	if (!billId) {
-		return json({ error: '法案IDが必要です' }, { status: 400 });
+		return json({ error: ERROR.BILL_ID_REQUIRED }, { status: 400 });
 	}
 
 	// Check if there's an active incoming delegation where this user voted on someone else's behalf
@@ -1187,7 +1193,7 @@ async function handleRetractAnswer(billId: number, userId: string | null) {
  */
 async function handleDirectVote(billId: number, score: number, userId: string | null) {
 	if (!userId) {
-		return json({ error: 'ログインが必要です' }, { status: 401 });
+		return json({ error: ERROR.AUTH_REQUIRED }, { status: 401 });
 	}
 
 	if (!billId || score === undefined || score === null) {

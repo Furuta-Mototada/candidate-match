@@ -63,12 +63,10 @@ export const POST: RequestHandler = async ({ locals }): Promise<Response> => {
 			process.on('close', (code) => {
 				if (code === 0) {
 					sendProgress(100, '計算が完了しました！ページを再読み込みしてください。');
-					controller.enqueue(encoder.encode('data: {"done": true, "success": true}\n\n'));
+					controller.enqueue(encoder.encode('data: {"done": true}\n\n'));
 				} else {
 					controller.enqueue(
-						encoder.encode(
-							`data: {"done": true, "success": false, "error": "Process exited with code ${code}"}\n\n`
-						)
+						encoder.encode(`data: {"done": true, "error": "Process exited with code ${code}"}\n\n`)
 					);
 				}
 				controller.close();
@@ -77,9 +75,7 @@ export const POST: RequestHandler = async ({ locals }): Promise<Response> => {
 			// Handle errors
 			process.on('error', (error) => {
 				console.error('Process error:', error);
-				controller.enqueue(
-					encoder.encode(`data: {"done": true, "success": false, "error": "${error.message}"}\n\n`)
-				);
+				controller.enqueue(encoder.encode(`data: {"done": true, "error": "${error.message}"}\n\n`));
 				controller.close();
 			});
 		}

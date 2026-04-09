@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { imagekit, IMAGEKIT_PUBLIC_KEY, IMAGEKIT_URL_ENDPOINT } from '$lib/server/imagekit';
 import type { RequestHandler } from './$types.js';
-import { requireUser, isErrorResponse } from '$lib/server/api-utils';
+import { requireUser, isErrorResponse, ERROR } from '$lib/server/api-utils';
 
 export const GET: RequestHandler = async ({ locals }) => {
 	const userOrError = requireUser(locals);
@@ -9,7 +9,7 @@ export const GET: RequestHandler = async ({ locals }) => {
 
 	const ik = imagekit();
 	if (!ik) {
-		return json({ error: '画像アップロード機能は現在利用できません' }, { status: 503 });
+		return json({ error: ERROR.IMAGEKIT_UNAVAILABLE }, { status: 503 });
 	}
 
 	try {

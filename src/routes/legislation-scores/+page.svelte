@@ -160,17 +160,17 @@
 							const data = JSON.parse(line.substring(6));
 
 							if (data.done) {
-								if (data.success) {
+								if (data.error) {
+									calculationMessage = `エラー: ${data.error}`;
+									calculationProgress = 0;
+									calculating = false;
+								} else {
 									calculationMessage = '計算が完了しました！ページを再読み込みしてください。';
 									calculationProgress = 100;
 									// Reload after 2 seconds
 									setTimeout(() => {
 										window.location.reload();
 									}, 2000);
-								} else {
-									calculationMessage = `エラー: ${data.error}`;
-									calculationProgress = 0;
-									calculating = false;
 								}
 							} else if (data.progress !== undefined) {
 								calculationProgress = data.progress;

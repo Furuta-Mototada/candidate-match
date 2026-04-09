@@ -5,7 +5,7 @@ import * as table from '$lib/server/db/schema';
 import { sql } from 'drizzle-orm';
 import { imagekit } from '$lib/server/imagekit';
 import type { RequestHandler } from './$types.js';
-import { requireUser, isErrorResponse } from '$lib/server/api-utils';
+import { requireUser, isErrorResponse, ERROR } from '$lib/server/api-utils';
 
 async function deleteOldAvatar(userId: string) {
 	const [existing] = await db
@@ -33,16 +33,16 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const { url, fileId } = body;
 
 	if (!url || typeof url !== 'string') {
-		return json({ error: '画像URLが必要です' }, { status: 400 });
+		return json({ error: ERROR.IMAGE_URL_REQUIRED }, { status: 400 });
 	}
 
 	if (!fileId || typeof fileId !== 'string') {
-		return json({ error: 'ファイルIDが必要です' }, { status: 400 });
+		return json({ error: ERROR.FILE_ID_REQUIRED }, { status: 400 });
 	}
 
 	// Basic URL validation - must be from ImageKit
 	if (!url.startsWith('https://ik.imagekit.io/')) {
-		return json({ error: '無効な画像URLです' }, { status: 400 });
+		return json({ error: ERROR.INVALID_IMAGE_URL }, { status: 400 });
 	}
 
 	// Delete the old avatar from ImageKit before saving the new one
