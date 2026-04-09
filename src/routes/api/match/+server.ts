@@ -117,7 +117,8 @@ async function reconstructSession(
 		}
 
 		for (const ab of clientAnsweredBills) {
-			const userAnswer: UserAnswer = { billId: ab.billId, score: ab.score };
+			// Force billId to number to prevent type mismatch with clusterData.billIds
+			const userAnswer: UserAnswer = { billId: Number(ab.billId), score: ab.score };
 			const newState = updateMatchingState(state, userAnswer, billLoadingsMap);
 			state.userVector = newState.userVector;
 			state.answeredBills = newState.answeredBills;
@@ -790,7 +791,7 @@ async function handleResume(
 			}
 
 			for (const ab of answeredBillsWithScores) {
-				const userAnswer: UserAnswer = { billId: ab.billId, score: ab.score };
+				const userAnswer: UserAnswer = { billId: Number(ab.billId), score: ab.score };
 				const newState = updateMatchingState(state, userAnswer, billLoadingsMap);
 				state.userVector = newState.userVector;
 				state.answeredBills = newState.answeredBills;
@@ -804,7 +805,7 @@ async function handleResume(
 			}
 
 			for (const billId of answeredBillIds) {
-				state.answeredBills.push({ billId, score: 0 }); // Score doesn't matter for exclusion
+				state.answeredBills.push({ billId: Number(billId), score: 0 });
 			}
 		}
 	}
@@ -911,6 +912,17 @@ async function handleAnswer(
 		return json({ error: 'sessionId is required' }, { status: 400 });
 	}
 
+	// Log exactly what the client sent for reconstruction
+	const sessionInMemory = sessionId ? sessions.has(sessionId) : false;
+	console.log(
+		`[handleAnswer] billId=${billId} (type=${typeof billId}), score=${score}, userId=${userId}, sessionInMemory=${sessionInMemory}, savedVectorId=${savedVectorId}, clientAnsweredBills=${clientAnsweredBills?.length ?? 'undefined'}, clientUserVector=${clientUserVector ? 'present' : 'undefined'}`
+	);
+	if (clientAnsweredBills && clientAnsweredBills.length > 0) {
+		console.log(
+			`[handleAnswer] clientAnsweredBills billIds: [${clientAnsweredBills.map((b) => `${b.billId}(${typeof b.billId})`).join(', ')}]`
+		);
+	}
+
 	const session = await getOrReconstructSession(
 		sessionId,
 		savedVectorId,
@@ -918,8 +930,18 @@ async function handleAnswer(
 		clientAnsweredBills
 	);
 	if (!session) {
+		console.warn(
+			`[handleAnswer] Session reconstruction FAILED. sessionId=${sessionId}, savedVectorId=${savedVectorId}`
+		);
 		return json({ error: 'Session not found or expired' }, { status: 404 });
 	}
+
+	console.log(
+		`[handleAnswer] Session state after reconstruction: answeredBills=[${session.state.answeredBills.map((a) => `${a.billId}(${typeof a.billId})`).join(', ')}] (${session.state.answeredBills.length} total), clusterBillIds sample=[${session.clusterData.billIds
+			.slice(0, 3)
+			.map((id: number) => `${id}(${typeof id})`)
+			.join(', ')}...]`
+	);
 
 	if (billId === undefined || score === undefined) {
 		return json({ error: 'billId and score are required' }, { status: 400 });
@@ -1066,8 +1088,8 @@ async function handleAnswer(
 		}
 	}
 
-	// Create answer
-	const answer: UserAnswer = { billId, score: normalizedScore };
+	// Create answer — force billId to number to prevent type mismatch
+	const answer: UserAnswer = { billId: Number(billId), score: normalizedScore };
 
 	// Build bill loadings map
 	const billLoadingsMap = new Map<number, number[]>();
@@ -1081,6 +1103,10 @@ async function handleAnswer(
 
 	// Get next question
 	let nextQuestion = selectNextQuestion(newState, session.clusterData, session.billInfoMap);
+
+	console.log(
+		`[handleAnswer] After update: answeredBills=[${newState.answeredBills.map((a) => a.billId).join(', ')}] (${newState.answeredBills.length} total), nextQuestion=${nextQuestion?.bill.billId ?? 'null'}`
+	);
 
 	// Server-side safety check: ensure nextQuestion is not already in answeredBills
 	// This guards against any edge case where reconstruction + selectNextQuestion desyncs
@@ -1136,7 +1162,15 @@ async function handleAnswer(
 			similarity: m.similarity,
 			rank: m.rank
 		})),
-		isComplete: nextQuestion === null
+		isComplete: nextQuestion === null,
+		_debug: {
+			sessionInMemory,
+			reconstructedFrom: sessionInMemory ? 'memory' : 'client+db',
+			clientAnsweredBillsCount: clientAnsweredBills?.length ?? 0,
+			serverAnsweredBillIds: newState.answeredBills.map((a) => a.billId),
+			nextQuestionBillId: nextQuestion?.bill.billId ?? null,
+			justAnsweredBillId: billId
+		}
 	});
 }
 
@@ -1198,8 +1232,8 @@ async function handleSkip(
 		}
 	}
 
-	// Add bill to answered with score 0 (neutral/skip)
-	const answer: UserAnswer = { billId, score: 0 };
+	// Add bill to answered with score 0 (neutral/skip) — force billId to number
+	const answer: UserAnswer = { billId: Number(billId), score: 0 };
 
 	// Build bill loadings map
 	const billLoadingsMap = new Map<number, number[]>();

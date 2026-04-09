@@ -384,10 +384,11 @@
 					savedVectorId: clusterVectorInfo.id,
 					existingUserVector: existingResult?.userVector,
 					answeredBillIds: existingResult?.answeredBills?.map((b) => b.billId) || [],
-					answeredBills: existingResult?.answeredBills?.map((b) => ({
-						billId: b.billId,
-						score: b.answer
-					})) || []
+					answeredBills:
+						existingResult?.answeredBills?.map((b) => ({
+							billId: b.billId,
+							score: b.answer
+						})) || []
 				})
 			});
 
@@ -527,10 +528,11 @@
 							savedVectorId: vectorInfo.id,
 							existingUserVector: existingResult?.userVector,
 							answeredBillIds: existingResult?.answeredBills?.map((b) => b.billId) || [],
-							answeredBills: existingResult?.answeredBills?.map((b) => ({
-								billId: b.billId,
-								score: b.answer
-							})) || []
+							answeredBills:
+								existingResult?.answeredBills?.map((b) => ({
+									billId: b.billId,
+									score: b.answer
+								})) || []
 						})
 					});
 
@@ -695,6 +697,10 @@
 		isLoading = true;
 		error = null;
 
+		console.log(
+			`[submitAnswer] billId=${currentQuestion.billId}, score=${score}, sessionId=${sessionId}, currentClusterAnsweredBills=[${currentClusterAnsweredBills.map((b) => b.billId).join(', ')}] (${currentClusterAnsweredBills.length} total)`
+		);
+
 		try {
 			let response = await fetch('/api/match', {
 				method: 'POST',
@@ -714,6 +720,11 @@
 			});
 
 			let result = await response.json();
+
+			// Log server debug info
+			if (result._debug) {
+				console.log('[submitAnswer] Server debug:', JSON.stringify(result._debug));
+			}
 
 			// Auto-retry on session loss: reconstruct session via resume then retry the answer
 			if (response.status === 404 && currentSavedVectorId) {
@@ -1068,10 +1079,11 @@
 						savedVectorId: vectorInfo.id,
 						existingUserVector: existingResult.userVector,
 						answeredBillIds: existingResult.answeredBills?.map((b) => b.billId) || [],
-						answeredBills: existingResult.answeredBills?.map((b) => ({
-							billId: b.billId,
-							score: b.answer
-						})) || []
+						answeredBills:
+							existingResult.answeredBills?.map((b) => ({
+								billId: b.billId,
+								score: b.answer
+							})) || []
 					})
 				});
 
