@@ -130,7 +130,10 @@
 				enrichmentCache[billId] = data;
 			}
 		} catch (error) {
-			if (error instanceof DOMException && error.name === 'AbortError') return;
+			if (error instanceof DOMException && error.name === 'AbortError') {
+				enrichmentLoading[billId] = false;
+				return;
+			}
 			console.error('Failed to load enrichment:', error);
 		}
 		enrichmentLoading[billId] = false;

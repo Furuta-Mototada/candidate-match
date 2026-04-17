@@ -90,7 +90,10 @@
 			enrichmentData = data;
 			enrichmentCache.set(billId, data);
 		} catch (e) {
-			if (e instanceof DOMException && e.name === 'AbortError') return;
+			if (e instanceof DOMException && e.name === 'AbortError') {
+				isLoading = false;
+				return;
+			}
 			loadError = e instanceof Error ? e.message : '不明なエラー';
 		}
 		isLoading = false;
