@@ -16,6 +16,7 @@
 		Handshake,
 		TriangleAlert
 	} from '@lucide/svelte';
+	import { untrack } from 'svelte';
 	import type {
 		Bill,
 		MemberMatch,
@@ -143,7 +144,8 @@
 	$effect(() => {
 		if (currentQuestion && !enrichmentCache[currentQuestion.billId]) {
 			const controller = new AbortController();
-			loadEnrichment(currentQuestion.billId, controller.signal);
+			const billId = currentQuestion.billId;
+			untrack(() => loadEnrichment(billId, controller.signal));
 			return () => controller.abort();
 		}
 	});
